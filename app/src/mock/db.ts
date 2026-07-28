@@ -121,6 +121,14 @@ export class BancoMock {
     return true;
   }
 
+  /**
+   * T6-01 — quem verificou por último, lido do próprio trail e não de um campo
+   * paralelo. Campo paralelo diverge do registro; derivar não diverge.
+   */
+  ultimaVerificacao(): AuditLinha | null {
+    return [...this.auditoria].reverse().find((l) => l.acao === 'INTEGRIDADE_VERIFICADA') ?? null;
+  }
+
   /** Append-only de verdade: nem administrador edita. */
   auditAtualizar(): never { throw new LogImutavel('Tabela audit_log é append-only: UPDATE não é permitido.'); }
   auditRemover(): never { throw new LogImutavel('Tabela audit_log é append-only: DELETE não é permitido.'); }

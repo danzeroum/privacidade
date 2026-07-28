@@ -38,8 +38,15 @@ export const POLITICAS: PoliticaRota[] = [
   // ── Auditoria ─────────────────────────────────────────────────────────────
   {
     metodo: 'POST', caminho: /^audit\/verificar$/,
-    tipo: 'leitura', foraDeEscopo: '403',
-    nota: 'Recomputa hashes e compara, sem mudar uma linha. É o ato que sustenta o parecer do auditor externo.',
+    tipo: 'leitura', foraDeEscopo: '403', acao: 'verificar_integridade',
+    nota: 'Recomputa hashes e compara, sem mudar uma linha. É o ato que sustenta o parecer do auditor externo. '
+      + 'Continua leitura mesmo gravando INTEGRIDADE_VERIFICADA (T6-01): o registro é consequência do sistema, não escalada do ator.',
+  },
+  {
+    metodo: 'POST', caminho: /^audit\/exportar$/,
+    tipo: 'leitura', foraDeEscopo: '403', acao: 'exportar_auditoria',
+    nota: 'Exportar o registro de acessos é, ele mesmo, um acesso — gravado antes de o arquivo existir (C-06). '
+      + 'Leitura pelo mesmo motivo da verificação, e por isso alcança o auditor externo.',
   },
   {
     metodo: 'GET', caminho: /^audit(\/.*)?$/,

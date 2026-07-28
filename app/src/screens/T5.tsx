@@ -1,41 +1,63 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Cabecalho, Cartao, Nota, Pill, Tabela } from '../ui/primitivos';
+import { Cabecalho, Cartao, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
 import { ModalReclassificar, CORES_DANO } from '../ui/reclassificar';
 import { useSessao } from '../store/sessao';
 import type { Risco } from '../mock/types';
 
-const M = { W: 560, H: 430, ml: 52, mb: 46, mt: 12, mr: 12 };
-const cw = (M.W - M.ml - M.mr) / 5;
-const ch = (M.H - M.mt - M.mb) / 5;
-const mx = (p: number) => M.ml + (p - 0.5) * cw;
-const my = (i: number) => M.H - M.mb - (i - 0.5) * ch;
+const NIVEIS = [1, 2, 3, 4, 5];
+const faixaDaCelula = (score: number) => (score >= 15 ? 'crit' : score >= 8 ? 'warn' : 'ok');
 
 export default function T5() {
   const banco = useSessao((s) => s.banco);
-  const avisar = useSessao((s) => s.avisar);
   useSessao((s) => s.versao);
 
   const riscos = banco.cenario.riscos;
   const [sel, setSel] = useState(riscos[0]?.codigo ?? '');
+  /**
+   * T5-01 — o ajuste por teclado é **rascunho**, não aplicação.
+   *
+   * As setas mexem em `ajuste` e mais nada: nenhuma chamada de API sai daqui.
+   * Aplicar continua passando pelo `ModalReclassificar`, que exige
+   * justificativa de 20 caracteres e registra. Acessibilidade que criasse um
+   * caminho de escrita sem registro seria pior do que a inacessibilidade que
+   * este item corrige — o atalho novo não pode ser a porta lateral.
+   */
+  const [ajuste, setAjuste] = useState<{ codigo: string; p: number; i: number } | null>(null);
   const [arrasto, setArrasto] = useState<{ risco: Risco; p: number; i: number } | null>(null);
   const [pendente, setPendente] = useState<{ risco: Risco; p: number; i: number } | null>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
 
   const selecionado = riscos.find((r) => r.codigo === sel) ?? riscos[0];
+  const emAjuste = ajuste?.codigo === selecionado?.codigo ? ajuste : null;
 
-  const paraGrade = (e: React.PointerEvent) => {
-    const svg = svgRef.current;
-    if (!svg) return null;
-    const pt = svg.createSVGPoint();
-    pt.x = e.clientX; pt.y = e.clientY;
-    const m = svg.getScreenCTM();
-    if (!m) return null;
-    const l = pt.matrixTransform(m.inverse());
-    return {
-      p: Math.min(5, Math.max(1, Math.ceil((l.x - M.ml) / cw))),
-      i: Math.min(5, Math.max(1, Math.ceil((M.H - M.mb - l.y) / ch))),
+  const abrirAjuste = (r: Risco) =>
+    setAjuste({ codigo: r.codigo, p: r.probabilidade, i: r.impacto });
+
+  const mover = (dp: number, di: number) => {
+    if (!selecionado) return;
+    const base = emAjuste ?? { p: selecionado.probabilidade, i: selecionado.impacto };
+    setAjuste({
+      codigo: selecionado.codigo,
+      p: Math.min(5, Math.max(1, base.p + dp)),
+      i: Math.min(5, Math.max(1, base.i + di)),
+    });
+  };
+
+  const teclaNaGrade = (e: React.KeyboardEvent, r: Risco) => {
+    const passo: Record<string, [number, number]> = {
+      ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1],
     };
+    if (passo[e.key]) {
+      e.preventDefault();
+      setSel(r.codigo);
+      if (ajuste?.codigo !== r.codigo) abrirAjuste(r);
+      mover(...passo[e.key]);
+    }
+  };
+
+  const aplicar = () => {
+    if (!selecionado || !emAjuste) return;
+    setPendente({ risco: selecionado, p: emAjuste.p, i: emAjuste.i });
   };
 
   const dominios = riscos.reduce<Record<string, { total: number; soma: number; criticos: number }>>((acc, r) => {
@@ -47,15 +69,18 @@ export default function T5() {
   }, {});
   const maior = Math.max(...Object.values(dominios).map((d) => d.soma), 1);
 
+  // Impacto 5 em cima, como na leitura convencional de matriz de risco.
+  const linhas = [...NIVEIS].reverse();
+
   return (
     <>
       <Cabecalho
         fontes={['docs/risk-matrix.csv', 'RACI']}
         titulo="Riscos e RACI"
-        resumo="Dez riscos, um dono cada, prazo e data de reavaliação. Arrastar uma bolha muda a prioridade do programa — por isso exige justificativa registrada."
+        resumo="Dez riscos, um dono cada, prazo e data de reavaliação. Reclassificar muda a prioridade do programa — por isso exige justificativa registrada, e agora pode ser feito por teclado."
         nota={{
           engenharia: 'Risco com dono de engenharia vira tarefa. Score alto com esforço baixo é o que entra na sprint primeiro.',
-          dpo: 'Arrastar uma bolha exige justificativa e fica no histórico. É assim que você defende a priorização meses depois.',
+          dpo: 'Reclassificar exige justificativa e fica no histórico. É assim que você defende a priorização meses depois.',
           produto: 'O RACI mostra quem decide o quê. Se um processo trava, a pessoa accountable está nesta tabela.',
           seguranca: 'Os riscos com score ≥ 15 são a fila de trabalho da sua revisão trimestral.',
           auditor: 'A matriz é leitura. O histórico de reclassificações fica no audit trail (T6).',
@@ -63,77 +88,69 @@ export default function T5() {
       />
 
       <div className="grid g-2-1">
-        <Cartao titulo="Matriz 5 × 5" hint="arraste para reclassificar · clique para ver o detalhe">
-          <svg
-            ref={svgRef}
-            className="chart"
-            viewBox={`0 0 ${M.W} ${M.H}`}
-            role="img"
-            aria-label="Matriz de risco: probabilidade por impacto"
-            onPointerMove={(e) => {
-              if (!arrasto) return;
-              const g = paraGrade(e);
-              if (g && (g.p !== arrasto.p || g.i !== arrasto.i)) setArrasto({ ...arrasto, ...g });
-            }}
-            onPointerUp={() => {
-              if (!arrasto) return;
-              const a = arrasto;
-              setArrasto(null);
-              if (a.p !== a.risco.probabilidade || a.i !== a.risco.impacto) setPendente(a);
-            }}
-          >
-            {[1, 2, 3, 4, 5].flatMap((p) => [1, 2, 3, 4, 5].map((i) => {
-              const s = p * i;
-              return (
-                <rect
-                  key={`${p}-${i}`}
-                  x={M.ml + (p - 1) * cw} y={M.H - M.mb - i * ch} width={cw} height={ch}
-                  fill={s >= 15 ? 'var(--crit)' : s >= 8 ? 'var(--warn)' : 'var(--ok)'}
-                  opacity={0.1} stroke="var(--line)"
-                />
-              );
-            }))}
-            {[1, 2, 3, 4, 5].map((n) => (
-              <g key={n}>
-                <text x={mx(n)} y={M.H - M.mb + 17} textAnchor="middle" fontSize={11}>{n}</text>
-                <text x={M.ml - 12} y={my(n) + 4} textAnchor="end" fontSize={11}>{n}</text>
-              </g>
+        <Cartao
+          titulo="Matriz probabilidade × impacto"
+          hint="cada risco é um botão: Tab navega, Enter seleciona, setas ajustam P e I"
+        >
+          {/* T5-01 — grade HTML no lugar do SVG. O arrasto continua como atalho,
+              mas deixou de ser o único caminho: a bolha não era focável, não
+              respondia a teclado e o gesto disputava com a rolagem no telefone. */}
+          <div className="matriz" role="grid" aria-label="Matriz de risco: probabilidade por impacto">
+            {linhas.map((i) => (
+              <div className="matriz-linha" role="row" key={i}>
+                {NIVEIS.map((p) => {
+                  const aqui = riscos.filter((r) => {
+                    const a = ajuste?.codigo === r.codigo ? ajuste : null;
+                    const arr = arrasto?.risco.codigo === r.codigo ? arrasto : null;
+                    const rp = arr?.p ?? a?.p ?? r.probabilidade;
+                    const ri = arr?.i ?? a?.i ?? r.impacto;
+                    return rp === p && ri === i;
+                  });
+                  return (
+                    <div
+                      key={p}
+                      role="gridcell"
+                      className={`matriz-celula ${faixaDaCelula(p * i)}`}
+                      aria-label={`Probabilidade ${p}, impacto ${i}, score ${p * i}`}
+                      onPointerUp={() => {
+                        if (!arrasto) return;
+                        const a = { ...arrasto, p, i };
+                        setArrasto(null);
+                        if (p !== a.risco.probabilidade || i !== a.risco.impacto) setPendente(a);
+                      }}
+                      onPointerEnter={() => { if (arrasto) setArrasto({ ...arrasto, p, i }); }}
+                    >
+                      {aqui.map((r) => {
+                        const rascunho = ajuste?.codigo === r.codigo;
+                        return (
+                          <button
+                            key={r.codigo}
+                            type="button"
+                            className={`risco-pill ${r.status === 'mitigado' ? 'mitigado' : ''} ${sel === r.codigo ? 'sel' : ''} ${rascunho ? 'rascunho' : ''}`}
+                            style={{ background: CORES_DANO[r.dano] }}
+                            aria-pressed={sel === r.codigo}
+                            // C-12 — o que estava só no `title` do SVG passa a ser
+                            // nome acessível. Leitor de tela e mouse recebem a
+                            // mesma informação.
+                            aria-label={`${r.codigo}: ${r.descricao} · P ${r.probabilidade} × I ${r.impacto} · score ${r.probabilidade * r.impacto} · ${r.status.replace('_', ' ')}`}
+                            onClick={() => { setSel(r.codigo); if (ajuste?.codigo !== r.codigo) setAjuste(null); }}
+                            onKeyDown={(e) => teclaNaGrade(e, r)}
+                            onPointerDown={() => { setSel(r.codigo); setArrasto({ risco: r, p: r.probabilidade, i: r.impacto }); }}
+                          >
+                            {r.codigo}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
             ))}
-            <text x={(M.ml + M.W) / 2} y={M.H - 8} textAnchor="middle" fontSize={11}>probabilidade →</text>
-            <text x={16} y={(M.H - M.mb + M.mt) / 2} fontSize={11} textAnchor="middle"
-                  transform={`rotate(-90 16 ${(M.H - M.mb + M.mt) / 2})`}>impacto →</text>
-
-            {riscos.map((r) => {
-              const emArrasto = arrasto?.risco.codigo === r.codigo;
-              const p = emArrasto ? arrasto.p : r.probabilidade;
-              const i = emArrasto ? arrasto.i : r.impacto;
-              const irmaos = riscos.filter((o) => o.probabilidade === p && o.impacto === i);
-              const k = irmaos.findIndex((o) => o.codigo === r.codigo);
-              const off = !emArrasto && irmaos.length > 1 ? (k - (irmaos.length - 1) / 2) * 34 : 0;
-              return (
-                <g
-                  key={r.codigo}
-                  className="bub"
-                  data-risco={r.codigo}
-                  onPointerDown={(e) => {
-                    (e.target as Element).setPointerCapture?.(e.pointerId);
-                    setSel(r.codigo);
-                    setArrasto({ risco: r, p: r.probabilidade, i: r.impacto });
-                  }}
-                >
-                  <title>{r.descricao}</title>
-                  <circle
-                    cx={mx(p) + off} cy={my(i)} r={15}
-                    fill={CORES_DANO[r.dano]}
-                    opacity={r.status === 'mitigado' ? 0.42 : 0.9}
-                    stroke={sel === r.codigo ? 'var(--text)' : 'none'}
-                    strokeWidth={2}
-                  />
-                  <text x={mx(p) + off} y={my(i) + 4} className="bub-label" textAnchor="middle">{r.codigo}</text>
-                </g>
-              );
-            })}
-          </svg>
+          </div>
+          <div className="matriz-eixos">
+            <span>probabilidade 1 → 5</span>
+            <span>impacto 5 (topo) → 1</span>
+          </div>
           <div className="legend">
             <span><i className="dot" style={{ background: 'var(--crit)' }} /> Material</span>
             <span><i className="dot" style={{ background: 'var(--warn)' }} /> Moral / perda de controle</span>
@@ -159,12 +176,55 @@ export default function T5() {
                 </Pill>
               </dd>
             </dl>
-            {selecionado.ripdCodigo && (
-              <div className="row" style={{ marginTop: 12 }}>
-                <Link className="btn" to="/t3">Ver {selecionado.ripdCodigo} →</Link>
-              </div>
-            )}
+            <div className="row" style={{ marginTop: 12 }}>
+              <Permitido
+                acao="gerenciar_risco"
+                alternativa={<Nota>Reclassificar risco é ato do DPO. A matriz continua legível para o seu papel.</Nota>}
+              >
+                <button className="btn primary" onClick={() => abrirAjuste(selecionado)}>Reclassificar P × I</button>
+              </Permitido>
+              {selecionado.ripdCodigo && <Link className="btn" to="/t3">Ver {selecionado.ripdCodigo} →</Link>}
+            </div>
           </Cartao>
+
+          {emAjuste && (
+            <Permitido acao="gerenciar_risco">
+              <Cartao titulo="Nova classificação">
+                <p className="mono" style={{ margin: 0, fontSize: 12.5, color: 'var(--text-2)' }}>
+                  P {selecionado.probabilidade} → {emAjuste.p} · I {selecionado.impacto} → {emAjuste.i} ·
+                  {' '}score {selecionado.probabilidade * selecionado.impacto} → {emAjuste.p * emAjuste.i}
+                </p>
+                <div className="row" style={{ marginTop: 12, gap: 18 }}>
+                  <div className="row" style={{ gap: 8 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600 }}>Probabilidade</span>
+                    <button className="stepper" aria-label="Diminuir probabilidade" onClick={() => mover(-1, 0)}>−</button>
+                    <span className="mono" aria-live="polite">{emAjuste.p}</span>
+                    <button className="stepper" aria-label="Aumentar probabilidade" onClick={() => mover(1, 0)}>+</button>
+                  </div>
+                  <div className="row" style={{ gap: 8 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600 }}>Impacto</span>
+                    <button className="stepper" aria-label="Diminuir impacto" onClick={() => mover(0, -1)}>−</button>
+                    <span className="mono" aria-live="polite">{emAjuste.i}</span>
+                    <button className="stepper" aria-label="Aumentar impacto" onClick={() => mover(0, 1)}>+</button>
+                  </div>
+                </div>
+                <div className="row" style={{ marginTop: 12 }}>
+                  <button
+                    className="btn primary"
+                    disabled={emAjuste.p === selecionado.probabilidade && emAjuste.i === selecionado.impacto}
+                    onClick={aplicar}
+                  >
+                    Registrar reclassificação
+                  </button>
+                  <button className="btn" onClick={() => setAjuste(null)}>Descartar</button>
+                </div>
+                <Nota>
+                  O ajuste acima é rascunho: nada foi gravado. Registrar abre a justificativa obrigatória —
+                  ajustar por teclado não cria caminho de escrita sem registro.
+                </Nota>
+              </Cartao>
+            </Permitido>
+          )}
 
           <Cartao titulo="Risco por domínio" hint="onde a dívida está concentrada">
             {Object.entries(dominios).sort((a, b) => b[1].soma - a[1].soma).map(([nome, d]) => (
@@ -180,7 +240,7 @@ export default function T5() {
 
           <Cartao titulo="Reclassificações registradas" hint="imutáveis">
             {banco.reclassificacoes.length === 0
-              ? <Nota>Nenhuma ainda. Arraste uma bolha na matriz.</Nota>
+              ? <Nota>Nenhuma neste cenário. Selecione um risco e use "Reclassificar P × I" — o registro fica aqui com a justificativa anexada.</Nota>
               : banco.reclassificacoes.map((r, i) => (
                 <div key={i} style={{ paddingBottom: 8, borderBottom: '1px solid var(--line)', marginBottom: 8 }}>
                   <div className="mono" style={{ fontSize: 11.5 }}>
@@ -189,50 +249,92 @@ export default function T5() {
                   <div style={{ fontSize: 12.5, color: 'var(--text-2)' }}>{r.justificativa}</div>
                 </div>
               ))}
+            {/* T5-02 — o card dizia "imutáveis" e a troca de cenário apagava tudo. */}
+            <Nota>
+              Cada cenário guarda o próprio banco e o próprio histórico: trocar de cenário e voltar
+              reencontra estes registros. Nada aqui é descartável, nem com confirmação.
+            </Nota>
           </Cartao>
         </div>
       </div>
 
       <div className="sec-title">Quem responde por quê</div>
-      <Cartao titulo="Matriz RACI" hint="um único accountable por processo — a plataforma recusa o segundo">
-        <Tabela cabecalho={['Processo', 'DPO', 'Jurídico', 'Segurança', 'Engenharia', 'Produto', 'Dados']}>
-          {banco.cenario.raci.map((linha) => (
-            <tr key={linha.processo} className="raci">
-              <td>{linha.processo}</td>
-              {['DPO', 'Jurídico', 'Segurança', 'Engenharia', 'Produto', 'Dados'].map((dom) => (
-                <td key={dom} style={{ textAlign: 'center' }}>
-                  <button
-                    className={`letter ${linha.letras[dom]}`}
-                    style={{ border: 0, cursor: 'pointer' }}
-                    title="Tentar promover a accountable"
-                    onClick={() => {
-                      if (linha.letras[dom] === 'A') return;
-                      avisar('negado',
-                        `${linha.processo} já tem accountable: ${Object.entries(linha.letras).find(([, v]) => v === 'A')?.[0]}.`,
-                        'Índice único parcial no banco garante um único "A" por processo — não é disciplina do preenchedor.');
-                    }}
-                  >
-                    {linha.letras[dom]}
-                  </button>
-                </td>
-              ))}
-            </tr>
-          ))}
-        </Tabela>
-        <Nota>
-          Engenharia é o único domínio que <b>executa</b> controle técnico. Jurídico escreve o contrato e o DPO
-          documenta a base legal, mas RLS, redação de log e pseudonimização só existem se alguém escrever o código.
-        </Nota>
-      </Cartao>
+      <MatrizRaci />
 
       {pendente && (
         <ModalReclassificar
           risco={pendente.risco}
           p={pendente.p}
           i={pendente.i}
-          aoFechar={() => setPendente(null)}
+          aoFechar={(aplicado) => {
+            setPendente(null);
+            if (aplicado) setAjuste(null);
+          }}
         />
       )}
     </>
+  );
+}
+
+/**
+ * T5-03 — só é botão a célula que a ação alcança.
+ *
+ * Antes, **toda** letra da matriz era um `<button>` que existia para negar:
+ * clicar em qualquer uma disparava recusa, e quem já era accountable não fazia
+ * nada. Um controle cuja única função é dizer não ensina a não clicar, e de
+ * quebra polui a navegação por teclado com 60 paradas inúteis.
+ *
+ * Agora a matriz é texto — com o papel escrito por extenso, não só a letra
+ * (C-12) — e a demonstração da recusa vira um controle honesto por linha,
+ * atrás das mesmas duas condições do bloco de ataque da T6.
+ */
+function MatrizRaci() {
+  const banco = useSessao((s) => s.banco);
+  const avisar = useSessao((s) => s.avisar);
+  const DOMINIOS = ['DPO', 'Jurídico', 'Segurança', 'Engenharia', 'Produto', 'Dados'];
+  const PORTEXTENSO: Record<string, string> = {
+    R: 'responsável pela execução', A: 'accountable pela decisão',
+    C: 'consultado', I: 'informado', '—': 'não participa',
+  };
+
+  return (
+    <Cartao titulo="Matriz RACI" hint="um único accountable por processo — a plataforma recusa o segundo">
+      <Tabela cabecalho={['Processo', ...DOMINIOS, banco.modoDemo ? 'Demonstração' : '']}>
+        {banco.cenario.raci.map((linha) => {
+          const accountable = Object.entries(linha.letras).find(([, v]) => v === 'A')?.[0];
+          return (
+            <tr key={linha.processo} className="raci">
+              <td>{linha.processo}</td>
+              {DOMINIOS.map((dom) => (
+                <td key={dom} style={{ textAlign: 'center' }}>
+                  <span className={`letter ${linha.letras[dom]}`} title={`${dom}: ${PORTEXTENSO[linha.letras[dom]] ?? linha.letras[dom]}`}>
+                    {linha.letras[dom]}
+                  </span>
+                  <span className="visually-hidden">{PORTEXTENSO[linha.letras[dom]] ?? linha.letras[dom]}</span>
+                </td>
+              ))}
+              {banco.modoDemo && (
+                <td>
+                  <Permitido acao="escrever">
+                    <button
+                      className="reveal"
+                      onClick={() => avisar('negado',
+                        `${linha.processo} já tem accountable: ${accountable}.`,
+                        'Índice único parcial no banco garante um único "A" por processo — não é disciplina do preenchedor.')}
+                    >
+                      Tentar um segundo accountable
+                    </button>
+                  </Permitido>
+                </td>
+              )}
+            </tr>
+          );
+        })}
+      </Tabela>
+      <Nota>
+        Engenharia é o único domínio que <b>executa</b> controle técnico. Jurídico escreve o contrato e o DPO
+        documenta a base legal, mas RLS, redação de log e pseudonimização só existem se alguém escrever o código.
+      </Nota>
+    </Cartao>
   );
 }
