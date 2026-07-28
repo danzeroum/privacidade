@@ -150,6 +150,7 @@ export const POLITICAS: PoliticaRota[] = [
   { metodo: 'GET', caminho: /^gates(\/.*)?$/, tipo: 'leitura', foraDeEscopo: '403', nota: 'Execuções dos gates.' },
   { metodo: 'POST', caminho: /^ripds\/[^/]+\/(aprovar|render)$/, tipo: 'escrita', foraDeEscopo: '403', nota: 'Aprovação e geração do RIPD.' },
   { metodo: 'POST', caminho: /^lias\/[^/]+\/(campos|assinar)$/, tipo: 'escrita', foraDeEscopo: '403', nota: 'Vínculo e assinatura da LIA.' },
+  { metodo: 'GET', caminho: /^risks(\/.*)?$/, tipo: 'leitura', foraDeEscopo: '403', nota: 'Matriz de risco.' },
   { metodo: 'PATCH', caminho: /^risks\/[^/]+$/, tipo: 'escrita', foraDeEscopo: '403', acao: 'gerenciar_risco', nota: 'Reclassificação de risco.' },
   { metodo: 'POST', caminho: /^purge\/[^/]+\/verificar$/, tipo: 'escrita', foraDeEscopo: '403', nota: 'Verificação de lote de expurgo.' },
   { metodo: 'GET', caminho: /^kms(\/.*)?$/, tipo: 'leitura', foraDeEscopo: '403', nota: 'Chaves e rotação.' },

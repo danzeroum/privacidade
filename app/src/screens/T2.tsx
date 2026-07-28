@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Cabecalho, Cartao, Didatico, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
+import { Cabecalho, Cartao, Didatico, Explica, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
+import { Estados, useRecurso } from '../ui/estados';
 import { useSessao } from '../store/sessao';
 import { hashCpf } from '../lib/sha256';
 import { redigir, resumoDaRedacao } from '../lib/redator';
@@ -41,14 +42,14 @@ export default function T2() {
   const [ultimoHash, setUltimoHash] = useState<string | null>(null);
   const [buscaResultado, setBuscaResultado] = useState<string | null>(null);
 
-  const papel = useSessao((s) => s.papel);
-  const versao = useSessao((s) => s.versao);
-  const resposta = useMemo(
-    () => chamar<{ data: Campo[]; totalItems?: number }>({ metodo: 'GET', caminho: '/v1/catalog/fields' }),
-    [chamar, papel, versao, banco],
+  // C-13 — a leitura do catálogo passa pelos quatro estados. Antes ia direto do
+  // nada para a tabela preenchida, e erro de transporte não tinha como aparecer.
+  const catalogo = useRecurso<{ data: Campo[]; totalItems?: number }>(
+    { metodo: 'GET', caminho: '/v1/catalog/fields' },
+    { vazioSe: (r) => (r.data ?? []).length === 0 },
   );
-  const campos = resposta.body.data ?? [];
-  const total = resposta.body.totalItems;
+  const campos = catalogo.dados?.data ?? [];
+  const total = catalogo.dados?.totalItems;
 
   const filtrados = useMemo(() => campos.filter((c) => (
     (fBase === 'Todas' || c.baseLegal === fBase)
@@ -226,10 +227,21 @@ export default function T2() {
               ? `${filtrados.length} de ${total} campos`
               : `${filtrados.length} campos nesta página · total não exibido para o seu papel`}
           >
-            {/* T2-03 — a tabela ficava simplesmente vazia, sem dizer que um
-                filtro a esvaziou nem como desfazer. Quem chega assim conclui que
-                o catálogo não tem o campo, e não que ele está escondido. */}
-            {filtrados.length === 0 && (
+            <Estados
+              recurso={catalogo}
+              rotulo="o catálogo de campos"
+              vazio={<><b>O catálogo deste cenário está vazio.</b>
+                <p className="hint" style={{ margin: '6px 0 0' }}>
+                  Nenhum repositório publicou inventário ainda — o ROPA é lido dos YAML, não digitado aqui.
+                </p></>}
+            >
+              {() => <TabelaDeCampos filtrados={filtrados} aoSelecionar={setSelecionado} />}
+            </Estados>
+
+            {/* T2-03 — o recorte vazio é outra coisa do que o catálogo vazio:
+                aqui há dado, e um filtro o escondeu. Quem chega sem essa
+                distinção conclui que o campo não existe. */}
+            {catalogo.estado === 'pronto' && filtrados.length === 0 && (
               <div className="vazio" role="status">
                 <b>Nenhum campo com os filtros atuais.</b>
                 <p className="hint" style={{ margin: '6px 0 10px' }}>
@@ -239,40 +251,6 @@ export default function T2() {
                 <button className="btn" onClick={limparFiltros}>Limpar filtros</button>
               </div>
             )}
-            <Tabela dense cabecalho={['Campo', 'Guarda', 'Finalidade', 'Base legal', 'Retenção', 'Destino', 'Estado']}>
-              {filtrados.map((c) => {
-                const conf = conformidade(c);
-                const intl = c.compartilhamentos.find((s) => s.internacional);
-                return (
-                  <tr key={c.id} onClick={() => setSelecionado(c)} style={{ cursor: 'pointer' }}>
-                    <td>
-                      <span className="mono">{c.nome}</span>{' '}
-                      {c.sensivel && <Pill tom="sens">🔒 sensível</Pill>}
-                      <div className="hash">{c.sistema} · {c.dataset} · {c.categoria}</div>
-                    </td>
-                    <td title={EXPLICA[c.tipoArmazenado]} style={{ whiteSpace: 'nowrap' }}>
-                      {ICONE[c.tipoArmazenado]} {c.tipoArmazenado}
-                    </td>
-                    <td>{c.finalidade}</td>
-                    <td>
-                      <span className="mono" style={{ fontSize: 11 }}>{c.baseLegal}</span>
-                      {c.liaCodigo && <div><Pill tom="ok">{c.liaCodigo}</Pill></div>}
-                    </td>
-                    <td className="num" style={{ whiteSpace: 'nowrap' }}>{c.retencao}</td>
-                    <td>
-                      {c.compartilhamentos.length === 0
-                        ? <span style={{ color: 'var(--text-3)' }}>—</span>
-                        : intl
-                          ? <span title={`Mecanismo: ${intl.mecanismo} — Art. 33 · evidência ${intl.evidencia ?? 'ausente'}`}>
-                              <Pill tom="warn">🌎 {intl.destino}</Pill>
-                            </span>
-                          : <Pill tom="neutral">{c.compartilhamentos[0].destino}</Pill>}
-                    </td>
-                    <td><Pill tom={conf.tom}>{conf.texto}</Pill></td>
-                  </tr>
-                );
-              })}
-            </Tabela>
             <Didatico>
               <Nota>
                 🔒 hash irreversível · 🎭 pseudônimo reversível pelo serviço autorizado · 📊 agregado com k-anonimato ·
@@ -325,7 +303,7 @@ function Linhagem({ campo, aoFechar }: { campo: Campo; aoFechar: () => void }) {
                 fill={e.externo ? 'var(--warn-soft)' : 'var(--surface-2)'}
                 stroke={e.externo ? 'var(--warn)' : 'var(--line)'} />
               <text x={x + w / 2} y={48} textAnchor="middle" fontSize={11.5} fontWeight={600} fill="var(--text)">{e.etapa}</text>
-              <text x={x + w / 2} y={64} textAnchor="middle" fontSize={10}>{e.detalhe}</text>
+              <text x={x + w / 2} y={64} textAnchor="middle" fontSize={11}>{e.detalhe}</text>
               {i < campo.linhagem.length - 1 && (
                 <path d={`M${x + w + 3} 53 L${x + passo + 2} 53`} stroke="var(--line-strong)" strokeWidth={1.5} />
               )}
@@ -362,7 +340,17 @@ function ValidadorInventario() {
   const alternar = (f: Finalidade) =>
     setFinalidades((atual) => (atual.includes(f) ? atual.filter((x) => x !== f) : [...atual, f]));
 
+  /**
+   * C-13 — a ação de escrita tem os mesmos quatro estados da leitura, e eles
+   * não são intercambiáveis: `sem_permissao` é ausência (o `<Permitido>` abaixo
+   * já cuida), transporte caído é erro recuperável com repetir, e a recusa de
+   * regra continua sendo recusa — não vira "tente de novo", porque tentar de
+   * novo com o mesmo corpo dá o mesmo 422.
+   */
+  const [estadoEnvio, setEstadoEnvio] = useState<'ocioso' | 'enviando' | 'erro'>('ocioso');
+
   const validar = () => {
+    setEstadoEnvio('enviando');
     const res = chamar<{ erro?: string; valido?: boolean }>({
       metodo: 'POST', caminho: '/v1/catalog/validar',
       body: {
@@ -370,6 +358,12 @@ function ValidadorInventario() {
         ...(declaraFinalidades ? { finalidadesCompativeis: finalidades } : {}),
       },
     });
+    if (res.status === 0) {
+      setEstadoEnvio('erro');
+      setSaida(null);
+      return;
+    }
+    setEstadoEnvio('ocioso');
     setSaida(res.status === 200 ? '✅ Inventário aceito.' : `❌ ${(res.body as { erro: string }).erro}`);
   };
 
@@ -415,8 +409,19 @@ function ValidadorInventario() {
             onChange={(e) => setDeclaraFinalidades(e.target.checked)} />
           <span className="track" /> declarar finalidades de acesso
         </label>
-        <button className="btn primary" onClick={validar}>Validar</button>
+        <button className="btn primary" onClick={validar} disabled={estadoEnvio === 'enviando'}>
+          {estadoEnvio === 'enviando' ? 'Validando…' : 'Validar'}
+        </button>
       </div>
+      {estadoEnvio === 'erro' && (
+        <div className="falha" role="alert" style={{ marginTop: 10 }}>
+          <b>A validação não chegou ao servidor.</b>
+          <p className="hint" style={{ margin: '6px 0 10px' }}>
+            Nada foi gravado, e nada foi decidido: repetir é seguro.
+          </p>
+          <button className="btn" onClick={validar}>Tentar de novo</button>
+        </div>
+      )}
       {declaraFinalidades && (
         <div className="row" style={{ marginTop: 10, flexWrap: 'wrap' }}>
           {(['atendimento', 'cobranca', 'auditoria', 'seguranca'] as Finalidade[]).map((f) => (
@@ -586,5 +591,57 @@ function AreaDeInventario() {
         </ul>
       )}
     </>
+  );
+}
+
+/**
+ * A tabela vive num componente próprio porque agora ela é o conteúdo "pronto"
+ * de `<Estados>` — e o conteúdo pronto só é montado quando há dado. Em erro,
+ * ela sai da tela em vez de ficar exibindo o recorte anterior como se fosse o
+ * atual.
+ */
+function TabelaDeCampos({ filtrados, aoSelecionar }: {
+  filtrados: Campo[]; aoSelecionar: (c: Campo) => void;
+}) {
+  return (
+      <Tabela dense cabecalho={['Campo', 'Guarda', 'Finalidade', 'Base legal', 'Retenção', 'Destino', 'Estado']}>
+        {filtrados.map((c) => {
+          const conf = conformidade(c);
+          const intl = c.compartilhamentos.find((s) => s.internacional);
+          return (
+            <tr key={c.id} onClick={() => aoSelecionar(c)} style={{ cursor: 'pointer' }}>
+              <td>
+                <span className="mono">{c.nome}</span>{' '}
+                {c.sensivel && <Pill tom="sens">🔒 sensível</Pill>}
+                <div className="hash">{c.sistema} · {c.dataset} · {c.categoria}</div>
+              </td>
+              {/* C-12 — a explicação da guarda vivia só no `title`. Agora é o
+                  popover padrão: abre por teclado, fecha por Esc, e o `title`
+                  fica como redundância. */}
+              <td style={{ whiteSpace: 'nowrap' }}>
+                <Explica rotulo={`${ICONE[c.tipoArmazenado]} ${c.tipoArmazenado}`} titulo={`Guarda: ${c.tipoArmazenado}`}>
+                  {EXPLICA[c.tipoArmazenado]}
+                </Explica>
+              </td>
+              <td>{c.finalidade}</td>
+              <td>
+                <span className="mono" style={{ fontSize: 12.5 }}>{c.baseLegal}</span>
+                {c.liaCodigo && <div><Pill tom="ok">{c.liaCodigo}</Pill></div>}
+              </td>
+              <td className="num" style={{ whiteSpace: 'nowrap' }}>{c.retencao}</td>
+              <td>
+                {c.compartilhamentos.length === 0
+                  ? <span style={{ color: 'var(--text-3)' }}>—</span>
+                  : intl
+                    ? <span title={`Mecanismo: ${intl.mecanismo} — Art. 33 · evidência ${intl.evidencia ?? 'ausente'}`}>
+                        <Pill tom="warn">🌎 {intl.destino}</Pill>
+                      </span>
+                    : <Pill tom="neutral">{c.compartilhamentos[0].destino}</Pill>}
+              </td>
+              <td><Pill tom={conf.tom}>{conf.texto}</Pill></td>
+            </tr>
+          );
+        })}
+      </Tabela>
   );
 }

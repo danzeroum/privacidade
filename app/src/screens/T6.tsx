@@ -135,7 +135,7 @@ export default function T6() {
                 );
               })}
             </div>
-            <div className="row" style={{ marginTop: 5, fontSize: 10, color: 'var(--text-3)' }}>
+            <div className="row" style={{ marginTop: 5, fontSize: 12.5, color: 'var(--text-3)' }}>
               {hoje.entradas.map((e) => <span key={e.tabela} style={{ flex: 1 }}>{e.tabela.split('.')[0]}</span>)}
             </div>
           </Cartao>

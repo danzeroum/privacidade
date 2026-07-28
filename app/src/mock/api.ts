@@ -541,6 +541,9 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
       break;
     }
 
+    case 'GET risks':
+      return ok(banco.cenario.riscos) as Res<T>;
+
     // ── T7-01 — a T7 informava muito bem e não deixava fazer nada ────────
     case 'POST kms': {
       const chave = banco.cenario.chaves.find((c) => c.alias === decodeURIComponent(partes[1] ?? ''));

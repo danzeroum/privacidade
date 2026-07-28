@@ -111,7 +111,7 @@ export default function T7() {
                 {acessosKms.map((a, i) => (
                   <tr key={i} style={{ background: a.autorizado ? undefined : 'var(--crit-soft)' }}>
                     <td className="mono">{a.quando}</td>
-                    <td className="mono" style={{ fontSize: 11.5 }}>{a.principal}</td>
+                    <td className="mono" style={{ fontSize: 12.5 }}>{a.principal}</td>
                     <td>{a.operacao}</td>
                     <td>{a.finalidade}</td>
                     <td className="mono">{a.origemIp}</td>
@@ -137,16 +137,16 @@ export default function T7() {
                 return (
                   <g key={c.alias}>
                     <rect x={8} y={y} width={150} height={34} rx={4} fill="var(--accent-soft)" stroke="var(--accent)" />
-                    <text x={16} y={y + 15} fontSize={9.5} fontWeight={600} fill="var(--text)">{c.alias}</text>
-                    <text x={16} y={y + 27} fontSize={9}>{c.status}</text>
+                    <text x={16} y={y + 15} fontSize={11} fontWeight={600} fill="var(--text)">{c.alias}</text>
+                    <text x={16} y={y + 27} fontSize={11}>{c.status}</text>
                     {c.dependencias.map((d, di) => {
                       const dy = y + di * 40;
                       return (
                         <g key={d}>
                           <path d={`M158 ${y + 17} C174 ${y + 17} 184 ${dy + 17} 200 ${dy + 17}`} fill="none" stroke="var(--line-strong)" strokeWidth={1.3} />
                           <rect x={200} y={dy} width={118} height={34} rx={4} fill="var(--surface-2)" stroke="var(--line)" />
-                          <text x={208} y={dy + 15} fontSize={9.5} fontWeight={600} fill="var(--text)">{d}</text>
-                          <text x={208} y={dy + 27} fontSize={9}>dataset</text>
+                          <text x={208} y={dy + 15} fontSize={11} fontWeight={600} fill="var(--text)">{d}</text>
+                          <text x={208} y={dy + 27} fontSize={11}>dataset</text>
                         </g>
                       );
                     })}

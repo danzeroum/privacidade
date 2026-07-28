@@ -246,7 +246,7 @@ export default function T5() {
               ? <Nota>Nenhuma neste cenário. Selecione um risco e use "Reclassificar P × I" — o registro fica aqui com a justificativa anexada.</Nota>
               : banco.reclassificacoes.map((r, i) => (
                 <div key={i} style={{ paddingBottom: 8, borderBottom: '1px solid var(--line)', marginBottom: 8 }}>
-                  <div className="mono" style={{ fontSize: 11.5 }}>
+                  <div className="mono" style={{ fontSize: 12.5 }}>
                     {r.codigo}: P{r.de.p}→{r.para.p} · I{r.de.i}→{r.para.i} · {r.ator}
                   </div>
                   <div style={{ fontSize: 12.5, color: 'var(--text-2)' }}>{r.justificativa}</div>
