@@ -93,6 +93,40 @@ export const POLITICAS: PoliticaRota[] = [
     nota: 'Revisão de decisão automatizada (Art. 20).',
   },
 
+  // ── Incidentes (C-07 · Art. 48) ───────────────────────────────────────────
+  {
+    metodo: 'GET', caminho: /^incidentes(\/.*)?$/,
+    tipo: 'leitura', foraDeEscopo: '403',
+    nota: 'Fila de incidentes. Leitura ampla de propósito: incidente escondido de quem audita não é incidente tratado.',
+  },
+  {
+    metodo: 'POST', caminho: /^incidentes$/,
+    tipo: 'escrita', foraDeEscopo: '403', acao: 'abrir_incidente',
+    nota: 'Abre o incidente com escopo lido do catálogo. É de quem opera a resposta — engenharia e segurança.',
+  },
+  {
+    metodo: 'POST', caminho: /^incidentes\/[^/]+\/conter$/,
+    tipo: 'escrita', foraDeEscopo: '403', acao: 'abrir_incidente',
+    nota: 'Contenção: estanca antes de decidir. Mesma mão que abriu o incidente.',
+  },
+  {
+    metodo: 'POST', caminho: /^incidentes\/[^/]+\/(decisao|comunicar|registrar-nao-comunicacao|encerrar)$/,
+    tipo: 'escrita', foraDeEscopo: '403', acao: 'comunicar_incidente',
+    nota: 'Decidir, comunicar e encerrar são do DPO, que responde pela comunicação ao titular e à ANPD (Art. 48).',
+  },
+
+  // ── Consentimento (C-08) ──────────────────────────────────────────────────
+  {
+    metodo: 'GET', caminho: /^consentimentos(\/.*)?$/,
+    tipo: 'leitura', foraDeEscopo: '403',
+    nota: 'Registros de consentimento — a prova que sustenta a base legal no ROPA.',
+  },
+  {
+    metodo: 'POST', caminho: /^consentimentos\/[^/]+\/revogar$/,
+    tipo: 'escrita', foraDeEscopo: '403', acao: 'revogar_consentimento',
+    nota: 'Revogação do titular (Art. 18, VIII), operada pelo balcão. Propaga: o campo perde base legal e o gate bloqueia.',
+  },
+
   // ── Solicitações ──────────────────────────────────────────────────────────
   {
     metodo: 'POST', caminho: /^requests\/[^/]+\/concluir$/,

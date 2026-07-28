@@ -13,6 +13,9 @@ export type Acao =
   | 'revisar_decisao'
   | 'verificar_integridade'
   | 'exportar_auditoria'
+  | 'abrir_incidente'
+  | 'comunicar_incidente'
+  | 'revogar_consentimento'
   | 'aprovar_ripd'
   | 'assinar_lia'
   | 'gerar_ripd'
@@ -52,14 +55,17 @@ export type Acao =
  */
 const MAPA: Record<Papel, Acao[]> = {
   engenharia: ['gerar_ripd', 'ver_gate_detalhe', 'ver_pipeline_rotacao', 'ver_log_kms',
-    'rodar_expurgo', 'ver_portal_titular', 'ver_total_itens', 'verificar_integridade', 'escrever'],
+    'rodar_expurgo', 'ver_portal_titular', 'ver_total_itens', 'verificar_integridade',
+    'abrir_incidente', 'escrever'],
   dpo: ['revelar_pii', 'buscar_titular', 'concluir_solicitacao', 'revisar_decisao',
     'aprovar_ripd', 'assinar_lia', 'gerenciar_risco',
     'ver_portal_titular', 'ver_total_itens', 'rodar_expurgo',
-    'verificar_integridade', 'exportar_auditoria', 'escrever'],
+    'verificar_integridade', 'exportar_auditoria',
+    'comunicar_incidente', 'revogar_consentimento', 'escrever'],
   produto: ['ver_portal_titular', 'verificar_integridade'],
   seguranca: ['ver_pipeline_rotacao', 'ver_log_kms', 'ver_gate_detalhe', 'ver_total_itens',
-    'rodar_expurgo', 'verificar_integridade', 'exportar_auditoria', 'escrever'],
+    'rodar_expurgo', 'verificar_integridade', 'exportar_auditoria',
+    'abrir_incidente', 'escrever'],
   auditor: ['verificar_integridade', 'exportar_auditoria'],
 };
 

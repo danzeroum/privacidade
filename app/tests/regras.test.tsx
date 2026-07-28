@@ -4,6 +4,7 @@ import { BancoMock } from '../src/mock/db';
 import { request } from '../src/mock/api';
 import { pode } from '../src/mock/permissoes';
 import { POLITICAS, POLITICA_PADRAO, politicaDe } from '../src/mock/politicas';
+import { TRANSICOES_INCIDENTE, transicaoPermitida } from '../src/mock/estados';
 import { CampoPII } from '../src/ui/primitivos';
 import { MemoryRouter } from 'react-router-dom';
 import T2 from '../src/screens/T2';
@@ -12,7 +13,7 @@ import T4 from '../src/screens/T4';
 import T6 from '../src/screens/T6';
 import { useSessao, limparBancosDaSessao } from '../src/store/sessao';
 import { sha256, hashCpf } from '../src/lib/sha256';
-import type { Papel } from '../src/mock/types';
+import type { EstadoIncidente, Papel } from '../src/mock/types';
 
 let banco: BancoMock;
 beforeEach(() => {
@@ -1036,5 +1037,267 @@ describe('T5-03 — só é botão a célula que a ação alcança', () => {
     useSessao.setState({ papel: 'auditor' });
     render(<MemoryRouter><T5 /></MemoryRouter>);
     expect(screen.queryByRole('button', { name: /Tentar um segundo accountable/i })).toBeNull();
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PR 4 — Lacunas de cobertura LGPD (C-07 incidente · C-08 consentimento)
+// ═════════════════════════════════════════════════════════════════════════════
+
+const FUNDAMENTO = 'Exposição confirmada de CPF e nome de 4.118 titulares por token válido.';
+
+/** O incidente semeado nasce em `aberto`, para as transições serem exercitáveis. */
+const incidenteDe = (b: BancoMock) => b.cenario.incidentes[0];
+
+describe('C-07 · máquina de estados do incidente — verificação, não validação', () => {
+  it('a tabela de transições é a do MAPA-PROCESSOS e nada além dela', () => {
+    expect(TRANSICOES_INCIDENTE.aberto).toEqual(['contido']);
+    expect(TRANSICOES_INCIDENTE.contido).toEqual(['decidido']);
+    expect(TRANSICOES_INCIDENTE.decidido).toEqual(['comunicado', 'nao_comunicado']);
+    expect(TRANSICOES_INCIDENTE.comunicado).toEqual(['encerrado']);
+    expect(TRANSICOES_INCIDENTE.nao_comunicado).toEqual(['encerrado']);
+    expect(TRANSICOES_INCIDENTE.encerrado).toEqual([]);
+  });
+
+  it('não existe atalho de estado nenhum para nenhum outro fora da tabela', () => {
+    const todos: EstadoIncidente[] = ['aberto', 'contido', 'decidido', 'comunicado', 'nao_comunicado', 'encerrado'];
+    for (const de of todos) {
+      for (const para of todos) {
+        expect(transicaoPermitida(de, para), `${de} → ${para}`)
+          .toBe(TRANSICOES_INCIDENTE[de].includes(para));
+      }
+    }
+  });
+
+  it('pular a contenção é 409, não 422 — o problema é a sequência, não o conteúdo', () => {
+    const inc = incidenteDe(banco);
+    expect(inc.estado).toBe('aberto');
+    const res = chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/incidentes/${inc.id}/decisao`,
+      body: { decisao: 'comunicar_anpd', fundamento: FUNDAMENTO },
+    });
+    expect(res.status).toBe(409);
+    expect(inc.estado).toBe('aberto');
+    expect(inc.decisao).toBeUndefined();
+  });
+
+  it('comunicar sem decisão registrada é 409', () => {
+    const inc = incidenteDe(banco);
+    chamar('seguranca', { metodo: 'POST', caminho: `/v1/incidentes/${inc.id}/conter`, body: { nota: 'Token revogado.' } });
+    expect(inc.estado).toBe('contido');
+    const res = chamar('dpo', { metodo: 'POST', caminho: `/v1/incidentes/${inc.id}/comunicar` });
+    expect(res.status).toBe(409);
+  });
+
+  it('encerrado não volta: reabrir é registro novo', () => {
+    const inc = incidenteDe(banco);
+    inc.estado = 'encerrado';
+    const res = chamar('seguranca', { metodo: 'POST', caminho: `/v1/incidentes/${inc.id}/conter`, body: { nota: 'x' } });
+    expect(res.status).toBe(409);
+    expect((res.body as { erro: string }).erro).toContain('encerrado');
+  });
+});
+
+describe('C-07 · decidir exige fundamento — inclusive para não comunicar (Art. 48)', () => {
+  const conter = (b: BancoMock) => request(b, {
+    papel: 'seguranca', ator: 'teste', metodo: 'POST',
+    caminho: `/v1/incidentes/${incidenteDe(b).id}/conter`, body: { nota: 'Token revogado.' },
+  });
+
+  it('nao_comunicar sem fundamento é 422, e a decisão não persiste', () => {
+    conter(banco);
+    const inc = incidenteDe(banco);
+    const antes = banco.auditoria.length;
+    const res = chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/incidentes/${inc.id}/decisao`,
+      body: { decisao: 'nao_comunicar' },
+    });
+    expect(res.status).toBe(422);
+    expect(inc.estado).toBe('contido');
+    expect(inc.decisao).toBeUndefined();
+    expect(banco.auditoria.length).toBe(antes);
+  });
+
+  it('nao_comunicar com fundamento grava no trail antes de responder', () => {
+    conter(banco);
+    const inc = incidenteDe(banco);
+    const antes = banco.auditoria.length;
+    const res = chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/incidentes/${inc.id}/decisao`,
+      body: { decisao: 'nao_comunicar', fundamento: 'Dados expostos eram pseudonimizados sem chave acessível ao atacante.' },
+    });
+    expect(res.status).toBe(200);
+    expect(banco.auditoria.length).toBe(antes + 1);
+
+    const registro = banco.auditoria.at(-1)!;
+    expect(registro.acao).toBe('INCIDENTE_DECIDIDO');
+    expect(registro.campos).toContain('nao_comunicar');
+    expect(inc.estado).toBe('decidido');
+    expect(inc.decisao).toBe('nao_comunicar');
+  });
+
+  it('o fundamento é redigido antes de entrar no registro imutável (C-04)', () => {
+    conter(banco);
+    const inc = incidenteDe(banco);
+    chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/incidentes/${inc.id}/decisao`,
+      body: { decisao: 'comunicar_anpd', fundamento: 'Titular 529.982.247-25 relatou uso indevido do cartão informado.' },
+    });
+    expect(banco.auditoria.at(-1)!.justificativa).not.toContain('529.982.247-25');
+    expect(inc.fundamento).toContain('[CPF removido]');
+  });
+
+  it('se o audit trail falha ao decidir, a decisão não persiste', () => {
+    conter(banco);
+    const inc = incidenteDe(banco);
+    banco.simularFalhaDeLog = true;
+    const res = chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/incidentes/${inc.id}/decisao`,
+      body: { decisao: 'comunicar_anpd_e_titulares', fundamento: FUNDAMENTO },
+    });
+    expect(res.status).toBe(503);
+    expect(inc.estado).toBe('contido');
+    expect(inc.decisao).toBeUndefined();
+  });
+
+  it('a comunicação segue a decisão registrada: não comunicar não vira comunicado', () => {
+    conter(banco);
+    const inc = incidenteDe(banco);
+    chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/incidentes/${inc.id}/decisao`,
+      body: { decisao: 'nao_comunicar', fundamento: 'Risco não relevante: dado agregado sem reidentificação viável.' },
+    });
+    const res = chamar('dpo', { metodo: 'POST', caminho: `/v1/incidentes/${inc.id}/comunicar` });
+    expect(res.status).toBe(409);
+    expect(chamar('dpo', { metodo: 'POST', caminho: `/v1/incidentes/${inc.id}/registrar-nao-comunicacao` }).status).toBe(200);
+    expect(inc.estado).toBe('nao_comunicado');
+  });
+
+  it('decidir é do DPO; conter é de quem opera a resposta', () => {
+    expect(pode('dpo', 'comunicar_incidente')).toBe(true);
+    expect(pode('seguranca', 'comunicar_incidente')).toBe(false);
+    expect(pode('seguranca', 'abrir_incidente')).toBe(true);
+    expect(pode('engenharia', 'abrir_incidente')).toBe(true);
+    expect(pode('auditor', 'abrir_incidente')).toBe(false);
+
+    const inc = incidenteDe(banco);
+    expect(chamar('seguranca', {
+      metodo: 'POST', caminho: `/v1/incidentes/${inc.id}/decisao`,
+      body: { decisao: 'comunicar_anpd', fundamento: FUNDAMENTO },
+    }).status).toBe(403);
+  });
+
+  it('o escopo é lido do catálogo: campo fora do ROPA não abre incidente', () => {
+    const res = chamar('seguranca', {
+      metodo: 'POST', caminho: '/v1/incidentes',
+      body: { origem: 'alerta de volume', camposIds: ['b-cpf', 'campo-inventado'], titularesEstimados: 10 },
+    });
+    expect(res.status).toBe(422);
+    expect((res.body as { erro: string }).erro).toContain('catálogo');
+  });
+});
+
+describe('C-08 · consentimento como prova, e revogação que propaga', () => {
+  let varejo: BancoMock;
+  const chamarV = <T = unknown,>(papel: Papel, req: Partial<Parameters<typeof request>[1]> & { metodo: 'GET' | 'POST' | 'PATCH' | 'DELETE'; caminho: string }) =>
+    request<T>(varejo, { papel, ator: 'teste', ...req });
+
+  beforeEach(() => { varejo = new BancoMock('varejo'); });
+
+  it('contraprova: campo com consentimento ativo e finalidade compatível revela', () => {
+    const consent = varejo.cenario.consentimentos.find((c) => c.campoId === 'v-tel')!;
+    expect(consent.estado).toBe('ativo');
+    const res = chamarV('dpo', {
+      metodo: 'POST', caminho: '/v1/pseudonyms/resolve', purpose: 'atendimento',
+      body: { titularId: 't1', campo: 'telefone', protocolo: '2026-0731', justificativa: 'Contato para confirmar a solicitação do titular.' },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('revogado, o mesmo campo deixa de ser revelável — 422 citando o artigo', () => {
+    chamarV('dpo', {
+      metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar',
+      body: { motivo: 'Titular pediu a revogação pelo canal do programa de fidelidade.' },
+    });
+    const res = chamarV('dpo', {
+      metodo: 'POST', caminho: '/v1/pseudonyms/resolve', purpose: 'atendimento',
+      body: { titularId: 't1', campo: 'telefone', protocolo: '2026-0731', justificativa: 'Contato para confirmar a solicitação do titular.' },
+    });
+    expect(res.status).toBe(422);
+    expect(`${(res.body as { erro: string }).erro} ${res.regra ?? ''}`).toContain('Art. 8');
+    expect(JSON.stringify(res.body)).not.toContain('98812');
+  });
+
+  it('a revogação fica registrada e aciona o gate do repositório do campo', () => {
+    const antes = varejo.auditoria.length;
+    const res = chamarV<{ gatesBloqueados: number }>('dpo', {
+      metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar',
+      body: { motivo: 'Titular pediu a revogação pelo canal do programa de fidelidade.' },
+    });
+    expect(res.status).toBe(200);
+    expect(varejo.auditoria.length).toBe(antes + 1);
+    expect(varejo.auditoria.at(-1)!.acao).toBe('CONSENTIMENTO_REVOGADO');
+    expect(res.body.gatesBloqueados).toBeGreaterThan(0);
+    expect(varejo.cenario.gates.some((g) => g.bloqueouMerge)).toBe(true);
+  });
+
+  it('revogar duas vezes é 409: a segunda não é revogação, é ruído no trail', () => {
+    const corpo = { motivo: 'Titular pediu a revogação pelo canal do programa de fidelidade.' };
+    expect(chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: corpo }).status).toBe(200);
+    expect(chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: corpo }).status).toBe(409);
+  });
+
+  it('validar inventário recusa baseLegal consentimento sem registro vigente', () => {
+    const semRegistro = chamarV('engenharia', {
+      metodo: 'POST', caminho: '/v1/catalog/validar',
+      body: { nome: 'novo', tipoArmazenado: 'bruto', categoria: 'pessoal', sensivel: false, baseLegal: 'consentimento', finalidadesCompativeis: ['atendimento'] },
+    });
+    expect(semRegistro.status).toBe(422);
+    expect((semRegistro.body as { erro: string }).erro).toContain('consentimento');
+
+    const comRegistro = chamarV('engenharia', {
+      metodo: 'POST', caminho: '/v1/catalog/validar',
+      body: { campoId: 'v-tel', nome: 'telefone', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, baseLegal: 'consentimento', finalidadesCompativeis: ['atendimento'] },
+    });
+    expect(comRegistro.status).toBe(200);
+  });
+
+  it('revogado, o inventário volta a recusar o mesmo campo', () => {
+    chamarV('dpo', {
+      metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar',
+      body: { motivo: 'Titular pediu a revogação pelo canal do programa de fidelidade.' },
+    });
+    const res = chamarV('engenharia', {
+      metodo: 'POST', caminho: '/v1/catalog/validar',
+      body: { campoId: 'v-tel', nome: 'telefone', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, baseLegal: 'consentimento', finalidadesCompativeis: ['atendimento'] },
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('revogado, a tela deixa de oferecer o botão — e diz por quê', () => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'dpo', banco: varejo, versao: 0, avisos: [], protocoloSelecionado: '2026-0731' });
+    const { unmount } = render(<CampoPII titularId="t1" chave="telefone" rotulo="Telefone" mascara="(••) •••••-••••" sensivel={false} />);
+    expect(screen.getByRole('button', { name: /revelar/i })).toBeInTheDocument();
+    unmount();
+
+    chamarV('dpo', {
+      metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar',
+      body: { motivo: 'Titular pediu a revogação pelo canal do programa de fidelidade.' },
+    });
+    useSessao.setState({ versao: 1 });
+    render(<CampoPII titularId="t1" chave="telefone" rotulo="Telefone" mascara="(••) •••••-••••" sensivel={false} />);
+    // Ausência em vez de desabilitado — e a razão fica visível no lugar.
+    expect(screen.queryByRole('button', { name: /revelar/i })).toBeNull();
+    expect(screen.getByText(/consentimento revogado/i)).toBeInTheDocument();
+  });
+
+  it('revogar é ato do DPO, e a rota recusa os demais', () => {
+    for (const p of ['engenharia', 'produto', 'seguranca', 'auditor'] as Papel[]) {
+      expect(pode(p, 'revogar_consentimento'), p).toBe(false);
+      expect(chamarV(p, {
+        metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: 'x'.repeat(30) },
+      }).status, p).toBe(403);
+    }
   });
 });

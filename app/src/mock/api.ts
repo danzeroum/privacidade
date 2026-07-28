@@ -1,12 +1,13 @@
 import { BancoMock, FalhaDeAuditoria, LogImutavel } from './db';
 import { pode } from './permissoes';
 import { POLITICA_PADRAO, politicaDe } from './politicas';
+import { motivoDaRecusa, transicaoPermitida } from './estados';
 import { redigir } from '../lib/redator';
 import { sha256 } from '../lib/sha256';
 import { BASES_PARA_SENSIVEL } from './types';
 import type {
-  BaseLegal, Campo, Categoria, DesfechoSolicitacao, Finalidade, Mecanismo, Papel,
-  ResultadoRevisao, TipoArmazenado,
+  BaseLegal, Campo, Categoria, DecisaoIncidente, DesfechoSolicitacao, EstadoIncidente,
+  Finalidade, Incidente, Mecanismo, Papel, ResultadoRevisao, TipoArmazenado,
 } from './types';
 
 export interface Req {
@@ -172,6 +173,18 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
           'Art. 6º, I: a finalidade do acesso precisa ser uma das declaradas no inventário para aquele campo.') as Res<T>;
       }
 
+      /**
+       * C-08 — a revogação propaga até aqui. Campo cuja base legal é
+       * consentimento e cujo registro foi revogado deixa de ser revelável: o
+       * tratamento perdeu fundamento no instante da revogação, e continuar
+       * mostrando o valor faria da revogação um rótulo.
+       */
+      if (catalogado.baseLegal === 'consentimento' && !consentimentoVigente(banco, catalogado.id)) {
+        registrarNegativa(banco, ator, papel, campo, 'consentimento revogado');
+        return erro(422, `O consentimento de ${catalogado.nome} foi revogado: o campo não é mais tratável.`,
+          'Art. 8º, §5º e Art. 18, VIII: revogado o consentimento, cessa o tratamento que dependia dele.') as Res<T>;
+      }
+
       if (!justificativa || justificativa.trim().length < 20) {
         return erro(422, 'A justificativa precisa de ao menos 20 caracteres.',
           'Justificativa curta não sustenta o acesso em auditoria.') as Res<T>;
@@ -251,7 +264,7 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
       const c = body as {
         nome: string; tipoArmazenado: TipoArmazenado; categoria: Categoria;
         sensivel: boolean; baseLegal: BaseLegal; internacional?: boolean; mecanismo?: Mecanismo;
-        finalidadesCompativeis?: Finalidade[];
+        finalidadesCompativeis?: Finalidade[]; campoId?: string;
       };
       const erros: string[] = [];
 
@@ -282,6 +295,19 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         erros.push('Transferência internacional sem mecanismo declarado do Art. 33 (SCC, adequação, normas corporativas ou consentimento específico).');
       }
       if (!c.baseLegal) erros.push('Campo sem base legal não entra no ROPA.');
+
+      /**
+       * C-08 — mesma lógica que já vale para legítimo interesse sem LIA: a base
+       * só é aceita com a prova viva. Consentimento declarado sem registro
+       * vigente é afirmação sobre a vontade de alguém que ninguém consultou.
+       */
+      if (c.baseLegal === 'consentimento') {
+        const registro = c.campoId ? consentimentoVigente(banco, c.campoId) : null;
+        if (!registro) {
+          erros.push('Base legal "consentimento" exige registro de consentimento vigente — com texto, versão, canal e hash. '
+            + 'Sem ele, ou com ele revogado, o campo não entra no ROPA.');
+        }
+      }
 
       return (erros.length
         ? erro(422, erros.join(' '), 'O inventário é recusado inteiro: um campo inválido invalida a versão.')
@@ -495,6 +521,35 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
       }) as Res<T>;
     }
 
+    // ── C-07 — incidente de segurança (Art. 48) ───────────────────────────
+    case 'GET incidentes':
+      return ok(banco.cenario.incidentes) as Res<T>;
+
+    case 'POST incidentes': {
+      if (!partes[1]) return abrirIncidente<T>(banco, req);
+      const inc = banco.cenario.incidentes.find((i) => i.id === partes[1]);
+      if (!inc) return erro(404, 'Não encontrado.') as Res<T>;
+
+      switch (partes[2]) {
+        case 'conter': return conterIncidente<T>(banco, req, inc);
+        case 'decisao': return decidirIncidente<T>(banco, req, inc);
+        case 'comunicar': return efetivarIncidente<T>(banco, req, inc, 'comunicado');
+        case 'registrar-nao-comunicacao': return efetivarIncidente<T>(banco, req, inc, 'nao_comunicado');
+        case 'encerrar': return encerrarIncidente<T>(banco, req, inc);
+        default: break;
+      }
+      break;
+    }
+
+    // ── C-08 — consentimento como prova, e revogação que propaga ──────────
+    case 'GET consentimentos':
+      return ok(banco.cenario.consentimentos) as Res<T>;
+
+    case 'POST consentimentos': {
+      if (partes[2] !== 'revogar') break;
+      return revogarConsentimento<T>(banco, req, partes[1]);
+    }
+
     /**
      * T4-02 — o ato que para o cronômetro. Sem ele, o SLA corre para sempre e
      * a fila nunca fecha: a tela media prazo de coisas que ninguém podia
@@ -614,6 +669,228 @@ function buscarTitular<T>(banco: BancoMock, req: Req): Res<T> {
   if (!titular) return naoEncontrado as Res<T>;
   return ok({ id: titular.id, pseudonimo: `hmac:${cpfHash.slice(0, 4)}…${cpfHash.slice(-4)}` }) as Res<T>;
 }
+
+/**
+ * C-07 — incidente de segurança (Art. 48).
+ *
+ * As cinco funções abaixo compartilham uma disciplina: **a sequência é
+ * verificada antes do conteúdo**, e as duas falham com códigos diferentes.
+ *
+ * - **409** quando o passo está fora de ordem. É problema de sequência: o
+ *   pedido pode estar impecável e ainda assim ser cedo demais.
+ * - **422** quando o passo é legal mas o conteúdo não satisfaz o artigo —
+ *   fundamento ausente, curto, decisão fora do vocabulário.
+ *
+ * Trocar os dois códigos é o defeito comum: devolver 422 para quem pulou a
+ * contenção manda a pessoa reescrever um texto que já estava bom.
+ */
+const guardaDeTransicao = <T>(inc: Incidente, para: EstadoIncidente): Res<T> | null =>
+  (transicaoPermitida(inc.estado, para)
+    ? null
+    : erro(409, `O incidente ${inc.id} está em "${inc.estado}".`, motivoDaRecusa(inc.estado, para)) as Res<T>);
+
+function abrirIncidente<T>(banco: BancoMock, req: Req): Res<T> {
+  const { papel, ator } = req;
+  const body = (req.body ?? {}) as Record<string, any>;
+  const camposIds: string[] = Array.isArray(body.camposIds) ? body.camposIds.map(String) : [];
+
+  if (camposIds.length === 0) {
+    return erro(422, 'Um incidente sem escopo não é um incidente: informe os campos atingidos.',
+      'Art. 48: a comunicação descreve a natureza dos dados afetados.') as Res<T>;
+  }
+  /**
+   * O escopo é **lido do catálogo**, nunca digitado. Campo fora do ROPA não
+   * entra no incidente pelo mesmo motivo do C-17: se o inventário não conhece
+   * o dado, ninguém sabe a base legal, o prazo nem quem responde por ele — e a
+   * comunicação ao titular sairia descrevendo um universo inventado.
+   */
+  const forasDoCatalogo = camposIds.filter((id) => !banco.cenario.campos.some((c) => c.id === id));
+  if (forasDoCatalogo.length > 0) {
+    return erro(422, `Fora do catálogo: ${forasDoCatalogo.join(', ')}.`,
+      'O escopo do incidente é lido do inventário. Campo que o ROPA desconhece não tem base legal nem dono para responder por ele.') as Res<T>;
+  }
+
+  const id = `INC-${new Date().getFullYear()}-${String(banco.cenario.incidentes.length + 4).padStart(3, '0')}`;
+  const incidente: Incidente = {
+    id,
+    estado: 'aberto',
+    detectadoEm: new Date().toISOString(),
+    origem: redigir(String(body.origem ?? 'registro manual')).texto,
+    camposIds,
+    titularesEstimados: Number(body.titularesEstimados ?? 0),
+    riscoCodigo: body.riscoCodigo ? String(body.riscoCodigo) : undefined,
+  };
+
+  try {
+    banco.auditAppend({
+      ator, atorPapel: papel, acao: 'INCIDENTE_ABERTO', recursoTipo: 'incidente',
+      recursoId: id, campos: camposIds,
+    });
+  } catch (e) {
+    const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a abertura.';
+    return erro(503, msg, 'Incidente que não entra no trail não existe para a fiscalização.') as Res<T>;
+  }
+
+  banco.cenario.incidentes.push(incidente);
+  return ok(incidente, 201) as Res<T>;
+}
+
+function conterIncidente<T>(banco: BancoMock, req: Req, inc: Incidente): Res<T> {
+  const recusa = guardaDeTransicao<T>(inc, 'contido');
+  if (recusa) return recusa;
+
+  const nota = redigir(String((req.body as { nota?: string } | undefined)?.nota ?? '')).texto;
+  try {
+    banco.auditAppend({
+      ator: req.ator, atorPapel: req.papel, acao: 'INCIDENTE_CONTIDO', recursoTipo: 'incidente',
+      recursoId: inc.id, justificativa: nota || undefined,
+    });
+  } catch (e) {
+    const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a contenção.';
+    return erro(503, msg, 'Sem registro não há contenção comprovável.') as Res<T>;
+  }
+
+  inc.estado = 'contido';
+  inc.contidoPor = req.ator;
+  return ok({ id: inc.id, estado: inc.estado }) as Res<T>;
+}
+
+function decidirIncidente<T>(banco: BancoMock, req: Req, inc: Incidente): Res<T> {
+  // Verificação primeiro: a sequência não depende do que veio no corpo.
+  const recusa = guardaDeTransicao<T>(inc, 'decidido');
+  if (recusa) return recusa;
+
+  const body = (req.body ?? {}) as Record<string, any>;
+  const decisao = String(body.decisao ?? '') as DecisaoIncidente;
+  if (!['comunicar_anpd_e_titulares', 'comunicar_anpd', 'nao_comunicar'].includes(decisao)) {
+    return erro(422, 'Decisão fora do vocabulário controlado.',
+      'As três saídas do Art. 48 são comunicar à ANPD e aos titulares, comunicar só à ANPD, ou não comunicar.') as Res<T>;
+  }
+  /**
+   * Validação: o fundamento vale para as três decisões, e principalmente para
+   * a de **não** comunicar — é essa que a fiscalização examina primeiro. Sem
+   * razão registrada, não comunicar é indistinguível de não ter percebido.
+   */
+  if (String(body.fundamento ?? '').trim().length < 20) {
+    return erro(422, 'A decisão exige fundamento de ao menos 20 caracteres.',
+      'Art. 48: a decisão de não comunicar também é decisão, e é registrada com a razão.') as Res<T>;
+  }
+
+  const fundamento = redigir(String(body.fundamento)).texto;
+  try {
+    banco.auditAppend({
+      ator: req.ator, atorPapel: req.papel, acao: 'INCIDENTE_DECIDIDO', recursoTipo: 'incidente',
+      recursoId: inc.id, justificativa: fundamento, campos: [decisao],
+    });
+  } catch (e) {
+    const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a decisão.';
+    return erro(503, msg, 'Sem registro não há decisão: a ordem é gravar, depois responder.') as Res<T>;
+  }
+
+  inc.estado = 'decidido';
+  inc.decisao = decisao;
+  inc.fundamento = fundamento;
+  inc.decididoPor = req.ator;
+  return ok({ id: inc.id, estado: inc.estado, decisao, fundamento }) as Res<T>;
+}
+
+function efetivarIncidente<T>(
+  banco: BancoMock, req: Req, inc: Incidente, para: 'comunicado' | 'nao_comunicado',
+): Res<T> {
+  const recusa = guardaDeTransicao<T>(inc, para);
+  if (recusa) return recusa;
+
+  // A efetivação segue a decisão registrada. Comunicar um incidente decidido
+  // como "não comunicar" seria a tela contradizendo o trail.
+  const esperado = inc.decisao === 'nao_comunicar' ? 'nao_comunicado' : 'comunicado';
+  if (para !== esperado) {
+    return erro(409, `A decisão registrada foi "${inc.decisao}".`,
+      'A comunicação executa o que foi decidido e registrado — divergir aqui faria o trail mentir.') as Res<T>;
+  }
+
+  try {
+    banco.auditAppend({
+      ator: req.ator, atorPapel: req.papel,
+      acao: para === 'comunicado' ? 'INCIDENTE_COMUNICADO' : 'INCIDENTE_NAO_COMUNICADO',
+      recursoTipo: 'incidente', recursoId: inc.id,
+      justificativa: inc.fundamento, campos: [inc.decisao ?? '-'],
+    });
+  } catch (e) {
+    const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a comunicação.';
+    return erro(503, msg) as Res<T>;
+  }
+
+  inc.estado = para;
+  return ok({ id: inc.id, estado: inc.estado }) as Res<T>;
+}
+
+function encerrarIncidente<T>(banco: BancoMock, req: Req, inc: Incidente): Res<T> {
+  const recusa = guardaDeTransicao<T>(inc, 'encerrado');
+  if (recusa) return recusa;
+
+  try {
+    banco.auditAppend({
+      ator: req.ator, atorPapel: req.papel, acao: 'INCIDENTE_ENCERRADO',
+      recursoTipo: 'incidente', recursoId: inc.id,
+    });
+  } catch (e) {
+    const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar o encerramento.';
+    return erro(503, msg) as Res<T>;
+  }
+
+  inc.estado = 'encerrado';
+  return ok({ id: inc.id, estado: inc.estado }) as Res<T>;
+}
+
+/**
+ * C-08 — revogação de consentimento (Art. 18, VIII).
+ *
+ * Revogar não é apagar um registro: é um evento que **propaga**. O campo perde
+ * a base legal, sai dos caminhos de revelação e o gate volta a bloquear o
+ * repositório — exatamente como a LIA vencida. Revogação que só muda um rótulo
+ * na tela é o teatro que este projeto existe para não fazer.
+ */
+function revogarConsentimento<T>(banco: BancoMock, req: Req, campoId: string): Res<T> {
+  const registro = banco.cenario.consentimentos.find((c) => c.campoId === campoId);
+  if (!registro) return erro(404, 'Não encontrado.') as Res<T>;
+  if (registro.estado === 'revogado') {
+    return erro(409, `O consentimento de ${campoId} já está revogado desde ${registro.revogadoEm}.`,
+      'Revogar de novo não é revogação: seria ruído num registro que precisa contar uma história só.') as Res<T>;
+  }
+
+  const motivo = redigir(String((req.body as { motivo?: string } | undefined)?.motivo ?? '')).texto;
+  const campo = banco.cenario.campos.find((c) => c.id === campoId);
+  // O repositório do gate aparece ora nu (`fidelidade`), ora com organização
+  // (`aurora/fidelidade`). Comparar a string inteira faria a propagação falhar
+  // em silêncio — que é o pior modo de uma regra de privacidade falhar.
+  const mesmoRepo = (a: string, b: string) => a.split('/').pop() === b.split('/').pop();
+  const gates = banco.cenario.gates.filter((g) => campo && mesmoRepo(g.repositorio, campo.sistema));
+
+  try {
+    banco.auditAppend({
+      ator: req.ator, atorPapel: req.papel, acao: 'CONSENTIMENTO_REVOGADO',
+      recursoTipo: 'consentimento', recursoId: `${campoId}@${registro.versao}`,
+      justificativa: motivo || undefined, campos: [campoId],
+    });
+  } catch (e) {
+    const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a revogação.';
+    return erro(503, msg, 'Revogação sem registro não é oponível a ninguém.') as Res<T>;
+  }
+
+  registro.estado = 'revogado';
+  registro.revogadoEm = new Date().toISOString();
+  // A consequência sai do mesmo ato: o gate volta a bloquear o repositório do
+  // campo, como já acontece com RIPD pendente.
+  for (const g of gates) { g.conclusao = 'failure'; g.bloqueouMerge = true; }
+
+  return ok({
+    campoId, estado: registro.estado, gatesBloqueados: gates.length,
+  }, 200) as Res<T>;
+}
+
+/** C-08 — o consentimento vigente de um campo, ou `null` se não houver base viva. */
+const consentimentoVigente = (banco: BancoMock, campoId: string) =>
+  banco.cenario.consentimentos.find((c) => c.campoId === campoId && c.estado === 'ativo') ?? null;
 
 /**
  * C-06 — exportação do audit trail.

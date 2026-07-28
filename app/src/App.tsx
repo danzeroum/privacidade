@@ -13,6 +13,7 @@ import T5 from './screens/T5';
 import T6 from './screens/T6';
 import T7 from './screens/T7';
 import T8 from './screens/T8';
+import T9 from './screens/T9';
 
 const TELAS = [
   { rota: '/t1', id: 'T1', nome: 'Painel de governança', grupo: 'Esteira de entrega' },
@@ -23,6 +24,7 @@ const TELAS = [
   { rota: '/t6', id: 'T6', nome: 'Expurgo e auditoria', grupo: 'Operação e prova' },
   { rota: '/t7', id: 'T7', nome: 'Chaves e criptografia', grupo: 'Operação e prova' },
   { rota: '/t8', id: 'T8', nome: 'Editor de LIA', grupo: 'Operação e prova' },
+  { rota: '/t9', id: 'T9', nome: 'Incidentes', grupo: 'Operação e prova' },
 ];
 
 export default function App() {
@@ -142,6 +144,7 @@ function Casca() {
               <Route path="/t6" element={<T6 />} />
               <Route path="/t7" element={<T7 />} />
               <Route path="/t8" element={<T8 />} />
+              <Route path="/t9" element={<T9 />} />
               <Route path="*" element={<Navigate to="/t1" replace />} />
             </Routes>
           )}
