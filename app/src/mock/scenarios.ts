@@ -1,7 +1,30 @@
 import { sha256, hashCpf } from '../lib/sha256';
+import { aplicar } from './decisoes';
+import type { Decisao, DecisaoRegistrada, TabelaId, Valor } from './decisoes';
 import type {
   Achado, Campo, Cenario, Incidente, LinddunItem, Parecer, Maturidade, Risco, Solicitacao, Titular,
 } from './types';
+
+/**
+ * PR 8 — decisão semeada é **aplicação passada da tabela**, não texto escrito à
+ * mão. A saída sai de `aplicar()` com a versão que era vigente na data, e por
+ * isso o `reproduzir()` da semente confere como o de qualquer decisão gravada
+ * pela rota. Redigitar a saída aqui produziria exatamente a prova que este PR
+ * existe para não aceitar.
+ */
+const gravada = (d: Decisao, quando: string): DecisaoRegistrada => ({ ...d, quando });
+
+const decidido = (
+  tabela: TabelaId, entradas: Record<string, Valor | undefined>, versao: number, quando: string,
+): DecisaoRegistrada => gravada(aplicar(tabela, entradas, versao), quando);
+
+/** A D2 aplicada ao risco com o P × I que ele tinha quando foi avaliado. */
+const comD2 = (r: Risco): Risco => ({
+  ...r,
+  decisoes: [decidido('d2', {
+    probabilidade: r.probabilidade, impacto: r.impacto, score: r.probabilidade * r.impacto,
+  }, 1, '2026-06-02T09:15:00Z')],
+});
 
 const DIA = 86_400_000;
 const HORA = 3_600_000;
@@ -46,7 +69,10 @@ const maturidade = (g: number, i: number, c: number, co: number, p: number): Mat
 
 /** Os dez riscos variam de setor apenas nos dois primeiros; o resto é dívida comum. */
 const riscosComuns = (r1: Risco, r2: Risco): Risco[] => [
-  r1, r2,
+  // R1 entra sem decisão de propósito: é o risco que a T5 abre selecionado, e o
+  // estado "nenhuma D2 aplicada" precisa existir na tela como existe no dado.
+  r1, comD2(r2),
+  ...([
   { codigo: 'R3', descricao: 'Transferência internacional sem mecanismo do Art. 33', probabilidade: 2, impacto: 5, dano: 'perda_de_controle', danoTexto: 'Dado sai do país sem SCC nem decisão de adequação', tratamento: 'Contrato DPA + cláusulas-padrão da ANPD', tipo: 'mitigar', esforcoSprints: 0.25, dono: '@juridico-ana', dominio: 'Jurídico', prazo: '08/08', reavaliacao: '08/11', status: 'mitigado' },
   { codigo: 'R4', descricao: 'Retenção além do necessário', probabilidade: 4, impacto: 3, dano: 'perda_de_controle', danoTexto: 'Acúmulo de dado pessoal sem finalidade ativa', tratamento: 'TTL policies + job de expurgo diário', tipo: 'mitigar', esforcoSprints: 1, dono: '@sre-carlos', dominio: 'SRE', prazo: '15/08', reavaliacao: '15/11', status: 'mitigado' },
   { codigo: 'R5', descricao: 'PII em log de produção', probabilidade: 5, impacto: 3, dano: 'perda_de_controle', danoTexto: 'Exposição do titular em qualquer incidente de log', tratamento: 'Middleware de redação + redator no coletor', tipo: 'mitigar', esforcoSprints: 0.5, dono: '@sre-lucas', dominio: 'SRE', prazo: '01/08', reavaliacao: '01/11', status: 'mitigado' },
@@ -55,6 +81,7 @@ const riscosComuns = (r1: Risco, r2: Risco): Risco[] => [
   { codigo: 'R8', descricao: 'Ausência de RLS no banco principal', probabilidade: 2, impacto: 5, dano: 'material', danoTexto: 'Conta comprometida acessa a base inteira', tratamento: 'RLS por tenant + RBAC por finalidade', tipo: 'mitigar', esforcoSprints: 2, dono: '@seg-rita', dominio: 'Segurança', prazo: '29/08', reavaliacao: '29/11', status: 'em_tratamento' },
   { codigo: 'R9', descricao: 'Revogação sem cascata de eliminação', probabilidade: 3, impacto: 4, dano: 'perda_de_controle', danoTexto: 'Titular revoga e o dado permanece nos sistemas a jusante', tratamento: 'Job de eliminação por escopo + webhook a parceiros', tipo: 'mitigar', esforcoSprints: 2, dono: '@eng-maria', dominio: 'Engenharia', prazo: '22/08', reavaliacao: '22/11', status: 'identificado' },
   { codigo: 'R10', descricao: 'Backup sem criptografia gerenciada', probabilidade: 1, impacto: 5, dano: 'perda_de_controle', danoTexto: 'Restauração devolve dado já eliminado', tratamento: 'Habilitar SSE-KMS nos snapshots', tipo: 'mitigar', esforcoSprints: 1, dono: '@sre-carlos', dominio: 'SRE', prazo: '08/08', reavaliacao: '08/11', status: 'mitigado' },
+  ] as Risco[]).map(comD2),
 ];
 
 const expurgoPadrao = (sistema: string, tabelas: [string, ExpurgoMetodo, number][]) => {
@@ -237,12 +264,25 @@ const banco: Cenario = {
       { prioridade: 'P1', descricao: 'Teste de disparate impact no pipeline do modelo', dono: '@ml-joao', prazo: '18/08', concluida: false },
     ],
     triggers: [
-      { codigo: 'T1', categoria: 'dado sensível', critico: true, evidencias: ['CPF interpolado no prompt (credit_model.py:38)'] },
-      { codigo: 'T3', categoria: 'decisão automatizada', critico: true, evidencias: ['/creditos/avaliar retorna aprovado/reprovado'] },
-      { codigo: 'T6', categoria: 'nova tecnologia', critico: false, evidencias: ['dependência openai, modelo gpt-4o'] },
-      { codigo: 'T8', categoria: 'transferência internacional', critico: false, evidencias: ['processamento em us-east-1'] },
+      { codigo: 'T1', evidencias: ['CPF interpolado no prompt (credit_model.py:38)'] },
+      { codigo: 'T3', evidencias: ['/creditos/avaliar retorna aprovado/reprovado'] },
+      { codigo: 'T6', evidencias: ['dependência openai, modelo gpt-4o'] },
+      { codigo: 'T8', evidencias: ['processamento em us-east-1'] },
     ],
+    volumeTitulares: 1_200_000,
     status: 'em_revisao',
+    // Gravada em março, quando d1@1 era a vigente. A publicação de d1@2 em julho
+    // não mexe nesta linha: a decisão continua dizendo por qual regra foi tomada,
+    // e é a T3 que mostra o que a versão de hoje responderia.
+    decisoes: [
+      decidido('d1', {
+        categoria: 'pessoal', volumeTitulares: 1_200_000,
+        decisaoAutomatizada: true, transferenciaInternacional: true,
+      }, 1, '2026-03-12T14:02:00Z'),
+      decidido('d3', {
+        gatilhos: ['T1', 'T3', 'T6', 'T8'], gatilhosCriticos: 2, gatilhosTotal: 4,
+      }, 1, '2026-03-12T14:02:10Z'),
+    ],
     linddun: LINDDUN_BASE.map((l) => ({ ...l })),
   }],
   riscos: riscosComuns(
@@ -397,10 +437,11 @@ const varejo: Cenario = {
       { prioridade: 'P1', descricao: 'Auditar quem tem acesso ao dataset receitas', dono: '@seg-rita', prazo: '20/08', concluida: false },
     ],
     triggers: [
-      { codigo: 'T1', categoria: 'dado sensível', critico: true, evidencias: ['medicamento_controlado usado fora da finalidade de saúde'] },
-      { codigo: 'T7', categoria: 'cruzamento de bases', critico: false, evidencias: ['join entre farmacia.receitas e recomendacao.eventos'] },
-      { codigo: 'T5', categoria: 'larga escala', critico: false, evidencias: ['2,4 milhões de membros no programa'] },
+      { codigo: 'T1', evidencias: ['medicamento_controlado usado fora da finalidade de saúde'] },
+      { codigo: 'T7', evidencias: ['join entre farmacia.receitas e recomendacao.eventos'] },
+      { codigo: 'T5', evidencias: ['2,4 milhões de membros no programa'] },
     ],
+    volumeTitulares: 2_400_000,
     status: 'em_revisao',
     linddun: LINDDUN_BASE.map((l) => ({ ...l, ativo: l.chave === 'location' ? true : l.ativo })),
   }],
@@ -544,12 +585,22 @@ const midia: Cenario = {
       { prioridade: 'P1', descricao: 'Teste de reidentificação por combinação de segmentos', dono: '@ml-nina', prazo: '16/08', concluida: false },
     ],
     triggers: [
-      { codigo: 'T1', categoria: 'dado sensível', critico: true, evidencias: ['segmento inferido reconstrói afinidade sensível'] },
-      { codigo: 'T2', categoria: 'menores', critico: true, evidencias: ['perfil_infantil presente na audiência'] },
-      { codigo: 'T4', categoria: 'monitoramento', critico: true, evidencias: ['telemetria contínua do player'] },
-      { codigo: 'T8', categoria: 'transferência internacional', critico: false, evidencias: ['Google Ad Manager em us-east'] },
+      { codigo: 'T1', evidencias: ['segmento inferido reconstrói afinidade sensível'] },
+      { codigo: 'T2', evidencias: ['perfil_infantil presente na audiência'] },
+      { codigo: 'T4', evidencias: ['telemetria contínua do player'] },
+      { codigo: 'T8', evidencias: ['Google Ad Manager em us-east'] },
     ],
+    volumeTitulares: 8_900_000,
     status: 'em_revisao',
+    decisoes: [
+      decidido('d1', {
+        categoria: 'sensivel', volumeTitulares: 8_900_000,
+        decisaoAutomatizada: false, transferenciaInternacional: true,
+      }, 2, '2026-07-14T10:30:00Z'),
+      decidido('d3', {
+        gatilhos: ['T1', 'T2', 'T4', 'T8'], gatilhosCriticos: 3, gatilhosTotal: 4,
+      }, 1, '2026-07-14T10:30:08Z'),
+    ],
     linddun: LINDDUN_BASE.map((l) => ({ ...l, ativo: true })),
   }],
   riscos: riscosComuns(

@@ -2,8 +2,11 @@ import { useState } from 'react';
 import { Cabecalho, Cartao, Didatico, Nota, Permitido, Pill, Recusa, Tabela } from '../ui/primitivos';
 import { useSessao, nomeDoPapel } from '../store/sessao';
 import { BASES_PARA_SENSIVEL } from '../mock/types';
+import {
+  aplicar, gatilhoCritico, reproduzir, rotuloDoGatilho, ultimaDecisao, vigenteDe,
+} from '../mock/decisoes';
 import { sha256 } from '../lib/sha256';
-import type { BaseLegal, Campo } from '../mock/types';
+import type { BaseLegal, Campo, DecisaoRegistrada, Ripd, TabelaId } from '../mock/types';
 
 export default function T3() {
   const banco = useSessao((s) => s.banco);
@@ -125,8 +128,12 @@ export default function T3() {
               : 'RIPD aprovado. A plataforma reposta o status check e o merge fica liberado.'}
           </p>
           <div className="row" style={{ marginTop: 9 }}>
+            {/* PR 8 — rótulo e criticidade vêm do catálogo de gatilhos, que é a
+                entrada da D3. O cenário só diz qual acionou e com que evidência. */}
             {ripd.triggers.map((t) => (
-              <Pill key={t.codigo} tom={t.critico ? 'crit' : 'warn'}>{t.codigo} · {t.categoria}</Pill>
+              <Pill key={t.codigo} tom={gatilhoCritico(t.codigo) ? 'crit' : 'warn'}>
+                {t.codigo} · {rotuloDoGatilho(t.codigo)}
+              </Pill>
             ))}
             <span className="hash">{ripd.codigo} · {ripd.headSha}</span>
           </div>
@@ -286,6 +293,8 @@ export default function T3() {
         </Cartao>
 
         <div className="stack">
+          <Rito ripd={ripd} />
+
           <Cartao titulo="Checklist LINDDUN" hint="ativar gera mitigação">
             {ripd.linddun.map((l) => (
               <label className="ck" key={l.chave} style={{ cursor: 'pointer' }}>
@@ -327,6 +336,102 @@ export default function T3() {
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * PR 8 — o rito, explicado em uma frase por tabela.
+ *
+ * A frase é **derivada** da regra que casou, não escrita ao lado dela: se a
+ * tabela mudar, o texto muda junto. Foi por isso que a explicação não virou um
+ * campo `porque` em cada linha da tabela — campo de texto ao lado de uma regra
+ * é a próxima divergência esperando acontecer, do mesmo jeito que o rótulo do
+ * gatilho repetido em três cenários era.
+ *
+ * Três estados, e o terceiro é o que este PR existe para mostrar: decisão
+ * gravada com uma versão que já não é a vigente. Ela não se atualiza sozinha, e
+ * a tela não finge que sim — mostra o que a versão de hoje responderia às mesmas
+ * entradas, marcado como prévia, e deixa reaplicar como ato registrado.
+ */
+function Rito({ ripd }: { ripd: Ripd }) {
+  const chamar = useSessao((s) => s.chamar);
+  const avisar = useSessao((s) => s.avisar);
+
+  const aplicarNoRipd = (tabela: TabelaId) => {
+    const res = chamar<DecisaoRegistrada>(
+      { metodo: 'POST', caminho: `/v1/dmn/${tabela}/aplicar`, body: { id: ripd.id } },
+      `dmn-${tabela}`,
+    );
+    if (res.status === 200) {
+      avisar('ok', `${tabela.toUpperCase()}@${res.body.versao} aplicada e registrada.`,
+        'A decisão anterior continua no artefato como foi tomada — reaplicar grava uma nova, não reescreve a antiga.');
+      useSessao.setState((s) => ({ versao: s.versao + 1 }));
+    }
+  };
+
+  return (
+    <Cartao titulo="Rito aplicado" hint="D1 · complexidade e alçada — D3 · exige RIPD">
+      <Decidido tabela="d1" registro={ultimaDecisao(ripd.decisoes, 'd1')} aoAplicar={() => aplicarNoRipd('d1')} />
+      <Decidido tabela="d3" registro={ultimaDecisao(ripd.decisoes, 'd3')} aoAplicar={() => aplicarNoRipd('d3')} />
+      <Recusa ancora="dmn-d1" />
+      <Recusa ancora="dmn-d3" />
+      <Nota>
+        As entradas de cada decisão são lidas do artefato — categoria vem do catálogo, os gatilhos vêm da
+        triagem —, nunca digitadas aqui. É o que faz a decisão ser reproduzível meses depois em vez de ser
+        apenas declarada.
+      </Nota>
+    </Cartao>
+  );
+}
+
+function Decidido({ tabela, registro, aoAplicar }: {
+  tabela: TabelaId; registro: DecisaoRegistrada | null; aoAplicar: () => void;
+}) {
+  const rotulo = tabela.toUpperCase();
+  const vigente = vigenteDe(tabela).versao;
+
+  if (!registro) {
+    return (
+      <div style={{ paddingBottom: 10, borderBottom: '1px solid var(--line)', marginBottom: 10 }}>
+        <Nota>Nenhuma decisão da {rotulo} gravada para este RIPD.</Nota>
+        <Permitido acao="escrever" alternativa={null}>
+          <button className="btn" style={{ marginTop: 8 }} onClick={aoAplicar}>
+            Aplicar {rotulo} ({tabela}@{vigente})
+          </button>
+        </Permitido>
+      </div>
+    );
+  }
+
+  const conferencia = reproduzir(registro);
+  const desatualizada = registro.versao !== vigente;
+  // Mesmas entradas, versão de hoje: isola o efeito da troca de versão do
+  // efeito de o artefato ter mudado desde então.
+  const hoje = desatualizada ? aplicar(tabela, registro.entradas) : null;
+
+  return (
+    <div style={{ paddingBottom: 10, borderBottom: '1px solid var(--line)', marginBottom: 10 }}>
+      <p style={{ margin: 0, fontSize: 12.5 }}>{registro.frase}</p>
+      <div className="row" style={{ marginTop: 6, gap: 8 }}>
+        <span className="hash">{tabela}@{registro.versao}</span>
+        <span className="hint">
+          gravada em {new Date(registro.quando).toLocaleDateString('pt-BR')} ·
+          {' '}{conferencia.confere ? 'reproduz a mesma saída' : `não reproduz: ${conferencia.motivo}`}
+        </span>
+      </div>
+      {hoje && (
+        <Nota tom="warn">
+          A versão vigente é <span className="mono">{tabela}@{vigente}</span> — {vigenteDe(tabela).nota} Para
+          estas mesmas entradas ela responderia: <b>{hoje.frase}</b>. Isto é prévia, não decisão: a gravada
+          acima continua valendo como foi tomada.
+          <Permitido acao="escrever" alternativa={null}>
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className="btn" onClick={aoAplicar}>Reaplicar com {tabela}@{vigente}</button>
+            </div>
+          </Permitido>
+        </Nota>
+      )}
+    </div>
   );
 }
 

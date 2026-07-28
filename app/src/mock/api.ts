@@ -3,6 +3,10 @@ import { pode } from './permissoes';
 import { POLITICA_PADRAO, politicaDe } from './politicas';
 import { ARTEFATOS, estadosDe, motivoDaRecusa, transicaoPermitida } from './estados';
 import type { Artefato, EstadoDe } from './estados';
+import {
+  CATEGORIAS, TABELAS, TABELAS_IDS, aplicar, gatilhoCritico, rotuloDoGatilho, ultimaDecisao, vigenteDe,
+} from './decisoes';
+import type { DecisaoRegistrada, TabelaId, Valor } from './decisoes';
 import { redigir } from '../lib/redator';
 import { sha256 } from '../lib/sha256';
 import { BASES_PARA_SENSIVEL } from './types';
@@ -545,6 +549,25 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
       return transitar<T>(banco, req, alvo, para);
     }
 
+    /**
+     * PR 8 — as três tabelas de decisão (`MAPA-PROCESSOS.md §3`).
+     *
+     * Raiz própria e não `decisoes`, que já é a decisão automatizada do Art. 20
+     * — duas coisas diferentes com o mesmo nome na URL é como um oráculo nasce
+     * por descuido.
+     */
+    case 'GET dmn':
+      return ok(catalogoDmn()) as Res<T>;
+
+    case 'POST dmn': {
+      const tabela = partes[1] as TabelaId;
+      if (!TABELAS_IDS.includes(tabela)) {
+        return erro(404, `Tabela de decisão desconhecida: ${partes[1]}.`) as Res<T>;
+      }
+      if (partes[2] !== 'aplicar') break;
+      return aplicarTabela<T>(banco, req, tabela, String(body.id ?? ''));
+    }
+
     // ── C-07 — incidente de segurança (Art. 48) ───────────────────────────
     case 'GET incidentes':
       return ok(banco.cenario.incidentes) as Res<T>;
@@ -898,6 +921,125 @@ function alvoDaTransicao(banco: BancoMock, artefato: Artefato, id: string, body:
 }
 
 /**
+ * PR 8 — D1, D2 e D3 aplicadas.
+ *
+ * Aqui mora a **validação**; a verificação está em `decisoes.ts`. A divisão tem
+ * consequência prática: quando uma decisão sai errada, o 422 diz que a entrada
+ * não podia vir daquele artefato, e não que a tabela está torta.
+ *
+ * A regra que sustenta a reprodutibilidade é uma só: **as entradas são lidas do
+ * artefato, nunca digitadas**. Entrada digitada faz a decisão descrever um
+ * mundo que o catálogo desconhece — o mesmo problema do escopo do incidente no
+ * C-07 — e transforma "reproduzível" em promessa sem lastro.
+ */
+function catalogoDmn() {
+  return {
+    tabelas: TABELAS_IDS.map((id) => {
+      const t = TABELAS[id];
+      return {
+        id: t.id, titulo: t.titulo, pergunta: t.pergunta, sobre: t.sobre,
+        vigente: vigenteDe(id).versao,
+        versoes: t.versoes.map((v) => ({
+          versao: v.versao, vigenciaInicio: v.vigenciaInicio, nota: v.nota, regras: v.regras.length,
+        })),
+      };
+    }),
+  };
+}
+
+/** A categoria mais restritiva entre os campos do artefato — nunca a média. */
+const categoriaMaisRestritiva = (campos: Campo[]): string | undefined =>
+  campos.reduce<string | undefined>((pior, c) => (
+    pior === undefined || CATEGORIAS.indexOf(c.categoria) > CATEGORIAS.indexOf(pior) ? c.categoria : pior
+  ), undefined);
+
+type AlvoDeDecisao = {
+  rotulo: string;
+  entradas: Record<string, Valor | undefined>;
+  gravar: (d: DecisaoRegistrada) => void;
+};
+
+function alvoDaDecisao(banco: BancoMock, tabela: TabelaId, id: string): AlvoDeDecisao | null {
+  const c = banco.cenario;
+
+  if (tabela === 'd1' || tabela === 'd3') {
+    const ripd = c.ripds.find((r) => r.id === id || r.codigo === id);
+    if (!ripd) return null;
+    const campos = ripd.camposIds
+      .map((cid) => c.campos.find((x) => x.id === cid))
+      .filter((x): x is Campo => Boolean(x));
+    const gatilhos = ripd.triggers.map((t) => t.codigo);
+
+    if (tabela === 'd1') {
+      return {
+        rotulo: ripd.codigo,
+        entradas: {
+          categoria: categoriaMaisRestritiva(campos),
+          volumeTitulares: ripd.volumeTitulares,
+          // Decisão automatizada e remessa internacional não são digitadas: uma
+          // sai da triagem, a outra do inventário de compartilhamentos.
+          decisaoAutomatizada: gatilhos.includes('T3'),
+          transferenciaInternacional: campos.some((x) => x.compartilhamentos.some((s) => s.internacional)),
+        },
+        gravar: (d) => { ripd.decisoes = [...(ripd.decisoes ?? []), d]; },
+      };
+    }
+    return {
+      rotulo: ripd.codigo,
+      entradas: {
+        gatilhos,
+        gatilhosCriticos: gatilhos.filter(gatilhoCritico).length,
+        gatilhosTotal: gatilhos.length,
+      },
+      gravar: (d) => { ripd.decisoes = [...(ripd.decisoes ?? []), d]; },
+    };
+  }
+
+  const risco = c.riscos.find((r) => r.codigo === id);
+  if (!risco) return null;
+  return {
+    rotulo: risco.codigo,
+    entradas: {
+      probabilidade: risco.probabilidade,
+      impacto: risco.impacto,
+      score: risco.probabilidade * risco.impacto,
+    },
+    gravar: (d) => { risco.decisoes = [...(risco.decisoes ?? []), d]; },
+  };
+}
+
+function aplicarTabela<T>(banco: BancoMock, req: Req, tabela: TabelaId, id: string): Res<T> {
+  const body = (req.body ?? {}) as Record<string, any>;
+  if (body.entradas !== undefined || body.saida !== undefined || body.versao !== undefined) {
+    return erro(422, 'As entradas de uma decisão são lidas do artefato, nunca enviadas no pedido.',
+      'Decisão com entrada digitada não é reproduzível: ela descreve o que quem clicou disse, não o que o artefato é.') as Res<T>;
+  }
+
+  const alvo = alvoDaDecisao(banco, tabela, id);
+  if (!alvo) return erro(404, 'Não encontrado.') as Res<T>;
+
+  // A versão aplicada é sempre a vigente. Pinar versão antiga por pedido seria
+  // dar a quem clica a escolha de qual regra o julga.
+  const decisao = aplicar(tabela, alvo.entradas);
+
+  try {
+    banco.auditAppend({
+      ator: req.ator, atorPapel: req.papel, acao: 'DECISAO_APLICADA',
+      recursoTipo: tabela, recursoId: alvo.rotulo,
+      justificativa: decisao.frase,
+      campos: [`${tabela}@${decisao.versao}`, ...Object.entries(decisao.saida).map(([k, v]) => `${k}=${v}`)],
+    });
+  } catch (e) {
+    const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a decisão.';
+    return erro(503, msg, 'Sem registro não há decisão: a versão aplicada precisa estar selada antes de valer.') as Res<T>;
+  }
+
+  const registrada: DecisaoRegistrada = { ...decisao, quando: new Date().toISOString() };
+  alvo.gravar(registrada);
+  return ok(registrada) as Res<T>;
+}
+
+/**
  * C-07 — incidente de segurança (Art. 48).
  *
  * As cinco funções abaixo compartilham uma disciplina: **a sequência é
@@ -1240,7 +1382,12 @@ export function renderRipd(banco: BancoMock, ripdId: string): string {
 
 | Trigger | Critério | Crítico | Evidência |
 |---|---|---|---|
-${r.triggers.map((t) => `| ${t.codigo} | ${t.categoria} | ${t.critico ? '✅' : '⚠️'} | ${t.evidencias.join('; ')} |`).join('\n')}
+${r.triggers.map((t) => `| ${t.codigo} | ${rotuloDoGatilho(t.codigo)} | ${gatilhoCritico(t.codigo) ? '✅' : '⚠️'} | ${t.evidencias.join('; ')} |`).join('\n')}
+
+## 1.1 Rito aplicado
+
+${[ultimaDecisao(r.decisoes, 'd1'), ultimaDecisao(r.decisoes, 'd3')].filter(Boolean).map((d) => `- ${d!.frase} _(${d!.tabela}@${d!.versao})_`).join('\n')
+  || '- Nenhuma tabela de decisão aplicada a este RIPD.'}
 
 ## 2. Contexto e escopo
 

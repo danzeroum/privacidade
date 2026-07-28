@@ -100,6 +100,20 @@ export const POLITICAS: PoliticaRota[] = [
     nota: 'Mover artefato entre estados. A sequência é da tabela de mock/estados.ts; o conteúdo exigido, da rota.',
   },
 
+  // ── Tabelas de decisão (PR 8 · DMN) ───────────────────────────────────────
+  {
+    metodo: 'GET', caminho: /^dmn(\/.*)?$/,
+    tipo: 'leitura', foraDeEscopo: '403',
+    nota: 'Catálogo de D1, D2 e D3 com todas as versões publicadas. Leitura ampla de propósito: '
+      + 'regra que decidiu e não pode ser lida por quem audita é regra que não se defende.',
+  },
+  {
+    metodo: 'POST', caminho: /^dmn\/[^/]+\/aplicar$/,
+    tipo: 'escrita', foraDeEscopo: '403',
+    nota: 'Aplicar a tabela grava a versão e as entradas antes de responder — por isso é escrita, '
+      + 'mesmo a decisão sendo derivada do artefato.',
+  },
+
   // ── Incidentes (C-07 · Art. 48) ───────────────────────────────────────────
   {
     metodo: 'GET', caminho: /^incidentes(\/.*)?$/,
