@@ -1,0 +1,523 @@
+import { sha256, hashCpf } from '../lib/sha256';
+import type {
+  Campo, Cenario, LinddunItem, Maturidade, Risco, Solicitacao, Titular,
+} from './types';
+
+const DIA = 86_400_000;
+const HORA = 3_600_000;
+
+/**
+ * Os seis rótulos LINDDUN que o template `.privacy/threat-model.md` desta
+ * organização usa. Não são as sete categorias canônicas — a equivalência fica
+ * explícita ao lado de cada um para que o modelo continue comparável fora de casa.
+ */
+export const LINDDUN_BASE: LinddunItem[] = [
+  { chave: 'location', rotulo: 'Location', canonico: 'Identifiability por geolocalização', ativo: false,
+    mitigacao: 'Truncar coordenadas para o centroide do município antes de qualquer persistência.' },
+  { chave: 'inference', rotulo: 'Inference', canonico: 'Detectability', ativo: true,
+    mitigacao: 'Remover features proxy (CEP, nome da mãe, canal de atendimento) do conjunto de treino.' },
+  { chave: 'disclosure', rotulo: 'Disclosure', canonico: 'Disclosure of information', ativo: true,
+    mitigacao: 'DTO por escopo com allowlist de campos; nenhuma entidade do ORM é serializada direta.' },
+  { chave: 'discrimination', rotulo: 'Discrimination', canonico: 'Non-compliance (Art. 6º, IX)', ativo: true,
+    mitigacao: 'Teste de disparate impact com limiar 0,8–1,2 bloqueando o release do modelo.' },
+  { chave: 'unauthorized', rotulo: 'Unauthorized', canonico: 'Linkability + Identifiability', ativo: true,
+    mitigacao: 'Autorização por objeto com checagem de posse; 404 uniforme em vez de 403.' },
+  { chave: 'nonrepudiation', rotulo: 'Non-repudiation', canonico: 'Non-repudiation', ativo: true,
+    mitigacao: 'audit_log append-only com hash encadeado e finalidade obrigatória por acesso.' },
+];
+
+const RACI = [
+  { processo: 'Definição de base legal', letras: { DPO: 'A', Jurídico: 'C', Segurança: 'I', Engenharia: 'I', Produto: 'C', Dados: 'I' } },
+  { processo: 'LINDDUN / threat model', letras: { DPO: 'C', Jurídico: 'I', Segurança: 'C', Engenharia: 'A', Produto: 'I', Dados: 'I' } },
+  { processo: 'LIA', letras: { DPO: 'A', Jurídico: 'C', Segurança: 'I', Engenharia: 'I', Produto: 'C', Dados: 'I' } },
+  { processo: 'SCC / DPA com terceiros', letras: { DPO: 'C', Jurídico: 'A', Segurança: 'C', Engenharia: 'I', Produto: 'I', Dados: 'I' } },
+  { processo: 'Controle técnico', letras: { DPO: 'I', Jurídico: 'I', Segurança: 'C', Engenharia: 'A', Produto: 'I', Dados: 'C' } },
+  { processo: 'Resposta a incidente', letras: { DPO: 'C', Jurídico: 'C', Segurança: 'A', Engenharia: 'C', Produto: 'I', Dados: 'I' } },
+  { processo: 'Atendimento a titular', letras: { DPO: 'A', Jurídico: 'I', Segurança: 'I', Engenharia: 'C', Produto: 'I', Dados: 'C' } },
+] as Cenario['raci'];
+
+const maturidade = (g: number, i: number, c: number, co: number, p: number): Maturidade[] => [
+  { dominio: 'Governar', score: g, anterior: g - 1, evidencias: ['RACI publicado e revisado no comitê', 'Ata mensal com decisões rastreadas'] },
+  { dominio: 'Identificar', score: i, anterior: i - 1, evidencias: ['ROPA gerado do catálogo', 'Linhagem registrada nos pipelines'] },
+  { dominio: 'Controlar', score: c, anterior: c, evidencias: ['TTL definido na maioria dos datasets', 'RLS ainda pendente no banco core'] },
+  { dominio: 'Comunicar', score: co, anterior: co, evidencias: ['Portal de direitos em produção', 'Aviso de privacidade sem versionamento'] },
+  { dominio: 'Proteger', score: p, anterior: p - 1, evidencias: ['Envelope encryption com DEK por registro', 'Rotação trimestral automatizada'] },
+];
+
+/** Os dez riscos variam de setor apenas nos dois primeiros; o resto é dívida comum. */
+const riscosComuns = (r1: Risco, r2: Risco): Risco[] => [
+  r1, r2,
+  { codigo: 'R3', descricao: 'Transferência internacional sem mecanismo do Art. 33', probabilidade: 2, impacto: 5, dano: 'perda_de_controle', danoTexto: 'Dado sai do país sem SCC nem decisão de adequação', tratamento: 'Contrato DPA + cláusulas-padrão da ANPD', tipo: 'mitigar', esforcoSprints: 0.25, dono: '@juridico-ana', dominio: 'Jurídico', prazo: '08/08', reavaliacao: '08/11', status: 'mitigado' },
+  { codigo: 'R4', descricao: 'Retenção além do necessário', probabilidade: 4, impacto: 3, dano: 'perda_de_controle', danoTexto: 'Acúmulo de dado pessoal sem finalidade ativa', tratamento: 'TTL policies + job de expurgo diário', tipo: 'mitigar', esforcoSprints: 1, dono: '@sre-carlos', dominio: 'SRE', prazo: '15/08', reavaliacao: '15/11', status: 'mitigado' },
+  { codigo: 'R5', descricao: 'PII em log de produção', probabilidade: 5, impacto: 3, dano: 'perda_de_controle', danoTexto: 'Exposição do titular em qualquer incidente de log', tratamento: 'Middleware de redação + redator no coletor', tipo: 'mitigar', esforcoSprints: 0.5, dono: '@sre-lucas', dominio: 'SRE', prazo: '01/08', reavaliacao: '01/11', status: 'mitigado' },
+  { codigo: 'R6', descricao: 'Tracking de terceiro ligado por padrão', probabilidade: 3, impacto: 4, dano: 'perda_de_controle', danoTexto: 'Rastreamento sem consentimento livre e informado', tratamento: 'Feature flag default false + gate no CI', tipo: 'mitigar', esforcoSprints: 1, dono: '@eng-pedro', dominio: 'Engenharia', prazo: '22/08', reavaliacao: '22/11', status: 'em_tratamento' },
+  { codigo: 'R7', descricao: 'Legítimo interesse sem LIA documentada', probabilidade: 4, impacto: 2, dano: 'perda_de_controle', danoTexto: 'Tratamento sem balanceamento demonstrável', tratamento: 'Preencher e assinar a LIA vinculada', tipo: 'mitigar', esforcoSprints: 0.5, dono: '@dpo-marcela', dominio: 'DPO', prazo: '15/08', reavaliacao: '15/11', status: 'mitigado' },
+  { codigo: 'R8', descricao: 'Ausência de RLS no banco principal', probabilidade: 2, impacto: 5, dano: 'material', danoTexto: 'Conta comprometida acessa a base inteira', tratamento: 'RLS por tenant + RBAC por finalidade', tipo: 'mitigar', esforcoSprints: 2, dono: '@seg-rita', dominio: 'Segurança', prazo: '29/08', reavaliacao: '29/11', status: 'em_tratamento' },
+  { codigo: 'R9', descricao: 'Revogação sem cascata de eliminação', probabilidade: 3, impacto: 4, dano: 'perda_de_controle', danoTexto: 'Titular revoga e o dado permanece nos sistemas a jusante', tratamento: 'Job de eliminação por escopo + webhook a parceiros', tipo: 'mitigar', esforcoSprints: 2, dono: '@eng-maria', dominio: 'Engenharia', prazo: '22/08', reavaliacao: '22/11', status: 'aberto' },
+  { codigo: 'R10', descricao: 'Backup sem criptografia gerenciada', probabilidade: 1, impacto: 5, dano: 'perda_de_controle', danoTexto: 'Restauração devolve dado já eliminado', tratamento: 'Habilitar SSE-KMS nos snapshots', tipo: 'mitigar', esforcoSprints: 1, dono: '@sre-carlos', dominio: 'SRE', prazo: '08/08', reavaliacao: '08/11', status: 'mitigado' },
+];
+
+const expurgoPadrao = (sistema: string, tabelas: [string, ExpurgoMetodo, number][]) => {
+  const entradas = tabelas.map(([tabela, metodo, registros], i) => ({
+    sistema, tabela, metodo, registros,
+    hashPre: sha256(`${sistema}:${tabela}:pre:${i}`).slice(0, 16),
+    hashPos: sha256(`${sistema}:${tabela}:pos:${i}`).slice(0, 16),
+    verificado: i < tabelas.length - 1,
+  }));
+  return entradas;
+};
+type ExpurgoMetodo = 'hard_delete' | 'crypto_shredding' | 'anonimizacao' | 'compactacao_log';
+
+const metricas = (ropa: number, sla: number, logs: number, ripd: number): Cenario['metricas'] => [
+  { chave: 'ropa', rotulo: 'Cobertura do ROPA', valor: ropa, anterior: ropa - 7.1, unidade: 'percentual', meta: 90, melhorQuandoSobe: true, serie: [ropa - 14, ropa - 11, ropa - 7.1, ropa - 3, ropa] },
+  { chave: 'sla', rotulo: 'SLA médio de titulares', valor: sla, anterior: sla + 7.5, unidade: 'horas', meta: 120, melhorQuandoSobe: false, serie: [sla + 18, sla + 12, sla + 7.5, sla + 2, sla] },
+  { chave: 'logs', rotulo: 'Serviços com log sem PII', valor: logs, anterior: logs - 4, unidade: 'percentual', meta: 95, melhorQuandoSobe: true, serie: [logs - 12, logs - 9, logs - 4, logs - 1, logs] },
+  { chave: 'ripd', rotulo: 'RIPD pendentes', valor: ripd, anterior: ripd + 3, unidade: 'contagem', meta: 5, melhorQuandoSobe: false, serie: [ripd + 5, ripd + 4, ripd + 3, ripd + 1, ripd] },
+];
+
+const solicitacoesPadrao = (titularIds: string[], sistemas: string[]): Solicitacao[] => {
+  const agora = Date.now();
+  return [
+    { id: 's1', protocolo: '2026-0731', titularId: titularIds[0], titularPseudonimo: 'hmac:9f4c…a71b', direito: 'acesso', status: 'em_analise', nivelVerificacao: 2, sistemas, recebidaEm: '18/07', prazoLimiteMs: agora + 3 * DIA + 4 * HORA, metaInternaMs: agora - 6 * HORA,
+      mensagens: [
+        { remetente: 'titular', corpo: 'Quero saber quais empresas receberam meus dados e por qual finalidade.', quando: '18/07 14:02' },
+        { remetente: 'dpo', corpo: 'Recebido. Estou reunindo a linhagem completa; retorno até 31/07 com a relação de destinatários.', quando: '19/07 09:40' },
+      ] },
+    { id: 's2', protocolo: '2026-0730', titularId: titularIds[1], titularPseudonimo: 'hmac:3b81…cc02', direito: 'eliminacao', status: 'em_analise', nivelVerificacao: 3, sistemas: [sistemas[0]], recebidaEm: '14/07', prazoLimiteMs: agora + 19 * HORA, metaInternaMs: agora - 2 * DIA, mensagens: [] },
+    { id: 's3', protocolo: '2026-0729', titularId: titularIds[2], titularPseudonimo: 'hmac:d20e…8f13', direito: 'revisao_decisao', status: 'aguardando_titular', nivelVerificacao: 2, sistemas: [sistemas[0]], recebidaEm: '26/07', prazoLimiteMs: agora + 3 * DIA, metaInternaMs: agora + 2 * DIA, mensagens: [] },
+    { id: 's4', protocolo: '2026-0721', titularId: titularIds[0], titularPseudonimo: 'hmac:9f4c…a71b', direito: 'portabilidade', status: 'concluida', nivelVerificacao: 2, sistemas, recebidaEm: '08/07', prazoLimiteMs: agora - 5 * DIA, metaInternaMs: agora - 9 * DIA, concluidaEm: '20/07', mensagens: [] },
+    { id: 's5', protocolo: '2026-0718', titularId: titularIds[1], titularPseudonimo: 'hmac:3b81…cc02', direito: 'correcao', status: 'concluida', nivelVerificacao: 2, sistemas: [sistemas[0]], recebidaEm: '03/07', prazoLimiteMs: agora - 10 * DIA, metaInternaMs: agora - 14 * DIA, concluidaEm: '05/07', mensagens: [] },
+  ];
+};
+
+const titular = (
+  id: string, cpf: string, nome: string, email: string,
+  extras: { chave: string; rotulo: string; grupo: string; valor: string; mascara: string; baseLegal: Titular['campos'][number]['baseLegal'] }[],
+  sensiveis: { chave: string; rotulo: string; grupo: string; baseLegal: Titular['campos'][number]['baseLegal'] }[],
+  compart: Titular['compartilhamentos'],
+  decisao?: Titular['decisao'],
+): Titular => ({
+  id,
+  cpfHash: hashCpf(cpf),
+  segredos: { cpf, nome, email, ...Object.fromEntries(extras.map((e) => [e.chave, e.valor])) },
+  campos: [
+    { chave: 'nome', rotulo: 'Nome', grupo: 'Identificação', sensivel: false, mascara: '•••••• •••••••', baseLegal: 'execucao_contrato' },
+    { chave: 'cpf', rotulo: 'CPF', grupo: 'Identificação', sensivel: false, mascara: '•••.•••.•••-••', baseLegal: 'execucao_contrato' },
+    { chave: 'email', rotulo: 'E-mail', grupo: 'Identificação', sensivel: false, mascara: '•••••@••••••.•••', baseLegal: 'execucao_contrato' },
+    ...extras.map((e) => ({ chave: e.chave, rotulo: e.rotulo, grupo: e.grupo, sensivel: false, mascara: e.mascara, baseLegal: e.baseLegal })),
+    ...sensiveis.map((s) => ({ chave: s.chave, rotulo: s.rotulo, grupo: s.grupo, sensivel: true, mascara: '🔒 não revelável', baseLegal: s.baseLegal })),
+  ],
+  compartilhamentos: compart,
+  decisao,
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CENÁRIO 1 — Banco: crédito com IA
+// ─────────────────────────────────────────────────────────────────────────────
+
+const camposBanco: Campo[] = [
+  { id: 'b-cpf', sistema: 'credit-scoring', dataset: 'clientes', nome: 'cpf', tipoArmazenado: 'hash', categoria: 'pessoal', sensivel: false, finalidade: 'Identificação para emissão de nota fiscal', baseLegal: 'execucao_contrato', retencao: '5 anos', retencaoDias: 1825, origem: 'formulário web', compartilhamentos: [],
+    linhagem: [{ etapa: 'Formulário', detalhe: 'coleta com máscara' }, { etapa: 'API', detalhe: 'POST, nunca na URL' }, { etapa: 'PostgreSQL', detalhe: 'hash SHA-256 + sal' }, { etapa: 'Expurgo', detalhe: '5 anos, hash pré/pós' }] },
+  { id: 'b-renda', sistema: 'credit-scoring', dataset: 'clientes', nome: 'renda', tipoArmazenado: 'criptografado', categoria: 'pessoal', sensivel: false, finalidade: 'Análise de capacidade de pagamento', baseLegal: 'execucao_contrato', retencao: '2 anos', retencaoDias: 730, origem: 'formulário web', compartilhamentos: [],
+    linhagem: [{ etapa: 'Formulário', detalhe: 'campo obrigatório' }, { etapa: 'API', detalhe: 'DTO por escopo' }, { etapa: 'PostgreSQL', detalhe: 'envelope encryption' }, { etapa: 'Expurgo', detalhe: '2 anos' }] },
+  { id: 'b-score', sistema: 'credit-scoring', dataset: 'clientes', nome: 'score_serasa', tipoArmazenado: 'criptografado', categoria: 'pessoal', sensivel: false, finalidade: 'Risco de inadimplência', baseLegal: 'protecao_credito', retencao: '90 dias', retencaoDias: 90, origem: 'API Serasa',
+    compartilhamentos: [{ destino: 'Serasa', finalidade: 'Consulta de score', internacional: false, mecanismo: 'nao_aplicavel' }],
+    linhagem: [{ etapa: 'Serasa', detalhe: 'consulta autorizada', externo: true }, { etapa: 'API', detalhe: 'cache de 24h' }, { etapa: 'PostgreSQL', detalhe: 'envelope encryption' }, { etapa: 'Expurgo', detalhe: '90 dias' }] },
+  { id: 'b-hist', sistema: 'credit-scoring', dataset: 'clientes', nome: 'historico_compras', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, finalidade: 'Enriquecimento do modelo de scoring', baseLegal: 'legitimo_interesse', liaCodigo: 'LIA-SCORING-001', retencao: '180 dias', retencaoDias: 180, origem: 'eventos de transação',
+    compartilhamentos: [{ destino: 'OpenAI', finalidade: 'Enriquecimento textual do modelo', internacional: true, pais: 'EUA', mecanismo: 'clausulas_padrao_anpd', evidencia: 'dpa/openai-scc.pdf' }],
+    linhagem: [{ etapa: 'Transações', detalhe: 'eventos agregados' }, { etapa: 'Pseudonimizador', detalhe: 'HMAC + KMS' }, { etapa: 'OpenAI', detalhe: 'EUA · SCC ANPD', externo: true }, { etapa: 'Decisão', detalhe: 'SHAP registrado' }, { etapa: 'Expurgo', detalhe: '180 dias' }] },
+  { id: 'b-shap', sistema: 'credit-scoring', dataset: 'decisoes_ia', nome: 'shap_values', tipoArmazenado: 'agregado', categoria: 'anonimizado', sensivel: false, finalidade: 'Explicabilidade da decisão (Art. 20)', baseLegal: 'protecao_credito', retencao: '90 dias', retencaoDias: 90, origem: 'modelo de scoring', compartilhamentos: [],
+    linhagem: [{ etapa: 'Modelo', detalhe: 'saída agregada' }, { etapa: 'PostgreSQL', detalhe: 'sem identificador direto' }, { etapa: 'Expurgo', detalhe: '90 dias' }] },
+  { id: 'b-bio', sistema: 'onboarding', dataset: 'cadastros', nome: 'biometria_facial', tipoArmazenado: 'criptografado', categoria: 'sensivel', sensivel: true, finalidade: 'Prova de vida no onboarding', baseLegal: 'consentimento', retencao: '30 dias', retencaoDias: 30, origem: 'app mobile', compartilhamentos: [],
+    linhagem: [{ etapa: 'App', detalhe: 'captura com consentimento destacado' }, { etapa: 'KMS', detalhe: 'DEK por titular' }, { etapa: 'Cripto-shredding', detalhe: '30 dias' }] },
+  { id: 'b-email', sistema: 'onboarding', dataset: 'cadastros', nome: 'email', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, finalidade: 'Comunicação transacional', baseLegal: 'execucao_contrato', retencao: 'até revogação', retencaoDias: null, origem: 'formulário web',
+    compartilhamentos: [{ destino: 'SendGrid', finalidade: 'Entrega de e-mail transacional', internacional: true, pais: 'EUA', mecanismo: 'clausulas_padrao_anpd', evidencia: 'dpa/sendgrid-scc.pdf' }],
+    linhagem: [{ etapa: 'Formulário', detalhe: 'dupla confirmação' }, { etapa: 'SendGrid', detalhe: 'EUA · SCC ANPD', externo: true }, { etapa: 'Expurgo', detalhe: 'na revogação' }] },
+];
+
+const banco: Cenario = {
+  id: 'banco',
+  nome: 'Crédito IA S.A.',
+  setor: 'Serviços financeiros',
+  descricao: 'Concessão de crédito com decisão automatizada e enriquecimento por LLM externo. O risco dominante é o Art. 20: decisão sem revisão humana e discriminação algorítmica.',
+  sistemas: [
+    { slug: 'credit-scoring', nome: 'Scoring de crédito', repositorio: 'danzeroum/credit-scoring', timeDono: '@squad-credito', temInventario: true },
+    { slug: 'onboarding', nome: 'Onboarding e cadastro', repositorio: 'danzeroum/onboarding', timeDono: '@squad-growth', temInventario: true },
+    { slug: 'analytics', nome: 'Pipeline analítico', repositorio: 'danzeroum/analytics', timeDono: '@squad-dados', temInventario: false },
+  ],
+  campos: camposBanco,
+  gates: [
+    { id: 'g1', workflow: 'privacy-ci-gate', repositorio: 'credit-scoring', prNumero: 1234, prTitulo: 'feat: scoring v2 com LLM', prAutor: '@maria.silva', headSha: 'a1b2c3d', conclusao: 'failure', bloqueouMerge: true, runUrl: 'https://github.com/danzeroum/credit-scoring/actions/runs/1234', quando: 'há 4 h', ripdId: 'r1',
+      findings: [
+        { regra: 'pii_em_log', arquivo: 'src/models/credit_model.py', linha: 38, severidade: 'critica', mensagemBruta: "Error: Process completed with exit code 1. grep matched '(cpf|cnpj|cartao|email).*logger'", mensagemHumana: 'Este PR envia CPF para o log da aplicação. Log é banco de dados pessoal: entra no ROPA e fica visível para todo mundo com acesso ao Kibana.', comoCorrigir: 'Passe a chamada pelo privacy-redactor.ts ou logue o UUID do cliente.' },
+        { regra: 'schema_sem_base_legal', arquivo: '.privacy/data-inventory.product.yaml', linha: 52, severidade: 'alta', mensagemBruta: "ValidationError: field 'historico_compras' missing required property 'base_legal'", mensagemHumana: 'O campo historico_compras entrou no catálogo sem base legal — não aparece no ROPA e a auditoria não consegue justificar o tratamento.', comoCorrigir: 'Declare base_legal no YAML. Se for legítimo interesse, vincule uma LIA vigente.' },
+      ] },
+    { id: 'g2', workflow: 'architecture-review', repositorio: 'credit-scoring', prNumero: 1234, prTitulo: 'feat: scoring v2 com LLM', prAutor: '@maria.silva', headSha: 'a1b2c3d', conclusao: 'action_required', bloqueouMerge: true, runUrl: 'https://github.com/danzeroum/credit-scoring/actions/runs/1235', quando: 'há 4 h', ripdId: 'r1', findings: [] },
+    { id: 'g3', workflow: 'privacy-ci-gate', repositorio: 'onboarding', prNumero: 88, prTitulo: 'fix: máscara no formulário de cadastro', prAutor: '@pedro.lima', headSha: 'f7e6d5c', conclusao: 'success', bloqueouMerge: false, runUrl: '#', quando: 'há 9 h', findings: [] },
+    { id: 'g4', workflow: 'privacy-ci-gate', repositorio: 'analytics', prNumero: 307, prTitulo: 'chore: nova coluna em fact_eventos', prAutor: '@squad-dados', headSha: 'c4d5e6f', conclusao: 'neutral', bloqueouMerge: false, runUrl: '#', quando: 'há 6 h',
+      findings: [{ regra: 'linddun_ausente', arquivo: '.privacy/threat-model.md', severidade: 'baixa', mensagemBruta: 'Warning: threat-model.md not updated for changed paths', mensagemHumana: 'A nova coluna mudou o fluxo de dados, mas o threat model continua na versão anterior.', comoCorrigir: 'Revise as categorias LINDDUN e gere o diagrama atualizado.' }] },
+  ],
+  ripds: [{
+    id: 'r1', codigo: 'RIPD-2026-014', titulo: 'Scoring de crédito v2 com LLM externo', sistema: 'credit-scoring', prNumero: 1234, headSha: 'a1b2c3d',
+    contexto: 'API de scoring v2.3.1, frontend web v1.8.0, DAG-credit-v3 e serviço de decisão via OpenAI gpt-4o.',
+    foraDeEscopo: 'App mobile v1.2.0 (não integra scoring) e CRM de cobrança (ROPA próprio).',
+    fluxoMermaid: 'graph LR\n  A[Proposta] --> B(Pseudonimizador)\n  B --> C[gpt-4o]\n  C --> D[Decisão]\n  D --> E[Revisão humana]',
+    camposIds: ['b-cpf', 'b-renda', 'b-score', 'b-hist'],
+    operacoes: [
+      { operacao: 'POST /auth/cadastrar', finalidade: 'Criar conta', baseLegal: 'execucao_contrato' },
+      { operacao: 'POST /creditos/avaliar', finalidade: 'Decidir concessão', baseLegal: 'protecao_credito' },
+      { operacao: 'DAG credit-v3', finalidade: 'Enriquecer modelo', baseLegal: 'legitimo_interesse', liaCodigo: 'LIA-SCORING-001' },
+      { operacao: 'GET /me/dados', finalidade: 'Direito de acesso', baseLegal: 'obrigacao_legal' },
+    ],
+    recomendacoes: [
+      { prioridade: 'P0', descricao: 'Pseudonimizar CPF antes do LLM', dono: '@eng-maria', prazo: '04/08', concluida: true },
+      { prioridade: 'P0', descricao: 'Publicar endpoint de revisão de decisão', dono: '@eng-maria', prazo: '11/08', concluida: false },
+      { prioridade: 'P0', descricao: 'Assinar SCC da ANPD com a OpenAI', dono: '@juridico-ana', prazo: '04/08', concluida: true },
+      { prioridade: 'P1', descricao: 'Teste de disparate impact no pipeline do modelo', dono: '@ml-joao', prazo: '18/08', concluida: false },
+    ],
+    triggers: [
+      { codigo: 'T1', categoria: 'dado sensível', critico: true, evidencias: ['CPF interpolado no prompt (credit_model.py:38)'] },
+      { codigo: 'T3', categoria: 'decisão automatizada', critico: true, evidencias: ['/creditos/avaliar retorna aprovado/reprovado'] },
+      { codigo: 'T6', categoria: 'nova tecnologia', critico: false, evidencias: ['dependência openai, modelo gpt-4o'] },
+      { codigo: 'T8', categoria: 'transferência internacional', critico: false, evidencias: ['processamento em us-east-1'] },
+    ],
+    status: 'em_revisao',
+    linddun: LINDDUN_BASE.map((l) => ({ ...l })),
+  }],
+  riscos: riscosComuns(
+    { codigo: 'R1', descricao: 'Vazamento de CPF via prompt do LLM', probabilidade: 4, impacto: 5, dano: 'material', danoTexto: 'Crédito negado indevidamente e exposição do documento fora do perímetro', tratamento: 'Pseudonimização HMAC pré-prompt + SCC com a OpenAI', tipo: 'mitigar', esforcoSprints: 1, dono: '@eng-maria', dominio: 'Engenharia', prazo: '15/08', reavaliacao: '15/11', status: 'em_tratamento', ripdCodigo: 'RIPD-2026-014' },
+    { codigo: 'R2', descricao: 'Decisão automatizada sem canal de revisão', probabilidade: 3, impacto: 5, dano: 'discriminacao', danoTexto: 'Discriminação algorítmica sem via de contestação (Art. 20)', tratamento: 'Endpoint /revisao + teste de disparidade no CI', tipo: 'mitigar', esforcoSprints: 2, dono: '@dpo-marcela', dominio: 'DPO', prazo: '29/08', reavaliacao: '29/11', status: 'em_tratamento', ripdCodigo: 'RIPD-2026-014' },
+  ),
+  lias: [{
+    id: 'l1', codigo: 'LIA-SCORING-001', titulo: 'Enriquecimento do modelo de scoring com histórico de compras',
+    finalidade: 'Elevar a acurácia do scoring para reduzir recusa indevida de crédito a titulares com histórico de pagamento consistente.',
+    categoria: 'Análise de crédito', beneficio: 3, danoTitular: 2, expectativa: 'media',
+    alternativas: [
+      { alternativa: 'Anonimização', situacao: 'rejeitado', justificativa: 'A agregação com k-anonimato destrói o sinal individual: queda de 31 p.p. de AUC no teste de jul/2026.' },
+      { alternativa: 'Pseudonimização', situacao: 'atendido', justificativa: 'CPF vira token HMAC-SHA256 com chave no KMS antes de qualquer uso analítico ou envio ao LLM.' },
+      { alternativa: 'Escopo menor', situacao: 'atendido', justificativa: 'Removidas as features cep, nome_mae e canal_atendimento por serem proxies discriminatórios.' },
+      { alternativa: 'Retenção menor', situacao: 'atendido', justificativa: 'Janela reduzida de 24 para 6 meses de histórico, com perda de apenas 1,2 p.p. de AUC.' },
+      { alternativa: 'Agregação', situacao: 'nao_aplicavel', justificativa: 'A decisão é individual por titular; dado agregado não sustenta a finalidade.' },
+      { alternativa: 'Consentimento', situacao: 'rejeitado', justificativa: 'Condicionaria a análise de crédito à aceitação, tornando o consentimento não livre.' },
+    ],
+    evidencias: [
+      { arquivo: 'lia-001-log.txt', tipo: 'log redigido', hash: sha256('lia-001-log').slice(0, 16) },
+      { arquivo: 'lia-001-ttl.sql', tipo: 'política de retenção', hash: sha256('lia-001-ttl').slice(0, 16) },
+    ],
+    camposIds: ['b-hist'], status: 'vigente', vigenciaFim: '01/02/2027', diasParaVencer: 189,
+    assinaturaDpo: 'sig:sha256:7c1f0a9b…:oidc|marcela', documentoHash: sha256('LIA-SCORING-001').slice(0, 24),
+  }],
+  titulares: [
+    titular('t1', '529.982.247-25', 'Ana Beatriz Silva', 'ana.silva@exemplo.com',
+      [{ chave: 'renda', rotulo: 'Renda declarada', grupo: 'Crédito', valor: 'R$ 3.500,00', mascara: 'R$ ••••,••', baseLegal: 'execucao_contrato' },
+       { chave: 'score', rotulo: 'Score', grupo: 'Crédito', valor: '620', mascara: '•••', baseLegal: 'protecao_credito' }],
+      [{ chave: 'biometria', rotulo: 'Biometria facial', grupo: 'Onboarding', baseLegal: 'consentimento' }],
+      [{ destino: 'OpenAI', finalidade: 'Enriquecimento do modelo', baseLegal: 'legitimo_interesse', internacional: true, mecanismo: 'clausulas_padrao_anpd', ultimaRemessa: '27/07' },
+       { destino: 'Serasa', finalidade: 'Consulta de score', baseLegal: 'protecao_credito', internacional: false, mecanismo: 'nao_aplicavel', ultimaRemessa: '26/07' },
+       { destino: 'SendGrid', finalidade: 'E-mail transacional', baseLegal: 'execucao_contrato', internacional: true, mecanismo: 'clausulas_padrao_anpd', ultimaRemessa: '28/07' }],
+      { id: 'dec_9f21c7', modelo: 'credit-scoring v2.3.1', aprovado: false, shap: [{ feature: 'tempo_emprego', impacto: -0.34 }, { feature: 'score_serasa', impacto: -0.21 }, { feature: 'renda', impacto: 0.12 }] }),
+    titular('t2', '843.117.902-08', 'Carlos Menezes', 'carlos.m@exemplo.com',
+      [{ chave: 'renda', rotulo: 'Renda declarada', grupo: 'Crédito', valor: 'R$ 7.200,00', mascara: 'R$ ••••,••', baseLegal: 'execucao_contrato' }],
+      [{ chave: 'biometria', rotulo: 'Biometria facial', grupo: 'Onboarding', baseLegal: 'consentimento' }],
+      [{ destino: 'Serasa', finalidade: 'Consulta de score', baseLegal: 'protecao_credito', internacional: false, mecanismo: 'nao_aplicavel', ultimaRemessa: '20/07' }]),
+    titular('t3', '311.408.775-31', 'Joana Prado', 'joana.p@exemplo.com',
+      [{ chave: 'score', rotulo: 'Score', grupo: 'Crédito', valor: '548', mascara: '•••', baseLegal: 'protecao_credito' }], [],
+      [{ destino: 'OpenAI', finalidade: 'Enriquecimento do modelo', baseLegal: 'legitimo_interesse', internacional: true, mecanismo: 'clausulas_padrao_anpd', ultimaRemessa: '25/07' }],
+      { id: 'dec_44ab10', modelo: 'credit-scoring v2.3.1', aprovado: false, shap: [{ feature: 'score_serasa', impacto: -0.41 }, { feature: 'renda', impacto: -0.09 }] }),
+  ],
+  solicitacoes: solicitacoesPadrao(['t1', 't2', 't3'], ['credit-scoring', 'onboarding', 'analytics']),
+  expurgos: [
+    { id: 'e1', data: 'hoje', origem: 'cron', status: 'concluido', entradas: expurgoPadrao('credit-scoring', [['decisoes_ia', 'hard_delete', 8120], ['historico_compras', 'crypto_shredding', 6301], ['cadastros.biometria', 'crypto_shredding', 411], ['eventos_brutos', 'compactacao_log', 3600]]) },
+    { id: 'e2', data: 'ontem', origem: 'cron', status: 'concluido', entradas: expurgoPadrao('credit-scoring', [['decisoes_ia', 'hard_delete', 9902], ['cadastros', 'anonimizacao', 7208]]) },
+  ],
+  chaves: [
+    { alias: 'alias/credit-pii-v3', finalidade: 'credito_pii', status: 'ativa', criadaHaDias: 80, rotacaoEmDias: 10, criptoShredding: true, dependencias: ['clientes', 'decisoes_ia'] },
+    { alias: 'alias/credit-pii-v4', finalidade: 'credito_pii_next', status: 'canary', criadaHaDias: 6, rotacaoEmDias: 84, criptoShredding: true, dependencias: [] },
+    { alias: 'alias/onboarding-bio-v2', finalidade: 'biometria', status: 'ativa', criadaHaDias: 40, rotacaoEmDias: 50, criptoShredding: true, dependencias: ['cadastros'] },
+    { alias: 'alias/backup-rds-v1', finalidade: 'backup', status: 'ativa', criadaHaDias: 200, rotacaoEmDias: 5, criptoShredding: false, dependencias: ['snapshots'] },
+    { alias: 'alias/credit-pii-v2', finalidade: 'credito_pii_legado', status: 'revogada', criadaHaDias: 400, rotacaoEmDias: null, criptoShredding: true, dependencias: [] },
+  ],
+  rotacao: {
+    chaveNova: 'alias/credit-pii-v4', chaveAntiga: 'alias/credit-pii-v3',
+    etapas: [
+      { etapa: 'gerar', rotulo: 'Gerar chave', status: 'concluida', progresso: 100, detalhe: 'v4 criada em us-east-1' },
+      { etapa: 'parameter_store', rotulo: 'Parameter Store', status: 'concluida', progresso: 100, detalhe: 'SecureString atualizada' },
+      { etapa: 'canary_5', rotulo: 'Canary 5%', status: 'concluida', progresso: 100, detalhe: '48 h sem erro de decrypt' },
+      { etapa: 'recriptografar', rotulo: 'Recriptografar', status: 'executando', progresso: 63.4, detalhe: '1.187.402 de 1.873.900 registros' },
+      { etapa: 'revogar_antiga', rotulo: 'Revogar antiga', status: 'pendente', progresso: 0, detalhe: '30 dias após a re-encriptação' },
+    ],
+  },
+  acessosKms: [
+    { quando: 'há 20 min', principal: 'role/scoring-svc', operacao: 'Decrypt', finalidade: 'credito_pii', origemIp: '10.4.2.11', autorizado: true },
+    { quando: 'há 35 min', principal: 'role/scoring-svc', operacao: 'GenerateDataKey', finalidade: 'credito_pii', origemIp: '10.4.2.11', autorizado: true },
+    { quando: 'há 2 h', principal: 'user/estagiario.dev', operacao: 'Decrypt', finalidade: 'biometria', origemIp: '189.22.7.90', autorizado: false, motivo: 'fora da VPN e sem escopo para dado sensível' },
+    { quando: 'há 5 h', principal: 'role/rds-backup', operacao: 'Encrypt', finalidade: 'backup', origemIp: '10.4.9.3', autorizado: true },
+  ],
+  metricas: metricas(85.7, 34, 92, 3),
+  maturidade: maturidade(3, 4, 3, 2, 3),
+  raci: RACI,
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CENÁRIO 2 — Varejo: recomendação e fidelidade
+// ─────────────────────────────────────────────────────────────────────────────
+
+const camposVarejo: Campo[] = [
+  { id: 'v-cpf', sistema: 'checkout', dataset: 'pedidos', nome: 'cpf', tipoArmazenado: 'hash', categoria: 'pessoal', sensivel: false, finalidade: 'CPF na nota fiscal', baseLegal: 'obrigacao_legal', retencao: '5 anos', retencaoDias: 1825, origem: 'checkout', compartilhamentos: [],
+    linhagem: [{ etapa: 'Checkout', detalhe: 'opcional na nota' }, { etapa: 'SEFAZ', detalhe: 'obrigação fiscal', externo: true }, { etapa: 'Expurgo', detalhe: '5 anos' }] },
+  { id: 'v-endereco', sistema: 'checkout', dataset: 'pedidos', nome: 'endereco_entrega', tipoArmazenado: 'criptografado', categoria: 'pessoal', sensivel: false, finalidade: 'Entrega do pedido', baseLegal: 'execucao_contrato', retencao: '18 meses', retencaoDias: 540, origem: 'checkout',
+    compartilhamentos: [{ destino: 'Transportadora Norte', finalidade: 'Entrega', internacional: false, mecanismo: 'nao_aplicavel' }],
+    linhagem: [{ etapa: 'Checkout', detalhe: 'endereço do pedido' }, { etapa: 'Transportadora', detalhe: 'payload mínimo', externo: true }, { etapa: 'Expurgo', detalhe: '18 meses' }] },
+  { id: 'v-navegacao', sistema: 'recomendacao', dataset: 'eventos', nome: 'perfil_navegacao', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, finalidade: 'Recomendação de produtos', baseLegal: 'legitimo_interesse', liaCodigo: 'LIA-RECO-002', retencao: '120 dias', retencaoDias: 120, origem: 'clickstream',
+    compartilhamentos: [{ destino: 'Meta Ads', finalidade: 'Público semelhante', internacional: true, pais: 'EUA', mecanismo: 'clausulas_padrao_anpd', evidencia: 'dpa/meta-scc.pdf' }],
+    linhagem: [{ etapa: 'Site', detalhe: 'evento pseudonimizado na origem' }, { etapa: 'Feature store', detalhe: 'janela de 120 dias' }, { etapa: 'Meta Ads', detalhe: 'EUA · SCC ANPD', externo: true }, { etapa: 'Expurgo', detalhe: '120 dias' }] },
+  { id: 'v-saude', sistema: 'farmacia', dataset: 'receitas', nome: 'medicamento_controlado', tipoArmazenado: 'criptografado', categoria: 'sensivel', sensivel: true, finalidade: 'Dispensação de medicamento sob receita', baseLegal: 'tutela_saude', retencao: '2 anos', retencaoDias: 730, origem: 'balcão da farmácia', compartilhamentos: [],
+    linhagem: [{ etapa: 'Balcão', detalhe: 'receita retida' }, { etapa: 'KMS', detalhe: 'chave própria de saúde' }, { etapa: 'Cripto-shredding', detalhe: '2 anos' }] },
+  { id: 'v-cesta', sistema: 'recomendacao', dataset: 'agregados', nome: 'cesta_media_por_regiao', tipoArmazenado: 'agregado', categoria: 'anonimizado', sensivel: false, finalidade: 'Planejamento de sortimento', baseLegal: 'legitimo_interesse', liaCodigo: 'LIA-RECO-002', retencao: '3 anos', retencaoDias: 1095, origem: 'BI', compartilhamentos: [],
+    linhagem: [{ etapa: 'Pedidos', detalhe: 'agregação k≥5' }, { etapa: 'BI', detalhe: 'células suprimidas' }] },
+  { id: 'v-tel', sistema: 'fidelidade', dataset: 'membros', nome: 'telefone', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, finalidade: 'Comunicação do programa de fidelidade', baseLegal: 'consentimento', retencao: 'até revogação', retencaoDias: null, origem: 'adesão ao programa',
+    compartilhamentos: [{ destino: 'Zenvia', finalidade: 'Envio de SMS', internacional: false, mecanismo: 'nao_aplicavel' }],
+    linhagem: [{ etapa: 'Adesão', detalhe: 'consentimento granular' }, { etapa: 'Zenvia', detalhe: 'SMS transacional', externo: true }, { etapa: 'Expurgo', detalhe: 'na revogação' }] },
+];
+
+const varejo: Cenario = {
+  id: 'varejo',
+  nome: 'Rede Aurora',
+  setor: 'Varejo omnicanal',
+  descricao: 'Recomendação por comportamento de navegação, programa de fidelidade e farmácia dentro da loja. O risco dominante é a farmácia: dado de saúde no mesmo cadastro do varejo.',
+  sistemas: [
+    { slug: 'checkout', nome: 'Checkout e pedidos', repositorio: 'aurora/checkout', timeDono: '@squad-vendas', temInventario: true },
+    { slug: 'recomendacao', nome: 'Motor de recomendação', repositorio: 'aurora/recomendacao', timeDono: '@squad-dados', temInventario: true },
+    { slug: 'farmacia', nome: 'Farmácia', repositorio: 'aurora/farmacia', timeDono: '@squad-saude', temInventario: true },
+    { slug: 'fidelidade', nome: 'Programa de fidelidade', repositorio: 'aurora/fidelidade', timeDono: '@squad-crm', temInventario: false },
+  ],
+  campos: camposVarejo,
+  gates: [
+    { id: 'g1', workflow: 'privacy-ci-gate', repositorio: 'recomendacao', prNumero: 512, prTitulo: 'feat: cruzar cesta da farmácia com recomendação', prAutor: '@lucas.dias', headSha: 'd9c8b7a', conclusao: 'failure', bloqueouMerge: true, runUrl: '#', quando: 'há 2 h', ripdId: 'r1',
+      findings: [
+        { regra: 'dado_sensivel_fora_de_escopo', arquivo: 'src/features/basket.ts', linha: 71, severidade: 'critica', mensagemBruta: "SensitiveFieldError: 'medicamento_controlado' joined into non-health dataset", mensagemHumana: 'O PR cruza o histórico da farmácia com o motor de recomendação. Isso transforma dado de saúde em insumo de marketing — outra finalidade, outra base legal.', comoCorrigir: 'Remova o join. Se a finalidade for legítima, ela precisa de base do Art. 11 e de RIPD próprio.' },
+        { regra: 'schema_sem_base_legal', arquivo: '.privacy/data-inventory.reco.yaml', linha: 30, severidade: 'alta', mensagemBruta: "ValidationError: field 'cesta_farmacia' missing 'base_legal'", mensagemHumana: 'O campo derivado entrou sem base legal declarada.', comoCorrigir: 'Declare a base legal ou remova o campo do inventário.' },
+      ] },
+    { id: 'g2', workflow: 'architecture-review', repositorio: 'recomendacao', prNumero: 512, prTitulo: 'feat: cruzar cesta da farmácia com recomendação', prAutor: '@lucas.dias', headSha: 'd9c8b7a', conclusao: 'action_required', bloqueouMerge: true, runUrl: '#', quando: 'há 2 h', ripdId: 'r1', findings: [] },
+    { id: 'g3', workflow: 'privacy-ci-gate', repositorio: 'checkout', prNumero: 941, prTitulo: 'chore: TTL no endereço de entrega', prAutor: '@ana.ferraz', headSha: 'b2a1c0d', conclusao: 'success', bloqueouMerge: false, runUrl: '#', quando: 'há 7 h', findings: [] },
+  ],
+  ripds: [{
+    id: 'r1', codigo: 'RIPD-2026-031', titulo: 'Cruzamento de cesta da farmácia com recomendação', sistema: 'recomendacao', prNumero: 512, headSha: 'd9c8b7a',
+    contexto: 'Motor de recomendação v4 passando a consumir a base da farmácia para sugerir produtos correlatos.',
+    foraDeEscopo: 'Programa de fidelidade (ROPA próprio) e checkout.',
+    fluxoMermaid: 'graph LR\n  A[Farmácia] --> B(Feature store)\n  B --> C[Recomendação]\n  C --> D[Vitrine]',
+    camposIds: ['v-saude', 'v-navegacao', 'v-cpf'],
+    operacoes: [
+      { operacao: 'ETL farmacia→feature-store', finalidade: 'Recomendação', baseLegal: 'legitimo_interesse', liaCodigo: 'LIA-RECO-002' },
+      { operacao: 'GET /recomendacoes', finalidade: 'Exibir vitrine', baseLegal: 'legitimo_interesse', liaCodigo: 'LIA-RECO-002' },
+    ],
+    recomendacoes: [
+      { prioridade: 'P0', descricao: 'Remover o join com a base da farmácia', dono: '@lucas.dias', prazo: '05/08', concluida: false },
+      { prioridade: 'P0', descricao: 'Segregar chave KMS da farmácia da chave do varejo', dono: '@seg-rita', prazo: '12/08', concluida: false },
+      { prioridade: 'P1', descricao: 'Auditar quem tem acesso ao dataset receitas', dono: '@seg-rita', prazo: '20/08', concluida: false },
+    ],
+    triggers: [
+      { codigo: 'T1', categoria: 'dado sensível', critico: true, evidencias: ['medicamento_controlado usado fora da finalidade de saúde'] },
+      { codigo: 'T7', categoria: 'cruzamento de bases', critico: false, evidencias: ['join entre farmacia.receitas e recomendacao.eventos'] },
+      { codigo: 'T5', categoria: 'larga escala', critico: false, evidencias: ['2,4 milhões de membros no programa'] },
+    ],
+    status: 'em_revisao',
+    linddun: LINDDUN_BASE.map((l) => ({ ...l, ativo: l.chave === 'location' ? true : l.ativo })),
+  }],
+  riscos: riscosComuns(
+    { codigo: 'R1', descricao: 'Dado de saúde alimentando recomendação de marketing', probabilidade: 4, impacto: 5, dano: 'moral', danoTexto: 'Inferência de condição de saúde exposta na vitrine, visível a terceiros no mesmo domicílio', tratamento: 'Segregar base da farmácia; chave KMS própria; proibir join no gate', tipo: 'evitar', esforcoSprints: 1.5, dono: '@squad-saude', dominio: 'Engenharia', prazo: '05/08', reavaliacao: '05/11', status: 'em_tratamento', ripdCodigo: 'RIPD-2026-031' },
+    { codigo: 'R2', descricao: 'Público semelhante enviado a rede de anúncios sem oposição fácil', probabilidade: 4, impacto: 3, dano: 'perda_de_controle', danoTexto: 'Titular não consegue sair da audiência publicitária', tratamento: 'Oposição em um clique + purga de audiência em 24 h', tipo: 'mitigar', esforcoSprints: 1, dono: '@squad-crm', dominio: 'Produto', prazo: '19/08', reavaliacao: '19/11', status: 'aberto' },
+  ),
+  lias: [{
+    id: 'l1', codigo: 'LIA-RECO-002', titulo: 'Recomendação de produtos por comportamento de navegação',
+    finalidade: 'Reduzir o tempo de busca do cliente exibindo produtos correlatos ao que ele já navegou na sessão.',
+    categoria: 'Melhoria de produto', beneficio: 2, danoTitular: 2, expectativa: 'alta',
+    alternativas: [
+      { alternativa: 'Anonimização', situacao: 'rejeitado', justificativa: 'Recomendação sem identificador de sessão devolve a vitrine genérica; o ganho medido cai a zero.' },
+      { alternativa: 'Pseudonimização', situacao: 'atendido', justificativa: 'O identificador é HMAC de sessão, rotacionado a cada 30 dias, sem vínculo com CPF.' },
+      { alternativa: 'Escopo menor', situacao: 'atendido', justificativa: 'Categoria de produto apenas; SKU individual e base da farmácia estão fora.' },
+      { alternativa: 'Retenção menor', situacao: 'atendido', justificativa: 'Janela reduzida de 365 para 120 dias sem perda relevante de conversão.' },
+      { alternativa: 'Agregação', situacao: 'nao_aplicavel', justificativa: 'A vitrine é individual; agregado não sustenta a finalidade.' },
+      { alternativa: 'Consentimento', situacao: 'rejeitado', justificativa: 'Recomendação básica é expectativa razoável do cliente de e-commerce; pedir consentimento aqui é fadiga sem ganho de controle.' },
+    ],
+    evidencias: [{ arquivo: 'reco-002-retencao.sql', tipo: 'política de retenção', hash: sha256('reco-002').slice(0, 16) }],
+    camposIds: ['v-navegacao', 'v-cesta'], status: 'vigente', vigenciaFim: '30/09/2026', diasParaVencer: 42,
+    assinaturaDpo: 'sig:sha256:2b8e4f1a…:oidc|marcela', documentoHash: sha256('LIA-RECO-002').slice(0, 24),
+  }],
+  titulares: [
+    titular('t1', '712.334.908-11', 'Marina Costa', 'marina.c@exemplo.com',
+      [{ chave: 'endereco', rotulo: 'Endereço de entrega', grupo: 'Pedidos', valor: 'Rua das Acácias, 210 — Recife/PE', mascara: '••••••••••, ••• — ••/••', baseLegal: 'execucao_contrato' },
+       { chave: 'telefone', rotulo: 'Telefone', grupo: 'Fidelidade', valor: '(81) 98812-4470', mascara: '(••) •••••-••••', baseLegal: 'consentimento' }],
+      [{ chave: 'receita', rotulo: 'Medicamento controlado', grupo: 'Farmácia', baseLegal: 'tutela_saude' }],
+      [{ destino: 'Meta Ads', finalidade: 'Público semelhante', baseLegal: 'legitimo_interesse', internacional: true, mecanismo: 'clausulas_padrao_anpd', ultimaRemessa: '27/07' },
+       { destino: 'Transportadora Norte', finalidade: 'Entrega', baseLegal: 'execucao_contrato', internacional: false, mecanismo: 'nao_aplicavel', ultimaRemessa: '24/07' }]),
+    titular('t2', '905.221.744-60', 'Rafael Andrade', 'rafael.a@exemplo.com',
+      [{ chave: 'endereco', rotulo: 'Endereço de entrega', grupo: 'Pedidos', valor: 'Av. Beira Mar, 1180 — Fortaleza/CE', mascara: '••••••••••, •••• — ••/••', baseLegal: 'execucao_contrato' }],
+      [], [{ destino: 'Transportadora Norte', finalidade: 'Entrega', baseLegal: 'execucao_contrato', internacional: false, mecanismo: 'nao_aplicavel', ultimaRemessa: '19/07' }]),
+    titular('t3', '188.077.312-45', 'Beatriz Lopes', 'bia.l@exemplo.com',
+      [{ chave: 'telefone', rotulo: 'Telefone', grupo: 'Fidelidade', valor: '(11) 97741-0033', mascara: '(••) •••••-••••', baseLegal: 'consentimento' }],
+      [{ chave: 'receita', rotulo: 'Medicamento controlado', grupo: 'Farmácia', baseLegal: 'tutela_saude' }],
+      [{ destino: 'Zenvia', finalidade: 'SMS do programa', baseLegal: 'consentimento', internacional: false, mecanismo: 'nao_aplicavel', ultimaRemessa: '28/07' }]),
+  ],
+  solicitacoes: solicitacoesPadrao(['t1', 't2', 't3'], ['checkout', 'recomendacao', 'fidelidade']),
+  expurgos: [
+    { id: 'e1', data: 'hoje', origem: 'cron', status: 'concluido', entradas: expurgoPadrao('recomendacao', [['eventos', 'hard_delete', 41230], ['perfis_sessao', 'crypto_shredding', 12880], ['receitas', 'crypto_shredding', 96], ['clickstream_bruto', 'compactacao_log', 88400]]) },
+    { id: 'e2', data: 'ontem', origem: 'cron', status: 'falhou', entradas: expurgoPadrao('recomendacao', [['eventos', 'hard_delete', 0]]) },
+  ],
+  chaves: [
+    { alias: 'alias/varejo-pii-v2', finalidade: 'varejo_pii', status: 'ativa', criadaHaDias: 60, rotacaoEmDias: 30, criptoShredding: true, dependencias: ['pedidos', 'membros'] },
+    { alias: 'alias/farmacia-saude-v1', finalidade: 'saude', status: 'ativa', criadaHaDias: 20, rotacaoEmDias: 70, criptoShredding: true, dependencias: ['receitas'] },
+    { alias: 'alias/varejo-pii-v3', finalidade: 'varejo_pii_next', status: 'canary', criadaHaDias: 3, rotacaoEmDias: 87, criptoShredding: true, dependencias: [] },
+    { alias: 'alias/lake-v1', finalidade: 'lake', status: 'ativa', criadaHaDias: 300, rotacaoEmDias: 2, criptoShredding: false, dependencias: ['clickstream_bruto'] },
+  ],
+  rotacao: {
+    chaveNova: 'alias/varejo-pii-v3', chaveAntiga: 'alias/varejo-pii-v2',
+    etapas: [
+      { etapa: 'gerar', rotulo: 'Gerar chave', status: 'concluida', progresso: 100, detalhe: 'v3 criada em sa-east-1' },
+      { etapa: 'parameter_store', rotulo: 'Parameter Store', status: 'concluida', progresso: 100, detalhe: 'SecureString atualizada' },
+      { etapa: 'canary_5', rotulo: 'Canary 5%', status: 'executando', progresso: 40, detalhe: '19 h de 48 h sem erro' },
+      { etapa: 'recriptografar', rotulo: 'Recriptografar', status: 'pendente', progresso: 0, detalhe: 'aguarda o fim do canary' },
+      { etapa: 'revogar_antiga', rotulo: 'Revogar antiga', status: 'pendente', progresso: 0, detalhe: '30 dias depois' },
+    ],
+  },
+  acessosKms: [
+    { quando: 'há 10 min', principal: 'role/checkout-svc', operacao: 'Decrypt', finalidade: 'varejo_pii', origemIp: '10.9.1.4', autorizado: true },
+    { quando: 'há 1 h', principal: 'role/reco-etl', operacao: 'Decrypt', finalidade: 'saude', origemIp: '10.9.4.22', autorizado: false, motivo: 'pipeline de recomendação não tem escopo de saúde' },
+    { quando: 'há 3 h', principal: 'role/farmacia-svc', operacao: 'GenerateDataKey', finalidade: 'saude', origemIp: '10.9.7.2', autorizado: true },
+  ],
+  metricas: metricas(72.4, 61, 84, 5),
+  maturidade: maturidade(2, 3, 2, 3, 3),
+  raci: RACI,
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CENÁRIO 3 — Mídia: streaming e publicidade
+// ─────────────────────────────────────────────────────────────────────────────
+
+const camposMidia: Campo[] = [
+  { id: 'm-email', sistema: 'contas', dataset: 'assinantes', nome: 'email', tipoArmazenado: 'hash', categoria: 'pessoal', sensivel: false, finalidade: 'Autenticação e recuperação de senha', baseLegal: 'execucao_contrato', retencao: 'contrato + 6 meses', retencaoDias: 180, origem: 'cadastro', compartilhamentos: [],
+    linhagem: [{ etapa: 'Cadastro', detalhe: 'e-mail e senha apenas' }, { etapa: 'Auth', detalhe: 'cookie HttpOnly' }, { etapa: 'Expurgo', detalhe: '6 meses após o fim do contrato' }] },
+  { id: 'm-watch', sistema: 'player', dataset: 'sessoes', nome: 'historico_reproducao', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, finalidade: 'Continuar assistindo e recomendação', baseLegal: 'execucao_contrato', retencao: '24 meses', retencaoDias: 730, origem: 'player',
+    compartilhamentos: [{ destino: 'Nielsen', finalidade: 'Medição de audiência', internacional: true, pais: 'EUA', mecanismo: 'clausulas_padrao_anpd', evidencia: 'dpa/nielsen-scc.pdf' }],
+    linhagem: [{ etapa: 'Player', detalhe: 'evento por título' }, { etapa: 'Nielsen', detalhe: 'EUA · SCC ANPD', externo: true }, { etapa: 'Expurgo', detalhe: '24 meses' }] },
+  { id: 'm-geo', sistema: 'player', dataset: 'sessoes', nome: 'geolocalizacao_ip', tipoArmazenado: 'agregado', categoria: 'anonimizado', sensivel: false, finalidade: 'Licenciamento territorial de conteúdo', baseLegal: 'execucao_contrato', retencao: '30 dias', retencaoDias: 30, origem: 'IP da sessão', compartilhamentos: [],
+    linhagem: [{ etapa: 'Sessão', detalhe: 'IP truncado no ingest' }, { etapa: 'Geo', detalhe: 'centroide do município' }, { etapa: 'Expurgo', detalhe: '30 dias' }] },
+  { id: 'm-inferencia', sistema: 'ads', dataset: 'segmentos', nome: 'segmento_inferido', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, finalidade: 'Segmentação publicitária', baseLegal: 'consentimento', retencao: 'até revogação', retencaoDias: null, origem: 'modelo de audiência',
+    compartilhamentos: [{ destino: 'Google Ad Manager', finalidade: 'Entrega de anúncio segmentado', internacional: true, pais: 'EUA', mecanismo: 'clausulas_padrao_anpd', evidencia: 'dpa/gam-scc.pdf' }],
+    linhagem: [{ etapa: 'Consentimento', detalhe: 'toggle desligado por padrão' }, { etapa: 'Modelo', detalhe: 'segmento sem categoria sensível' }, { etapa: 'Google Ad Manager', detalhe: 'EUA · SCC ANPD', externo: true }, { etapa: 'Expurgo', detalhe: 'na revogação' }] },
+  { id: 'm-orientacao', sistema: 'ads', dataset: 'segmentos', nome: 'afinidade_conteudo_lgbt', tipoArmazenado: 'criptografado', categoria: 'sensivel', sensivel: true, finalidade: 'Curadoria editorial de acervo', baseLegal: 'consentimento', retencao: '90 dias', retencaoDias: 90, origem: 'consentimento explícito no perfil', compartilhamentos: [],
+    linhagem: [{ etapa: 'Perfil', detalhe: 'opt-in explícito e destacado' }, { etapa: 'KMS', detalhe: 'chave própria, nunca compartilhada com ads' }, { etapa: 'Cripto-shredding', detalhe: '90 dias' }] },
+  { id: 'm-menor', sistema: 'contas', dataset: 'perfis', nome: 'perfil_infantil', tipoArmazenado: 'criptografado', categoria: 'pessoal', sensivel: false, finalidade: 'Controle parental e classificação etária', baseLegal: 'consentimento', retencao: 'contrato', retencaoDias: null, origem: 'perfil criado pelo responsável', compartilhamentos: [],
+    linhagem: [{ etapa: 'Responsável', detalhe: 'consentimento parental (Art. 14)' }, { etapa: 'Player', detalhe: 'sem publicidade comportamental' }, { etapa: 'Expurgo', detalhe: 'no fim do contrato' }] },
+];
+
+const midia: Cenario = {
+  id: 'midia',
+  nome: 'Palco Streaming',
+  setor: 'Mídia e entretenimento',
+  descricao: 'Streaming por assinatura com publicidade segmentada e perfis infantis. O risco dominante é a inferência: preferência de conteúdo revela categoria sensível sem que ninguém tenha coletado dado sensível.',
+  sistemas: [
+    { slug: 'contas', nome: 'Contas e perfis', repositorio: 'palco/contas', timeDono: '@squad-conta', temInventario: true },
+    { slug: 'player', nome: 'Player e sessões', repositorio: 'palco/player', timeDono: '@squad-player', temInventario: true },
+    { slug: 'ads', nome: 'Publicidade', repositorio: 'palco/ads', timeDono: '@squad-ads', temInventario: true },
+  ],
+  campos: camposMidia,
+  gates: [
+    { id: 'g1', workflow: 'privacy-ci-gate', repositorio: 'ads', prNumero: 77, prTitulo: 'feat: segmento por afinidade de acervo', prAutor: '@bruno.reis', headSha: 'e1f2a3b', conclusao: 'failure', bloqueouMerge: true, runUrl: '#', quando: 'há 1 h', ripdId: 'r1',
+      findings: [
+        { regra: 'inferencia_categoria_sensivel', arquivo: 'src/segments/affinity.ts', linha: 44, severidade: 'critica', mensagemBruta: 'InferenceRiskError: segment derived from title metadata classified as sensitive affinity', mensagemHumana: 'O segmento inferido a partir do acervo assistido reconstrói categoria sensível. Ninguém coletou dado sensível — o modelo o produziu, e o efeito para o titular é o mesmo.', comoCorrigir: 'Remova os títulos classificados como sensíveis do sinal, ou exija consentimento específico do Art. 11 para o segmento.' },
+        { regra: 'menor_sem_verificacao', arquivo: 'src/segments/audience.ts', linha: 12, severidade: 'alta', mensagemBruta: "MinorDataError: profile flagged 'infantil' present in ad audience", mensagemHumana: 'Perfil infantil entrou na audiência publicitária. Art. 14 exige tratamento no melhor interesse da criança.', comoCorrigir: 'Exclua perfis infantis de qualquer segmento de publicidade comportamental.' },
+      ] },
+    { id: 'g2', workflow: 'architecture-review', repositorio: 'ads', prNumero: 77, prTitulo: 'feat: segmento por afinidade de acervo', prAutor: '@bruno.reis', headSha: 'e1f2a3b', conclusao: 'action_required', bloqueouMerge: true, runUrl: '#', quando: 'há 1 h', ripdId: 'r1', findings: [] },
+    { id: 'g3', workflow: 'privacy-ci-gate', repositorio: 'player', prNumero: 201, prTitulo: 'chore: truncar IP no ingest', prAutor: '@carla.souza', headSha: 'a9b8c7d', conclusao: 'success', bloqueouMerge: false, runUrl: '#', quando: 'há 12 h', findings: [] },
+  ],
+  ripds: [{
+    id: 'r1', codigo: 'RIPD-2026-008', titulo: 'Segmentação publicitária por afinidade de acervo', sistema: 'ads', prNumero: 77, headSha: 'e1f2a3b',
+    contexto: 'Motor de segmentos derivando afinidades a partir do histórico de reprodução para venda de inventário publicitário.',
+    foraDeEscopo: 'Recomendação editorial dentro do player (finalidade contratual) e perfis infantis.',
+    fluxoMermaid: 'graph LR\n  A[Player] --> B(Modelo de audiência)\n  B --> C[Segmentos]\n  C --> D[Google Ad Manager]',
+    camposIds: ['m-watch', 'm-inferencia', 'm-orientacao'],
+    operacoes: [
+      { operacao: 'ETL sessoes→segmentos', finalidade: 'Segmentação publicitária', baseLegal: 'consentimento' },
+      { operacao: 'POST /ads/audience', finalidade: 'Entrega de anúncio', baseLegal: 'consentimento' },
+    ],
+    recomendacoes: [
+      { prioridade: 'P0', descricao: 'Excluir títulos de categoria sensível do sinal de segmento', dono: '@bruno.reis', prazo: '02/08', concluida: false },
+      { prioridade: 'P0', descricao: 'Bloquear perfis infantis em qualquer audiência publicitária', dono: '@squad-conta', prazo: '02/08', concluida: true },
+      { prioridade: 'P1', descricao: 'Teste de reidentificação por combinação de segmentos', dono: '@ml-nina', prazo: '16/08', concluida: false },
+    ],
+    triggers: [
+      { codigo: 'T1', categoria: 'dado sensível', critico: true, evidencias: ['segmento inferido reconstrói afinidade sensível'] },
+      { codigo: 'T2', categoria: 'menores', critico: true, evidencias: ['perfil_infantil presente na audiência'] },
+      { codigo: 'T4', categoria: 'monitoramento', critico: true, evidencias: ['telemetria contínua do player'] },
+      { codigo: 'T8', categoria: 'transferência internacional', critico: false, evidencias: ['Google Ad Manager em us-east'] },
+    ],
+    status: 'em_revisao',
+    linddun: LINDDUN_BASE.map((l) => ({ ...l, ativo: true })),
+  }],
+  riscos: riscosComuns(
+    { codigo: 'R1', descricao: 'Inferência reconstrói categoria sensível sem coleta', probabilidade: 5, impacto: 5, dano: 'discriminacao', danoTexto: 'Exposição de característica protegida a anunciantes, com efeito de discriminação sem que o titular tenha informado nada', tratamento: 'Excluir títulos sensíveis do sinal; auditoria de reidentificação por combinação', tipo: 'evitar', esforcoSprints: 1.5, dono: '@bruno.reis', dominio: 'Engenharia', prazo: '02/08', reavaliacao: '02/11', status: 'aberto', ripdCodigo: 'RIPD-2026-008' },
+    { codigo: 'R2', descricao: 'Perfil infantil em audiência publicitária', probabilidade: 3, impacto: 5, dano: 'moral', danoTexto: 'Publicidade comportamental dirigida a criança (Art. 14)', tratamento: 'Bloqueio de perfis infantis no pipeline de audiência', tipo: 'evitar', esforcoSprints: 0.5, dono: '@squad-conta', dominio: 'Engenharia', prazo: '02/08', reavaliacao: '02/11', status: 'mitigado', ripdCodigo: 'RIPD-2026-008' },
+  ),
+  lias: [{
+    id: 'l1', codigo: 'LIA-AUDIENCIA-003', titulo: 'Medição de audiência agregada para relatório de licenciamento',
+    finalidade: 'Reportar audiência agregada por título aos detentores de direitos, obrigação contratual de licenciamento.',
+    categoria: 'Melhoria de produto', beneficio: 2, danoTitular: 3, expectativa: 'baixa',
+    alternativas: [
+      { alternativa: 'Anonimização', situacao: 'atendido', justificativa: 'O relatório usa contagem agregada por título com k≥50; nenhuma linha individual é exportada.' },
+      { alternativa: 'Pseudonimização', situacao: 'atendido', justificativa: 'Identificador de sessão HMAC rotacionado a cada 7 dias.' },
+      { alternativa: 'Escopo menor', situacao: 'rejeitado', justificativa: 'O contrato de licenciamento exige quebra por faixa etária e região.' },
+      { alternativa: 'Retenção menor', situacao: 'atendido', justificativa: 'Dado bruto de sessão vive 30 dias; só o agregado persiste.' },
+      { alternativa: 'Agregação', situacao: 'atendido', justificativa: 'É a forma do relatório: nunca sai linha individual.' },
+      { alternativa: 'Consentimento', situacao: 'nao_aplicavel', justificativa: 'A obrigação decorre do contrato de licenciamento, não da relação com o titular.' },
+    ],
+    evidencias: [{ arquivo: 'audiencia-003-agregacao.sql', tipo: 'política de retenção', hash: sha256('aud-003').slice(0, 16) }],
+    camposIds: ['m-geo'], status: 'vencida', vigenciaFim: '10/07/2026', diasParaVencer: -18,
+    documentoHash: sha256('LIA-AUDIENCIA-003').slice(0, 24),
+  }],
+  titulares: [
+    titular('t1', '404.882.113-90', 'Diego Rocha', 'diego.r@exemplo.com',
+      [{ chave: 'plano', rotulo: 'Plano', grupo: 'Assinatura', valor: 'Anual com anúncios', mascara: '••••••••••', baseLegal: 'execucao_contrato' }],
+      [{ chave: 'afinidade', rotulo: 'Afinidade de conteúdo', grupo: 'Publicidade', baseLegal: 'consentimento' }],
+      [{ destino: 'Google Ad Manager', finalidade: 'Anúncio segmentado', baseLegal: 'consentimento', internacional: true, mecanismo: 'clausulas_padrao_anpd', ultimaRemessa: '28/07' },
+       { destino: 'Nielsen', finalidade: 'Medição de audiência', baseLegal: 'execucao_contrato', internacional: true, mecanismo: 'clausulas_padrao_anpd', ultimaRemessa: '27/07' }]),
+    titular('t2', '620.559.874-02', 'Helena Martins', 'helena.m@exemplo.com',
+      [{ chave: 'plano', rotulo: 'Plano', grupo: 'Assinatura', valor: 'Mensal sem anúncios', mascara: '••••••••••', baseLegal: 'execucao_contrato' }], [],
+      [{ destino: 'Nielsen', finalidade: 'Medição de audiência', baseLegal: 'execucao_contrato', internacional: true, mecanismo: 'clausulas_padrao_anpd', ultimaRemessa: '26/07' }]),
+    titular('t3', '037.914.226-58', 'Tiago Nunes', 'tiago.n@exemplo.com',
+      [{ chave: 'plano', rotulo: 'Plano', grupo: 'Assinatura', valor: 'Família (2 perfis infantis)', mascara: '••••••••••', baseLegal: 'execucao_contrato' }], [],
+      [{ destino: 'Nielsen', finalidade: 'Medição de audiência', baseLegal: 'execucao_contrato', internacional: true, mecanismo: 'clausulas_padrao_anpd', ultimaRemessa: '25/07' }]),
+  ],
+  solicitacoes: solicitacoesPadrao(['t1', 't2', 't3'], ['contas', 'player', 'ads']),
+  expurgos: [
+    { id: 'e1', data: 'hoje', origem: 'cron', status: 'concluido', entradas: expurgoPadrao('player', [['sessoes', 'hard_delete', 220400], ['geolocalizacao', 'anonimizacao', 220400], ['segmentos', 'crypto_shredding', 3120], ['telemetria_bruta', 'compactacao_log', 940000]]) },
+    { id: 'e2', data: 'ontem', origem: 'solicitacao_titular', status: 'concluido', entradas: expurgoPadrao('ads', [['segmentos', 'crypto_shredding', 1]]) },
+  ],
+  chaves: [
+    { alias: 'alias/palco-pii-v1', finalidade: 'assinante_pii', status: 'ativa', criadaHaDias: 120, rotacaoEmDias: 15, criptoShredding: true, dependencias: ['assinantes', 'perfis'] },
+    { alias: 'alias/palco-afinidade-v1', finalidade: 'afinidade_sensivel', status: 'ativa', criadaHaDias: 25, rotacaoEmDias: 65, criptoShredding: true, dependencias: ['segmentos'] },
+    { alias: 'alias/palco-pii-v2', finalidade: 'assinante_pii_next', status: 'pendente', criadaHaDias: 0, rotacaoEmDias: 90, criptoShredding: true, dependencias: [] },
+    { alias: 'alias/telemetria-v4', finalidade: 'telemetria', status: 'ativa', criadaHaDias: 45, rotacaoEmDias: 45, criptoShredding: false, dependencias: ['telemetria_bruta'] },
+  ],
+  rotacao: {
+    chaveNova: 'alias/palco-pii-v2', chaveAntiga: 'alias/palco-pii-v1',
+    etapas: [
+      { etapa: 'gerar', rotulo: 'Gerar chave', status: 'executando', progresso: 20, detalhe: 'aguardando aprovação de mudança' },
+      { etapa: 'parameter_store', rotulo: 'Parameter Store', status: 'pendente', progresso: 0, detalhe: '' },
+      { etapa: 'canary_5', rotulo: 'Canary 5%', status: 'pendente', progresso: 0, detalhe: '' },
+      { etapa: 'recriptografar', rotulo: 'Recriptografar', status: 'pendente', progresso: 0, detalhe: '' },
+      { etapa: 'revogar_antiga', rotulo: 'Revogar antiga', status: 'pendente', progresso: 0, detalhe: '' },
+    ],
+  },
+  acessosKms: [
+    { quando: 'há 5 min', principal: 'role/player-svc', operacao: 'Decrypt', finalidade: 'assinante_pii', origemIp: '10.2.3.9', autorizado: true },
+    { quando: 'há 40 min', principal: 'role/ads-etl', operacao: 'Decrypt', finalidade: 'afinidade_sensivel', origemIp: '10.2.8.1', autorizado: false, motivo: 'pipeline de publicidade não tem escopo de afinidade sensível' },
+    { quando: 'há 4 h', principal: 'role/contas-svc', operacao: 'GenerateDataKey', finalidade: 'assinante_pii', origemIp: '10.2.1.5', autorizado: true },
+  ],
+  metricas: metricas(91.2, 22, 96, 1),
+  maturidade: maturidade(4, 4, 3, 3, 4),
+  raci: RACI,
+};
+
+export const CENARIOS: Record<string, Cenario> = { banco, varejo, midia };
+export const CENARIO_PADRAO = 'banco';

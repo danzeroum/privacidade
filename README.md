@@ -15,7 +15,8 @@ matriz de risco, parecer técnico e LIA — em uma interface única para **engen
 | # | Entregável | Onde |
 |---|---|---|
 | 1 | **Arquitetura** — como os 12 artefatos se conectam via API, ABAC por finalidade, ADRs | [`docs/01-arquitetura.md`](docs/01-arquitetura.md) |
-| 2 | **Wireframes das 8 telas** — protótipo navegável de alta fidelidade | [`prototipo/index.html`](prototipo/index.html) · spec em [`docs/02-wireframes.md`](docs/02-wireframes.md) |
+| 2 | **Wireframes das 8 telas** — protótipo estático de alta fidelidade | [`prototipo/index.html`](prototipo/index.html) · spec em [`docs/02-wireframes.md`](docs/02-wireframes.md) |
+| 2b | **Protótipo navegável** — React + TS, router, store, API mock, 9 regras LGPD como comportamento | [`app/`](app/) · guia em [`app/README.md`](app/README.md) |
 | 3 | **Fluxo ponta a ponta** — do PR bloqueado ao expurgo e à métrica | [`docs/03-fluxo-e2e.md`](docs/03-fluxo-e2e.md) |
 | 4 | **Schema PostgreSQL** — catálogo, RIPD, riscos, LIA, direitos, expurgo, KMS, auditoria | [`db/schema.sql`](db/schema.sql) |
 | + | **Contrato de API** — OpenAPI 3.1 que liga os artefatos à plataforma | [`api/openapi.yaml`](api/openapi.yaml) |
@@ -24,15 +25,26 @@ matriz de risco, parecer técnico e LIA — em uma interface única para **engen
 
 ## Como rodar
 
-### Protótipo
+### Protótipo estático
 
 ```bash
-# abra no navegador — arquivo único, sem dependências
+# arquivo único, sem dependências
 xdg-open prototipo/index.html
 ```
 
-As 8 telas navegam pelo menu lateral. O seletor de **público** no topo (Engenharia / DPO / Produto)
-muda o que cada tela oferece — não só o texto de ajuda. Tema claro e escuro pelo botão ◐.
+### Protótipo navegável
+
+```bash
+cd app
+npm install
+npm run dev    # http://localhost:5173
+npm test       # 26 testes de comportamento das 9 regras LGPD
+```
+
+Roteiro dos três fluxos críticos em [`app/README.md`](app/README.md).
+
+Nos dois protótipos, as 8 telas navegam pelo menu lateral e o seletor de **público** no topo muda o
+que cada tela oferece — não só o texto de ajuda. Tema claro e escuro pelo botão ◐.
 
 ### Banco
 
@@ -106,13 +118,18 @@ permissivo que a persistência é teatro.
 │   ├── 02-wireframes.md       spec anotada das 8 telas + sistema visual
 │   └── 03-fluxo-e2e.md        cenário completo, do PR ao expurgo
 ├── prototipo/
-│   └── index.html             protótipo navegável, arquivo único, tema claro/escuro
+│   └── index.html             protótipo estático, arquivo único, tema claro/escuro
 ├── db/
 │   ├── schema.sql             DDL: 39 tabelas, RLS, hash-chain, papéis por finalidade
 │   ├── seed.sql               massa de demonstração (mesmos números do protótipo)
 │   └── tests.sql              22 invariantes de privacidade
-└── api/
-    └── openapi.yaml           contrato 3.1 — 22 rotas
+├── api/
+│   └── openapi.yaml           contrato 3.1 — 22 rotas
+└── app/                       protótipo navegável React + TypeScript
+    ├── src/mock/api.ts        as 9 regras LGPD, implementadas fora da interface
+    ├── src/mock/scenarios.ts  três cenários: banco, varejo, mídia
+    ├── src/screens/           T1..T8 com rota real
+    └── tests/regras.test.tsx  26 testes de comportamento
 ```
 
 ---
@@ -128,16 +145,22 @@ O que foi efetivamente executado, não apenas escrito:
 | `tests.sql` | 22 invariantes, todas passam |
 | Detecção de adulteração no audit trail | detectada mesmo com os gatilhos desligados |
 | `openapi.yaml` | YAML válido, 22 rotas, nenhuma `$ref` quebrada |
-| Protótipo em Chromium (1440 px e 720 px) | zero erro de console, zero overflow horizontal |
-| Fluxos interativos | revelação com registro, arraste da matriz com justificativa, verificação de integridade, veredito do balanceamento |
+| Protótipo estático em Chromium (1440 px e 720 px) | zero erro de console, zero overflow horizontal |
+| Protótipo navegável: `tsc`, `vite build`, `vitest` | typecheck limpo, build de 322 kB, 26 testes passando |
+| App em Chromium, 8 rotas e 3 cenários | zero erro de console, zero overflow; Produto sem botão de revelar, T4 não monta para Segurança |
+| Fluxos interativos | revelação com registro e re-mascaramento em 60 s, aprovação do RIPD liberando o status check, adulteração do log detectada |
 
 ---
 
 ## Escopo e limites
 
-Isto é **arquitetura e protótipo**, não um sistema em produção. O protótipo é uma única página
-estática com dados de demonstração: não há backend, autenticação nem persistência. O `schema.sql`
-é executável e testado; a API está especificada, não implementada.
+Isto é **arquitetura e protótipo**, não um sistema em produção.
 
-Nenhum dado de titular real aparece em qualquer arquivo — os CPFs do protótipo são números de teste
-e os pseudônimos são fictícios.
+O protótipo em `prototipo/` é uma única página estática. O de `app/` é navegável e as 9 regras LGPD
+são comportamento verificável, mas a API roda no navegador: não há backend, e recarregar a página
+zera o estado. Trocar de papel é um seletor, não um login — o que se demonstra é a *consequência* do
+papel, não o mecanismo de autenticação. O `schema.sql` é executável e testado; a API do
+`openapi.yaml` está especificada e simulada, não implementada em servidor.
+
+Nenhum dado de titular real aparece em qualquer arquivo — os CPFs são números de teste e os nomes e
+pseudônimos são fictícios.
