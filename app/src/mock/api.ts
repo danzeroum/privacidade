@@ -1,7 +1,8 @@
 import { BancoMock, FalhaDeAuditoria, LogImutavel } from './db';
 import { pode } from './permissoes';
 import { POLITICA_PADRAO, politicaDe } from './politicas';
-import { motivoDaRecusa, transicaoPermitida } from './estados';
+import { ARTEFATOS, estadosDe, motivoDaRecusa, transicaoPermitida } from './estados';
+import type { Artefato, EstadoDe } from './estados';
 import { redigir } from '../lib/redator';
 import { sha256 } from '../lib/sha256';
 import { BASES_PARA_SENSIVEL } from './types';
@@ -334,13 +335,13 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
           return erro(409, `Há ${pendentesP0.length} recomendação P0 em aberto: "${pendentesP0[0].descricao}".`,
             'RIPD não fecha com P0 pendente — seria aprovar o risco, não o tratamento.') as Res<T>;
         }
-        ripd.status = 'aprovado';
+        ripd.status = 'vigente';
         // Simula o webhook: o status check do PR volta a verde e o merge libera.
         for (const g of banco.cenario.gates) {
           if (g.ripdId === ripd.id) { g.conclusao = 'success'; g.bloqueouMerge = false; }
         }
         banco.auditAppend({ ator, atorPapel: papel, acao: 'RIPD_APROVADO', recursoTipo: 'ripd', recursoId: ripd.codigo });
-        return ok({ status: 'aprovado', prNumero: ripd.prNumero, checkRun: 'success' }) as Res<T>;
+        return ok({ status: ripd.status, prNumero: ripd.prNumero, checkRun: 'success' }) as Res<T>;
       }
 
       if (acao === 'render') {
@@ -521,6 +522,29 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
       }) as Res<T>;
     }
 
+    /**
+     * PR 7 — `POST /v1/estados/{artefato}/{id}` com `{ para, … }`.
+     *
+     * Uma rota para os oito artefatos. Não existe rota de transição por
+     * artefato, e é isso que impede um caminho especial de nascer: quem
+     * precisar mover qualquer coisa passa pela mesma porta e pela mesma tabela.
+     */
+    case 'POST estados': {
+      const artefato = partes[1] as Artefato;
+      if (!ARTEFATOS.includes(artefato)) {
+        return erro(404, `Artefato desconhecido: ${partes[1]}.`) as Res<T>;
+      }
+      const alvo = alvoDaTransicao(banco, artefato, partes[2] ?? '', body);
+      if (!alvo) return erro(404, 'Não encontrado.') as Res<T>;
+
+      const para = String(body.para ?? '');
+      if (!estadosDe(artefato).includes(para as never)) {
+        return erro(422, `"${para}" não é estado de ${artefato}.`,
+          `Os estados declarados são: ${estadosDe(artefato).join(', ')}.`) as Res<T>;
+      }
+      return transitar<T>(banco, req, alvo, para);
+    }
+
     // ── C-07 — incidente de segurança (Art. 48) ───────────────────────────
     case 'GET incidentes':
       return ok(banco.cenario.incidentes) as Res<T>;
@@ -637,7 +661,7 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         }
 
         const agora = Date.now();
-        s.status = desfecho === 'recusado_com_fundamento' ? 'recusada' : 'concluida';
+        s.status = desfecho === 'recusado_com_fundamento' ? 'recusada_com_fundamento' : 'concluida';
         s.desfecho = desfecho;
         s.fundamento = fundamento;
         s.concluidaEmMs = agora;
@@ -719,6 +743,160 @@ function buscarTitular<T>(banco: BancoMock, req: Req): Res<T> {
   return ok({ id: titular.id, pseudonimo: `hmac:${cpfHash.slice(0, 4)}…${cpfHash.slice(-4)}` }) as Res<T>;
 }
 
+
+/**
+ * PR 7 — a rota única de transição.
+ *
+ * Um caminho para os oito artefatos, na ordem que o PR 4 fixou:
+ *
+ *   1. **sequência** — a tabela de `estados.ts` decide. Fora dela, 409.
+ *   2. **conteúdo** — o que o MAPA exige *daquela* transição. Faltando, 422.
+ *   3. **registro** — `auditAppend` antes de aplicar. Falhando, 503 e o estado
+ *      não muda.
+ *
+ * A validação de conteúdo mora aqui e não em `estados.ts` de propósito: a
+ * tabela não sabe o que é justificativa, dono ou gatilho, e não deve saber.
+ */
+type Alvo = { artefato: Artefato; id: string; estado: string; aplicar: () => void };
+
+/** O que cada transição exige além de ser legal. Vazio = só a sequência. */
+function exigenciasDe(
+  artefato: Artefato, de: string, para: string, body: Record<string, any>,
+): string | null {
+  const texto = (chave: string) => String(body[chave] ?? '').trim();
+
+  if (artefato === 'ripd' && para === 'dispensado') {
+    if (texto('justificativa').length < 20) {
+      return 'Dispensar o RIPD exige justificativa de ao menos 20 caracteres — dispensa sem registro é omissão, não decisão.';
+    }
+    if (!texto('gatilhoDeReabertura')) {
+      return 'Dispensa exige gatilho de reabertura declarado: sem ele, a dispensa vale para sempre e ninguém revisita.';
+    }
+  }
+  if (artefato === 'risco' && para === 'aceito') {
+    if (!texto('donoDaAceitacao')) return 'Aceitar um risco exige dono declarado — risco aceito sem dono volta como surpresa.';
+    if (!texto('prazoDeReavaliacao')) return 'Aceitar um risco exige prazo de reavaliação.';
+    if (!texto('gatilhoDeReabertura')) return 'Aceitar um risco exige gatilho de reabertura.';
+  }
+  if (artefato === 'solicitacao' && para === 'recusada_com_fundamento' && texto('fundamento').length < 20) {
+    return 'Recusar um direito exige fundamento legal de ao menos 20 caracteres (Art. 18, §4º).';
+  }
+  if (artefato === 'achado' && para === 'verificado' && !texto('verificadoPor')) {
+    return 'A verificação de eficácia é independente: declare quem verificou.';
+  }
+  if (artefato === 'parecer' && para === 'devolvido' && texto('motivo').length < 20) {
+    return 'Devolver o parecer exige motivo de ao menos 20 caracteres — devolução sem motivo é ida e volta sem aprendizado.';
+  }
+  if (de === para) return null;
+  return null;
+}
+
+export function transitar<T>(
+  banco: BancoMock, req: Req, alvo: Alvo, para: string,
+): Res<T> {
+  const body = (req.body ?? {}) as Record<string, any>;
+
+  // 1 · sequência
+  const fora = guardaDeSequencia<Artefato, T>(
+    alvo.artefato, `${alvo.artefato} ${alvo.id}`,
+    alvo.estado as never, para as never,
+  );
+  if (fora) return fora;
+
+  // 2 · conteúdo
+  const faltando = exigenciasDe(alvo.artefato, alvo.estado, para, body);
+  if (faltando) {
+    return erro(422, faltando,
+      `A transição ${alvo.estado} → ${para} é legal; o que falta é o conteúdo que a sustenta.`) as Res<T>;
+  }
+
+  // 3 · registro antes de aplicar
+  try {
+    banco.auditAppend({
+      ator: req.ator, atorPapel: req.papel, acao: 'ESTADO_TRANSICIONADO',
+      recursoTipo: alvo.artefato, recursoId: alvo.id,
+      justificativa: body.justificativa || body.fundamento || body.motivo
+        ? redigir(String(body.justificativa ?? body.fundamento ?? body.motivo)).texto
+        : undefined,
+      campos: [`${alvo.estado}→${para}`],
+    });
+  } catch (e) {
+    const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a transição.';
+    return erro(503, msg, 'Sem registro não há transição: a ordem é gravar, depois mover.') as Res<T>;
+  }
+
+  alvo.aplicar();
+  return ok({ artefato: alvo.artefato, id: alvo.id, de: alvo.estado, para }) as Res<T>;
+}
+
+/**
+ * Resolve o artefato pedido. É o único lugar que sabe onde cada estado está
+ * guardado — e é o que permite a rota de transição ser genérica de verdade.
+ */
+function alvoDaTransicao(banco: BancoMock, artefato: Artefato, id: string, body: Record<string, any>): Alvo | null {
+  const c = banco.cenario;
+  switch (artefato) {
+    case 'parecer': {
+      const x = c.pareceres.find((p) => p.id === id || p.codigo === id);
+      return x ? { artefato, id: x.codigo, estado: x.status, aplicar: () => {
+        const para = String(body.para);
+        if (para === 'devolvido') x.devolucoes += 1;
+        x.status = para as typeof x.status;
+      } } : null;
+    }
+    case 'ripd': {
+      const x = c.ripds.find((r) => r.id === id || r.codigo === id);
+      return x ? { artefato, id: x.codigo, estado: x.status, aplicar: () => { x.status = String(body.para) as typeof x.status; } } : null;
+    }
+    case 'lia': {
+      const x = c.lias.find((l) => l.id === id || l.codigo === id);
+      return x ? { artefato, id: x.codigo, estado: x.status, aplicar: () => { x.status = String(body.para) as typeof x.status; } } : null;
+    }
+    case 'risco': {
+      const x = c.riscos.find((r) => r.codigo === id);
+      return x ? { artefato, id: x.codigo, estado: x.status, aplicar: () => {
+        const para = String(body.para);
+        if (para === 'aceito') {
+          x.donoDaAceitacao = String(body.donoDaAceitacao);
+          x.prazoDeReavaliacao = String(body.prazoDeReavaliacao);
+          x.gatilhoDeReabertura = String(body.gatilhoDeReabertura);
+        }
+        x.status = para as typeof x.status;
+      } } : null;
+    }
+    case 'solicitacao': {
+      const x = c.solicitacoes.find((s) => s.id === id || s.protocolo === id);
+      return x ? { artefato, id: x.protocolo, estado: x.status, aplicar: () => { x.status = String(body.para) as typeof x.status; } } : null;
+    }
+    case 'achado': {
+      const x = c.achados.find((a) => a.id === id || a.codigo === id);
+      return x ? { artefato, id: x.codigo, estado: x.status, aplicar: () => {
+        const para = String(body.para);
+        if (para === 'reaberto') {
+          // O MAPA é explícito: reaberto entra com criticidade elevada e conta
+          // como reincidência. Achado que volta não volta igual.
+          x.reincidencias += 1;
+          x.criticidade = x.criticidade === 'critica' ? 'critica'
+            : x.criticidade === 'alta' ? 'critica'
+              : x.criticidade === 'media' ? 'alta' : 'media';
+        }
+        if (para === 'verificado') x.verificadoPor = String(body.verificadoPor);
+        x.status = para as typeof x.status;
+      } } : null;
+    }
+    case 'incidente': {
+      const x = c.incidentes.find((i) => i.id === id);
+      return x ? { artefato, id: x.id, estado: x.estado, aplicar: () => { x.estado = String(body.para) as typeof x.estado; } } : null;
+    }
+    case 'chave': {
+      const x = c.chaves.find((k) => k.alias === decodeURIComponent(id));
+      return x ? { artefato, id: x.alias, estado: x.status, aplicar: () => { x.status = String(body.para) as typeof x.status; } } : null;
+    }
+    default:
+      return null;
+  }
+}
+
 /**
  * C-07 — incidente de segurança (Art. 48).
  *
@@ -733,10 +911,23 @@ function buscarTitular<T>(banco: BancoMock, req: Req): Res<T> {
  * Trocar os dois códigos é o defeito comum: devolver 422 para quem pulou a
  * contenção manda a pessoa reescrever um texto que já estava bom.
  */
+/**
+ * O guarda de sequência, único para os oito artefatos.
+ *
+ * Não existe versão por artefato: quem quiser mover qualquer coisa passa por
+ * aqui, e quem decide é a tabela de `mock/estados.ts`. Um caminho especial
+ * escrito à mão em qualquer rota quebraria o teste que percorre todos os pares
+ * de estados de todas as máquinas.
+ */
+export function guardaDeSequencia<A extends Artefato, T>(
+  artefato: A, id: string, de: EstadoDe<A>, para: EstadoDe<A>,
+): Res<T> | null {
+  if (transicaoPermitida(artefato, de, para)) return null;
+  return erro(409, `${id} está em "${de}".`, motivoDaRecusa(artefato, de, para)) as Res<T>;
+}
+
 const guardaDeTransicao = <T>(inc: Incidente, para: EstadoIncidente): Res<T> | null =>
-  (transicaoPermitida(inc.estado, para)
-    ? null
-    : erro(409, `O incidente ${inc.id} está em "${inc.estado}".`, motivoDaRecusa(inc.estado, para)) as Res<T>);
+  guardaDeSequencia<'incidente', T>('incidente', `O incidente ${inc.id}`, inc.estado, para);
 
 function abrirIncidente<T>(banco: BancoMock, req: Req): Res<T> {
   const { papel, ator } = req;

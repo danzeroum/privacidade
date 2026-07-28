@@ -5,7 +5,10 @@ import { BancoMock } from '../src/mock/db';
 import { request } from '../src/mock/api';
 import { pode } from '../src/mock/permissoes';
 import { POLITICAS, POLITICA_PADRAO, politicaDe } from '../src/mock/politicas';
-import { TRANSICOES_INCIDENTE, transicaoPermitida } from '../src/mock/estados';
+import {
+  MAQUINAS, TRANSICOES_INCIDENTE, estadosDe, motivoDaRecusa, transicaoPermitida,
+  type Artefato,
+} from '../src/mock/estados';
 import { CampoPII, Didatico, Explica } from '../src/ui/primitivos';
 import { MemoryRouter } from 'react-router-dom';
 import T2 from '../src/screens/T2';
@@ -692,7 +695,8 @@ describe('T4-02 — concluir o atendimento', () => {
       body: { desfecho: 'recusado_com_fundamento', evidencia: 'Guarda fiscal obrigatória de 5 anos impede a eliminação agora.' },
     });
     expect(comRazao.status).toBe(200);
-    expect(banco.cenario.solicitacoes.find((x) => x.id === 's1')!.status).toBe('recusada');
+    // PR 7 — o estado passou a se chamar como no MAPA.
+    expect(banco.cenario.solicitacoes.find((x) => x.id === 's1')!.status).toBe('recusada_com_fundamento');
   });
 
   it('se o audit trail falha, a solicitação continua aberta', () => {
@@ -764,7 +768,7 @@ describe('T4-05 — "atendidas no SLA" mede SLA', () => {
   it('cada solicitação encerrada tem instante de conclusão comparável ao prazo', () => {
     for (const id of ['banco', 'varejo', 'midia']) {
       const b = new BancoMock(id);
-      const encerradas = b.cenario.solicitacoes.filter((s) => s.status === 'concluida' || s.status === 'recusada');
+      const encerradas = b.cenario.solicitacoes.filter((s) => s.status === 'concluida' || s.status === 'recusada_com_fundamento');
       expect(encerradas.length, id).toBeGreaterThan(0);
       for (const s of encerradas) {
         expect(s.concluidaEmMs, `${id}/${s.protocolo} sem instante de conclusão`).toBeDefined();
@@ -1069,7 +1073,7 @@ describe('C-07 · máquina de estados do incidente — verificação, não valid
     const todos: EstadoIncidente[] = ['aberto', 'contido', 'decidido', 'comunicado', 'nao_comunicado', 'encerrado'];
     for (const de of todos) {
       for (const para of todos) {
-        expect(transicaoPermitida(de, para), `${de} → ${para}`)
+        expect(transicaoPermitida('incidente', de, para), `${de} → ${para}`)
           .toBe(TRANSICOES_INCIDENTE[de].includes(para));
       }
     }
@@ -1918,5 +1922,288 @@ describe('T1-03 · unidade — a bolha é botão inteiro', () => {
     const bolha = document.querySelector('.bub') as HTMLElement;
     expect(bolha.querySelector('title')).not.toBeNull();
     expect(bolha.getAttribute('aria-label')).not.toBe(bolha.querySelector('title')?.textContent);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PR 7 — Máquinas de estado dos oito artefatos
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe('PR 7 · a tabela é a única autoridade sobre sequência', () => {
+  const ARTEFATOS: Artefato[] = [
+    'parecer', 'ripd', 'lia', 'risco', 'solicitacao', 'achado', 'incidente', 'chave',
+  ];
+
+  it('cada artefato do MAPA tem máquina declarada, e nenhuma a mais', () => {
+    expect(Object.keys(MAQUINAS).sort()).toEqual([...ARTEFATOS].sort());
+  });
+
+  /**
+   * O teste que sustenta a regra "toda transição percorre a tabela": para cada
+   * artefato, **todos** os pares de estados são exercitados, e só os da tabela
+   * passam. Um caminho especial escrito à mão em qualquer lugar quebra aqui.
+   */
+  it('para cada artefato, só os pares da tabela são permitidos', () => {
+    for (const artefato of ARTEFATOS) {
+      const estados = estadosDe(artefato) as string[];
+      let permitidos = 0;
+      for (const de of estados) {
+        for (const para of estados) {
+          const esperado = (MAQUINAS[artefato] as Record<string, string[]>)[de].includes(para);
+          expect(
+            transicaoPermitida(artefato as never, de as never, para as never),
+            `${artefato}: ${de} → ${para}`,
+          ).toBe(esperado);
+          if (esperado) permitidos += 1;
+        }
+      }
+      // Nenhuma máquina é vazia nem totalmente conectada: as duas coisas
+      // significariam que a tabela não está dizendo nada.
+      expect(permitidos, `${artefato}: transições declaradas`).toBeGreaterThan(0);
+      expect(permitidos, `${artefato}: não é grafo completo`).toBeLessThan(estados.length ** 2);
+    }
+  });
+
+  it('nenhum artefato inventou estado além do MAPA', () => {
+    const doMapa: Record<Artefato, string[]> = {
+      parecer: ['rascunho', 'emitido', 'homologado', 'vigente', 'devolvido'],
+      ripd: ['triagem', 'dispensado', 'elaboracao', 'parecer_juridico', 'deliberado', 'vigente', 'em_revisao'],
+      lia: ['rascunho', 'balanceamento', 'assinada', 'vigente', 'vencida'],
+      risco: ['identificado', 'avaliado', 'em_tratamento', 'mitigado', 'aceito'],
+      solicitacao: ['recebida', 'em_analise', 'concluida', 'recusada_com_fundamento'],
+      achado: ['aberto', 'causa_raiz', 'plano', 'executado', 'verificado', 'encerrado', 'reaberto'],
+      incidente: ['aberto', 'contido', 'decidido', 'comunicado', 'nao_comunicado', 'encerrado'],
+      chave: ['nova', 'recriptografando', 'canary', 'ativa', 'revogada'],
+    };
+    for (const artefato of ARTEFATOS) {
+      expect((estadosDe(artefato) as string[]).sort(), artefato).toEqual([...doMapa[artefato]].sort());
+    }
+  });
+
+  it('nenhum estado aponta para fora da própria máquina', () => {
+    for (const artefato of ARTEFATOS) {
+      const estados = new Set(estadosDe(artefato) as string[]);
+      for (const [de, destinos] of Object.entries(MAQUINAS[artefato] as Record<string, string[]>)) {
+        for (const para of destinos) {
+          expect(estados.has(para), `${artefato}: ${de} → ${para} sai da máquina`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('as oito transições ilegais nomeadas no MAPA são recusadas', () => {
+    const ilegais: [Artefato, string, string][] = [
+      ['ripd', 'triagem', 'vigente'],
+      ['lia', 'vencida', 'vigente'],
+      ['solicitacao', 'recebida', 'concluida'],
+      ['achado', 'executado', 'encerrado'],
+      ['incidente', 'aberto', 'comunicado'],
+      ['incidente', 'contido', 'comunicado'],
+      ['chave', 'recriptografando', 'ativa'],
+      ['parecer', 'rascunho', 'vigente'],
+    ];
+    for (const [artefato, de, para] of ilegais) {
+      expect(transicaoPermitida(artefato as never, de as never, para as never), `${artefato}: ${de} → ${para}`).toBe(false);
+      // A recusa ensina: nenhuma delas devolve mensagem genérica vazia.
+      expect(motivoDaRecusa(artefato as never, de as never, para as never).length).toBeGreaterThan(30);
+    }
+  });
+
+  it('as transições que o MAPA permite explicitamente passam', () => {
+    const legais: [Artefato, string, string][] = [
+      ['lia', 'vencida', 'balanceamento'],
+      ['ripd', 'triagem', 'dispensado'],
+      ['ripd', 'vigente', 'em_revisao'],
+      ['achado', 'verificado', 'reaberto'],
+      ['parecer', 'devolvido', 'emitido'],
+      ['risco', 'em_tratamento', 'aceito'],
+    ];
+    for (const [artefato, de, para] of legais) {
+      expect(transicaoPermitida(artefato as never, de as never, para as never), `${artefato}: ${de} → ${para}`).toBe(true);
+    }
+  });
+
+  it('estados.ts é puro: não importa nada e não lê papel, banco nem conteúdo', () => {
+    const fonte = readFileSync('src/mock/estados.ts', 'utf8');
+
+    // Pureza pela dependência, que é o teste mais forte: um arquivo que não
+    // importa nada não tem como consultar permissão, banco ou artigo.
+    expect(fonte.match(/^\s*import\s/m), 'estados.ts não deve importar nada').toBeNull();
+
+    /**
+     * E pelos identificadores. Comentários e mensagens podem citar "fundamento"
+     * — a mensagem de recusa do incidente cita, e deve citar. O que não pode é
+     * o arquivo **ler** o fundamento; por isso a varredura descarta comentários
+     * e literais de texto antes de procurar.
+     */
+    const soCodigo = fonte
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/[^\n]*/g, '')
+      .replace(/'[^']*'/g, "''")
+      .replace(/`[^`]*`/g, '``');
+    // Identificadores, com fronteira de palavra: `recusada_com_fundamento` é
+    // **nome de estado** do MAPA e contém a substring — casar por `includes`
+    // acusaria a própria tabela de ler o que ela só nomeia.
+    for (const proibido of ['papel', 'fundamento', 'justificativa', 'artigo']) {
+      const usa = new RegExp(`\\b${proibido}\\b`).test(soCodigo);
+      expect(usa, `estados.ts lê "${proibido}" — isso é validação, não verificação`).toBe(false);
+    }
+    for (const proibido of ['pode(', 'auditAppend', 'BancoMock', 'Art.']) {
+      expect(soCodigo.includes(proibido), `estados.ts referencia "${proibido}"`).toBe(false);
+    }
+  });
+});
+
+describe('PR 7 · a rota de transição — sequência, conteúdo, registro', () => {
+  const mover = (artefato: string, id: string, body: Record<string, unknown>) =>
+    chamar('dpo', { metodo: 'POST', caminho: `/v1/estados/${artefato}/${id}`, body });
+
+  it('aceitação — fora da tabela é 409; dentro dela sem conteúdo é 422', () => {
+    // Sequência: o RIPD está em `vigente` (semeado); pular para `deliberado` é
+    // problema de ordem, não de conteúdo.
+    const ripd = banco.cenario.ripds[0];
+    ripd.status = 'triagem';
+    const fora = mover('ripd', ripd.id, { para: 'vigente' });
+    expect(fora.status).toBe(409);
+    expect(ripd.status).toBe('triagem');
+
+    // Conteúdo: `triagem → dispensado` é legal, mas exige justificativa.
+    const semRazao = mover('ripd', ripd.id, { para: 'dispensado' });
+    expect(semRazao.status).toBe(422);
+    expect(ripd.status).toBe('triagem');
+  });
+
+  it('aceitação — ripd dispensado exige justificativa e gatilho de reabertura', () => {
+    const ripd = banco.cenario.ripds[0];
+    ripd.status = 'triagem';
+
+    const soJustificativa = mover('ripd', ripd.id, {
+      para: 'dispensado', justificativa: 'Tratamento não usa dado pessoal nesta versão.',
+    });
+    expect(soJustificativa.status).toBe(422);
+    expect((soJustificativa.body as { erro: string }).erro).toContain('gatilho de reabertura');
+
+    const completo = mover('ripd', ripd.id, {
+      para: 'dispensado',
+      justificativa: 'Tratamento não usa dado pessoal nesta versão.',
+      gatilhoDeReabertura: 'Qualquer coleta de identificador direto reabre a triagem.',
+    });
+    expect(completo.status).toBe(200);
+    expect(ripd.status).toBe('dispensado');
+  });
+
+  it('aceitação — lia: vencida → vigente é 409; vencida → balanceamento passa', () => {
+    const lia = banco.cenario.lias[0];
+    lia.status = 'vencida';
+
+    const recarimbo = mover('lia', lia.id, { para: 'vigente' });
+    expect(recarimbo.status).toBe(409);
+    expect(recarimbo.regra).toContain('rebalanceamento');
+    expect(lia.status).toBe('vencida');
+
+    expect(mover('lia', lia.id, { para: 'balanceamento' }).status).toBe(200);
+    expect(lia.status).toBe('balanceamento');
+  });
+
+  it('aceitação — risco aceito exige dono e prazo de reavaliação', () => {
+    const risco = banco.cenario.riscos[0];
+    risco.status = 'em_tratamento';
+
+    const semDono = mover('risco', risco.codigo, { para: 'aceito', prazoDeReavaliacao: '90 dias' });
+    expect(semDono.status).toBe(422);
+    expect((semDono.body as { erro: string }).erro).toContain('dono');
+    expect(risco.status).toBe('em_tratamento');
+
+    const semPrazo = mover('risco', risco.codigo, { para: 'aceito', donoDaAceitacao: '@dpo-marcela' });
+    expect(semPrazo.status).toBe(422);
+    expect((semPrazo.body as { erro: string }).erro).toContain('prazo');
+
+    const completo = mover('risco', risco.codigo, {
+      para: 'aceito', donoDaAceitacao: '@dpo-marcela',
+      prazoDeReavaliacao: '90 dias', gatilhoDeReabertura: 'Incidente que toque o campo reabre o risco.',
+    });
+    expect(completo.status).toBe(200);
+    expect(risco.status).toBe('aceito');
+    expect(risco.donoDaAceitacao).toBe('@dpo-marcela');
+  });
+
+  it('aceitação — achado: executado → encerrado é 409; reaberto eleva a criticidade', () => {
+    const achado = banco.cenario.achados[0];
+    achado.status = 'executado';
+
+    const pulando = mover('achado', achado.id, { para: 'encerrado' });
+    expect(pulando.status).toBe(409);
+    expect(pulando.regra).toContain('verificação independente');
+    expect(achado.status).toBe('executado');
+
+    expect(mover('achado', achado.id, { para: 'verificado', verificadoPor: '@auditoria' }).status).toBe(200);
+
+    const criticidadeAntes = achado.criticidade;
+    expect(criticidadeAntes).toBe('alta');
+    expect(mover('achado', achado.id, { para: 'reaberto' }).status).toBe(200);
+    expect(achado.criticidade).toBe('critica');
+    expect(achado.reincidencias).toBe(1);
+  });
+
+  it('solicitacao: recebida → concluida é 409 — conclusão sem análise não prova nada', () => {
+    const s = banco.cenario.solicitacoes[0];
+    s.status = 'recebida';
+    const res = mover('solicitacao', s.id, { para: 'concluida' });
+    expect(res.status).toBe(409);
+    expect(res.regra).toContain('sem análise');
+    expect(s.status).toBe('recebida');
+  });
+
+  it('transição legal sem auditAppend possível devolve 503, e o estado não muda', () => {
+    const lia = banco.cenario.lias[0];
+    lia.status = 'vencida';
+    banco.simularFalhaDeLog = true;
+
+    const res = mover('lia', lia.id, { para: 'balanceamento' });
+    expect(res.status).toBe(503);
+    expect(lia.status).toBe('vencida');
+  });
+
+  it('a transição registra antes de aplicar, com o par de estados no trail', () => {
+    const lia = banco.cenario.lias[0];
+    lia.status = 'vencida';
+    const antes = banco.auditoria.length;
+
+    expect(mover('lia', lia.id, { para: 'balanceamento' }).status).toBe(200);
+    expect(banco.auditoria.length).toBe(antes + 1);
+    const registro = banco.auditoria.at(-1)!;
+    expect(registro.acao).toBe('ESTADO_TRANSICIONADO');
+    expect(registro.campos).toContain('vencida→balanceamento');
+  });
+
+  it('estado que não existe na máquina é 422, com a lista do que existe', () => {
+    const res = mover('lia', banco.cenario.lias[0].id, { para: 'aposentada' });
+    expect(res.status).toBe(422);
+    expect(res.regra).toContain('rascunho');
+  });
+
+  it('artefato desconhecido é 404 — a rota não inventa máquina', () => {
+    expect(mover('contrato', 'x1', { para: 'vigente' }).status).toBe(404);
+  });
+
+  it('a rota é escrita: papel de leitura não move artefato nenhum', () => {
+    const lia = banco.cenario.lias[0];
+    lia.status = 'vencida';
+    const res = chamar('auditor', {
+      metodo: 'POST', caminho: `/v1/estados/lia/${lia.id}`, body: { para: 'balanceamento' },
+    });
+    expect(res.status).toBe(403);
+    expect(lia.status).toBe('vencida');
+  });
+
+  it('a redação do C-04 vale também aqui: PII no motivo não entra no trail', () => {
+    const ripd = banco.cenario.ripds[0];
+    ripd.status = 'triagem';
+    mover('ripd', ripd.id, {
+      para: 'dispensado',
+      justificativa: 'Confirmado com o titular 529.982.247-25 que não há tratamento.',
+      gatilhoDeReabertura: 'Coleta de identificador direto reabre.',
+    });
+    expect(banco.auditoria.at(-1)!.justificativa).not.toContain('529.982.247-25');
   });
 });

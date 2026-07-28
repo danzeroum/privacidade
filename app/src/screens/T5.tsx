@@ -174,7 +174,7 @@ export default function T5() {
               <dt>Prazo</dt><dd>{selecionado.prazo} · reavaliar em {selecionado.reavaliacao}</dd>
               <dt>Status</dt>
               <dd>
-                <Pill tom={selecionado.status === 'mitigado' ? 'ok' : selecionado.status === 'aberto' ? 'crit' : 'warn'}>
+                <Pill tom={selecionado.status === 'mitigado' ? 'ok' : selecionado.status === 'identificado' ? 'crit' : 'warn'}>
                   {selecionado.status.replace('_', ' ')}
                 </Pill>
               </dd>

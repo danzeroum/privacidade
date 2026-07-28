@@ -1,5 +1,19 @@
 /** Vocabulário controlado — espelha os enums de db/schema.sql. */
 
+/**
+ * PR 7 — os estados são reexportados de `mock/estados.ts`, que é a autoridade
+ * sobre sequência. Antes, cada artefato declarava o próprio conjunto aqui e a
+ * máquina não existia: dois lugares dizendo o que é um estado válido.
+ */
+export type {
+  EstadoParecer, EstadoRipd, EstadoLia, EstadoRisco,
+  EstadoSolicitacao, EstadoAchado, EstadoIncidente, EstadoChave,
+} from './estados';
+import type {
+  EstadoParecer, EstadoRipd, EstadoLia, EstadoRisco,
+  EstadoSolicitacao, EstadoAchado, EstadoIncidente, EstadoChave,
+} from './estados';
+
 export type Papel = 'engenharia' | 'dpo' | 'produto' | 'seguranca' | 'auditor';
 
 export type Finalidade = 'atendimento' | 'cobranca' | 'auditoria' | 'seguranca';
@@ -119,7 +133,8 @@ export interface Ripd {
   operacoes: { operacao: string; finalidade: string; baseLegal: BaseLegal; liaCodigo?: string }[];
   recomendacoes: Recomendacao[];
   triggers: RipdTrigger[];
-  status: 'rascunho' | 'em_revisao' | 'aprovado' | 'reprovado';
+  /** PR 7 — estados do `MAPA-PROCESSOS.md §2`. `vigente` é o antigo `aprovado`. */
+  status: EstadoRipd;
   linddun: LinddunItem[];
 }
 
@@ -147,7 +162,11 @@ export interface Risco {
   dominio: string;
   prazo: string;
   reavaliacao: string;
-  status: 'aberto' | 'em_tratamento' | 'mitigado' | 'aceito';
+  status: EstadoRisco;
+  /** Exigidos para aceitar o risco: sem dono e sem prazo, ele volta como surpresa. */
+  donoDaAceitacao?: string;
+  prazoDeReavaliacao?: string;
+  gatilhoDeReabertura?: string;
   ripdCodigo?: string;
 }
 
@@ -178,7 +197,7 @@ export interface Lia {
   alternativas: LiaAlternativa[];
   evidencias: { arquivo: string; tipo: string; hash: string }[];
   camposIds: string[];
-  status: 'rascunho' | 'vigente' | 'vencida' | 'revogada';
+  status: EstadoLia;
   vigenciaFim: string;
   diasParaVencer: number;
   assinaturaDpo?: string;
@@ -235,7 +254,7 @@ export interface Solicitacao {
   titularId: string;
   titularPseudonimo: string;
   direito: Direito;
-  status: 'recebida' | 'em_analise' | 'aguardando_titular' | 'concluida' | 'recusada';
+  status: EstadoSolicitacao;
   nivelVerificacao: 1 | 2 | 3;
   sistemas: string[];
   recebidaEm: string;
@@ -271,7 +290,7 @@ export interface ExpurgoRun {
 export interface ChaveKms {
   alias: string;
   finalidade: string;
-  status: 'ativa' | 'canary' | 'revogada' | 'pendente';
+  status: EstadoChave;
   criadaHaDias: number;
   rotacaoEmDias: number | null;
   criptoShredding: boolean;
@@ -336,10 +355,38 @@ export interface Maturidade {
   evidencias: string[];
 }
 
-// ── C-07 · incidente de segurança (Art. 48) ─────────────────────────────────
+// ── PR 7 · artefatos que a máquina de estados move ──────────────────────────
 
-export type EstadoIncidente =
-  | 'aberto' | 'contido' | 'decidido' | 'comunicado' | 'nao_comunicado' | 'encerrado';
+/**
+ * Parecer técnico e achado de auditoria não existiam como modelo: viviam como
+ * texto dentro do RIPD e como linha da trilha. Para a máquina de estados deles
+ * ser exercitável, precisam de identidade própria.
+ */
+export interface Parecer {
+  id: string;
+  codigo: string;
+  ripdId?: string;
+  status: EstadoParecer;
+  autor: string;
+  /** Máx. 2 devoluções; a terceira vai ao comitê (MAPA §2). */
+  devolucoes: number;
+}
+
+export interface Achado {
+  id: string;
+  codigo: string;
+  descricao: string;
+  origem: string;
+  status: EstadoAchado;
+  criticidade: 'baixa' | 'media' | 'alta' | 'critica';
+  /** Reaberto conta como reincidência e entra com criticidade elevada. */
+  reincidencias: number;
+  causaRaiz?: string;
+  plano?: string;
+  verificadoPor?: string;
+}
+
+// ── C-07 · incidente de segurança (Art. 48) ─────────────────────────────────
 
 export type DecisaoIncidente = 'comunicar_anpd_e_titulares' | 'comunicar_anpd' | 'nao_comunicar';
 
@@ -387,6 +434,8 @@ export interface Cenario {
   descricao: string;
   sistemas: Sistema[];
   campos: Campo[];
+  pareceres: Parecer[];
+  achados: Achado[];
   incidentes: Incidente[];
   consentimentos: Consentimento[];
   gates: GateRun[];

@@ -261,8 +261,8 @@ export default function T3() {
                 <button className="btn primary" onClick={anexarAoPr}>Anexar ao PR #{ripd.prNumero}</button>
               </Permitido>
               <Permitido acao="aprovar_ripd">
-                <button className="btn" onClick={aprovar} disabled={ripd.status === 'aprovado'}>
-                  {ripd.status === 'aprovado' ? 'Aprovado' : 'Aprovar como DPO'}
+                <button className="btn" onClick={aprovar} disabled={ripd.status === 'vigente'}>
+                  {ripd.status === 'vigente' ? 'Aprovado' : 'Aprovar como DPO'}
                 </button>
               </Permitido>
               <span className="hint">

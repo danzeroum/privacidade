@@ -93,6 +93,13 @@ export const POLITICAS: PoliticaRota[] = [
     nota: 'Revisão de decisão automatizada (Art. 20).',
   },
 
+  // ── Transições de estado (PR 7) ───────────────────────────────────────────
+  {
+    metodo: 'POST', caminho: /^estados\/[^/]+\/[^/]+$/,
+    tipo: 'escrita', foraDeEscopo: '403',
+    nota: 'Mover artefato entre estados. A sequência é da tabela de mock/estados.ts; o conteúdo exigido, da rota.',
+  },
+
   // ── Incidentes (C-07 · Art. 48) ───────────────────────────────────────────
   {
     metodo: 'GET', caminho: /^incidentes(\/.*)?$/,

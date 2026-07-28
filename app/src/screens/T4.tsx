@@ -29,7 +29,7 @@ const ABAS = [
 ] as const;
 type AbaId = (typeof ABAS)[number]['id'];
 
-const encerrada = (s: Solicitacao) => s.status === 'concluida' || s.status === 'recusada';
+const encerrada = (s: Solicitacao) => s.status === 'concluida' || s.status === 'recusada_com_fundamento';
 
 export default function T4() {
   const banco = useSessao((s) => s.banco);
@@ -193,7 +193,7 @@ export default function T4() {
                     ? (
                       <>
                         <span style={{ color: (s.concluidaEmMs ?? 0) <= s.prazoLimiteMs ? 'var(--ok)' : 'var(--warn)', fontSize: 12.5 }}>
-                          {s.status === 'recusada' ? 'recusada' : 'concluída'} em {s.concluidaEm}
+                          {s.status === 'recusada_com_fundamento' ? 'recusada' : 'concluída'} em {s.concluidaEm}
                           {' · '}{(s.concluidaEmMs ?? 0) <= s.prazoLimiteMs ? 'no prazo' : 'fora do prazo'}
                         </span>
                         {/* T4-05 — o prazo aparece ao lado da conclusão: duas datas
@@ -247,7 +247,7 @@ export default function T4() {
                 Titular <span className="mono">{foco.titularPseudonimo}</span> ·
                 {' '}recebida em {foco.recebidaEm} ·
                 {' '}{encerrada(foco)
-                  ? `${foco.status === 'recusada' ? 'recusada' : 'concluída'} em ${foco.concluidaEm}`
+                  ? `${foco.status === 'recusada_com_fundamento' ? 'recusada' : 'concluída'} em ${foco.concluidaEm}`
                   : formatarRestante(foco.prazoLimiteMs - Date.now())}
                 {' · '}verificação nível {foco.nivelVerificacao}
               </p>

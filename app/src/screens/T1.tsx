@@ -34,7 +34,7 @@ export default function T1() {
         danoTexto: 'Token válido extraiu a base inteira sem disparar alerta',
         tratamento: 'Rate limit por ator + paginação por cursor + alerta de volume',
         tipo: 'mitigar', esforcoSprints: 0.75, dono: '@seg-rita', dominio: 'Segurança',
-        prazo: 'imediato', reavaliacao: '30 dias', status: 'aberto',
+        prazo: 'imediato', reavaliacao: '30 dias', status: 'identificado',
       }]
     : riscos;
 
@@ -251,7 +251,7 @@ function Dispersao({ riscos, simulando, aoSelecionar }: {
 
   const pts = riscos.map((r) => ({
     r, cx: x(r.esforcoSprints), cy: y(r.probabilidade * r.impacto),
-    raio: 10 + (r.status === 'aberto' ? 4 : r.status === 'em_tratamento' ? 2 : 0),
+    raio: 10 + (r.status === 'identificado' || r.status === 'avaliado' ? 4 : r.status === 'em_tratamento' ? 2 : 0),
   }));
   for (let volta = 0; volta < 12; volta++) {
     let mexeu = false;
