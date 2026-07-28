@@ -13,10 +13,13 @@ import {
   CATEGORIAS, GATILHOS, TABELAS, TABELAS_IDS, aplicar, condicoesDe, nivelDoRisco,
   reproduzir, tomDoRisco, ultimaDecisao, vigenteDe,
 } from '../src/mock/decisoes';
+import { REGRAS, derivarFila } from '../src/mock/fila';
+import type { ContadoresDaFila, ItemDaFila } from '../src/mock/fila';
 import { CampoPII, Didatico, Explica } from '../src/ui/primitivos';
 import { MemoryRouter } from 'react-router-dom';
 import T2 from '../src/screens/T2';
-import { Casca } from '../src/App';
+import { Casca, TELAS } from '../src/App';
+import T0 from '../src/screens/T0';
 import T1 from '../src/screens/T1';
 import T3 from '../src/screens/T3';
 import T5 from '../src/screens/T5';
@@ -2353,7 +2356,7 @@ describe('PR 8 · D1, D2 e D3 como dados versionados', () => {
   });
 
   it('toda decisão semeada em todo cenário reproduz', () => {
-    for (const id of ['banco', 'varejo', 'streaming']) {
+    for (const id of ['banco', 'varejo', 'midia']) {
       const b = new BancoMock(id);
       const registros = [
         ...b.cenario.ripds.flatMap((r) => r.decisoes ?? []),
@@ -2377,7 +2380,7 @@ describe('PR 8 · D1, D2 e D3 como dados versionados', () => {
   });
 
   it('todo gatilho de todo cenário está no catálogo, e nenhum rótulo é repetido no dado', () => {
-    for (const id of ['banco', 'varejo', 'streaming']) {
+    for (const id of ['banco', 'varejo', 'midia']) {
       const b = new BancoMock(id);
       for (const r of b.cenario.ripds) {
         for (const t of r.triggers) {
@@ -2555,5 +2558,275 @@ describe('PR 8 · a tela explica a decisão em uma frase', () => {
 
     expect(screen.getByText(/o risco hoje está em P 1 × I 1/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Aplicar D2 com o P × I atual/ })).toBeInTheDocument();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('PR 9 · a fila derivada — a tabela e a derivação', () => {
+  const HOJE = Date.UTC(2026, 6, 28, 12, 0, 0);
+
+  it('nenhuma regra inventa estado, tela ou par duplicado', () => {
+    const rotas = new Set(TELAS.map((t) => t.rota));
+    const vistos = new Set<string>();
+    for (const r of REGRAS) {
+      // A tabela não pode declarar estado que a máquina do PR 7 desconhece: a
+      // fila derivaria de um estado que nenhum artefato alcança.
+      expect(estadosDe(r.artefato) as string[], `${r.artefato}: ${r.estado}`).toContain(r.estado);
+      expect(rotas, `${r.artefato} ${r.estado} aponta para ${r.tela}`).toContain(r.tela);
+      const chave = `${r.artefato}:${r.estado}:${r.quando}`;
+      expect(vistos.has(chave), `regra duplicada: ${chave}`).toBe(false);
+      vistos.add(chave);
+    }
+  });
+
+  it('nenhum item sai com marcador de substituição por preencher', () => {
+    // `{codigo}` que sobra é dado que a tabela pediu e o artefato não tem.
+    // Sem esta varredura, o defeito chega à tela como texto com chave crua.
+    for (const id of ['banco', 'varejo', 'midia']) {
+      for (const item of derivarFila(new BancoMock(id).cenario, HOJE)) {
+        for (const campo of [item.travado, item.proximaAcao, item.proximo, item.prazo.texto]) {
+          expect(campo, `${id} · ${item.id}: "${campo}"`).not.toMatch(/\{\w+\}/);
+        }
+        expect(item.travado.length, `${id} · ${item.id}`).toBeGreaterThan(20);
+      }
+    }
+  });
+
+  it('todo item aponta para um estado que a faixa de passos contém', () => {
+    for (const item of derivarFila(new BancoMock('banco').cenario, HOJE)) {
+      expect(item.estadoAtual, `${item.id}`).toBeGreaterThanOrEqual(0);
+      expect(item.estados.length).toBeGreaterThan(item.estadoAtual);
+    }
+  });
+
+  it('nenhum dado pessoal na fila, em nenhum papel, em nenhum cenário', () => {
+    // A regra é "código de artefato, nunca titular". O protocolo é o código da
+    // solicitação; o pseudônimo, o id e o hash do titular não podem aparecer em
+    // campo nenhum do item — nem no travado, nem no rito.
+    for (const id of ['banco', 'varejo', 'midia']) {
+      const b = new BancoMock(id);
+      const proibidos = b.cenario.titulares.flatMap((t) => [t.id, t.cpfHash]);
+      proibidos.push(...b.cenario.solicitacoes.map((s) => s.titularPseudonimo));
+      // Só os campos que chegam a gente. `tela` e `estados` são vocabulário do
+      // sistema — e `/t3` casaria com o id de titular `t3` por substring, que
+      // seria falso positivo, não vazamento.
+      const texto = derivarFila(b.cenario, HOJE)
+        .map((i) => [i.id, i.tipo, i.travado, i.proximaAcao, i.proximo, i.prazo.texto, i.rito.texto].join(' | '))
+        .join('\n');
+      for (const p of proibidos) {
+        expect(new RegExp(`\\b${p}\\b`).test(texto), `${id}: "${p}" vazou para a fila`).toBe(false);
+      }
+    }
+  });
+
+  it('trabalho em curso não vira item: risco em tratamento fica de fora', () => {
+    const b = new BancoMock('banco');
+    const emTratamento = b.cenario.riscos.filter((r) => r.status === 'em_tratamento');
+    expect(emTratamento.length).toBeGreaterThan(0);
+    const itens = derivarFila(b.cenario, HOJE);
+    for (const r of emTratamento) {
+      expect(itens.some((i) => i.id === r.codigo), `${r.codigo} não deveria estar na fila`).toBe(false);
+    }
+    // Contraprova: o identificado, que está parado, entra.
+    const parado = b.cenario.riscos.find((r) => r.status === 'identificado')!;
+    expect(itens.some((i) => i.id === parado.codigo)).toBe(true);
+  });
+
+  it('a solicitação vencida vem antes da chave que vence em 8 dias', () => {
+    const b = new BancoMock('banco');
+    const s = b.cenario.solicitacoes.find((x) => x.status === 'em_analise')!;
+    s.prazoLimiteMs = HOJE - 2 * 86_400_000;
+    const chave = b.cenario.chaves.find((k) => k.status === 'ativa')!;
+    chave.rotacaoEmDias = 8;
+
+    const fila = derivarFila(b.cenario, HOJE);
+    const posVencida = fila.findIndex((i) => i.id === s.protocolo);
+    const posChave = fila.findIndex((i) => i.id === chave.alias);
+    expect(posVencida).toBeGreaterThanOrEqual(0);
+    expect(posChave).toBeGreaterThan(posVencida);
+    expect(fila[posVencida].prazo.urgencia).toBe('vencido');
+    expect(fila[posChave].prazo.urgencia).toBe('30d');
+    // E a vencida é a primeira da fila inteira: nada precede prazo estourado.
+    expect(fila[0].id).toBe(s.protocolo);
+  });
+
+  it('dentro da faixa, o que não tem relógio vem antes do que tem', () => {
+    const fila = derivarFila(new BancoMock('banco').cenario, HOJE);
+    const trinta = fila.filter((i) => i.prazo.urgencia === '30d');
+    const primeiroComRelogio = trinta.findIndex((i) => i.prazo.restanteMs !== null);
+    expect(primeiroComRelogio).toBeGreaterThan(0);
+    // Depois do primeiro com relógio, ninguém sem relógio aparece.
+    expect(trinta.slice(primeiroComRelogio).every((i) => i.prazo.restanteMs !== null)).toBe(true);
+    // E entre os que têm relógio, o de menos tempo vem primeiro.
+    const comRelogio = trinta.slice(primeiroComRelogio).map((i) => i.prazo.restanteMs!);
+    expect([...comRelogio].sort((a, b) => a - b)).toEqual(comRelogio);
+  });
+
+  it('prazo legal correndo vem antes de vencimento de artefato mais próximo', () => {
+    const b = new BancoMock('banco');
+    // Uma solicitação com três dias de folga e uma chave que vence amanhã: a
+    // faixa é da natureza do prazo, não da distância dele.
+    const chave = b.cenario.chaves.find((k) => k.status === 'ativa')!;
+    chave.rotacaoEmDias = 1;
+    const fila = derivarFila(b.cenario, HOJE);
+    const solicitacao = fila.find((i) => i.artefato === 'solicitacao')!;
+    const daChave = fila.find((i) => i.id === chave.alias)!;
+    expect(fila.indexOf(solicitacao)).toBeLessThan(fila.indexOf(daChave));
+    expect(solicitacao.prazo.urgencia).toBe('agora');
+  });
+
+  it('o rito cita a regra que produziu o item, com a versão quando existe', () => {
+    const fila = derivarFila(new BancoMock('banco').cenario, HOJE);
+    const doRipd = fila.find((i) => i.artefato === 'ripd')!;
+    expect(doRipd.rito.fonte).toBe('d1@1');
+    expect(doRipd.rito.texto).toContain('complexidade');
+
+    const doRisco = fila.find((i) => i.artefato === 'risco')!;
+    expect(doRisco.rito.fonte).toBe('d2@1');
+
+    // Sem tabela de decisão aplicável, a fonte é a máquina de estados — que é,
+    // literalmente, a regra que colocou o item aqui.
+    const daChave = fila.find((i) => i.artefato === 'chave')!;
+    expect(daChave.rito.fonte).toContain('estados.ts');
+  });
+
+  it('produto e auditor não alcançam ação nenhuma da tabela', () => {
+    // Não é acidente da massa de dados: nenhuma das ações declaradas na tabela
+    // pertence a esses dois papéis, e por isso a fila deles é sempre vazia.
+    const acoes = [...new Set(REGRAS.map((r) => r.acao))];
+    for (const papel of ['produto', 'auditor'] as Papel[]) {
+      expect(acoes.filter((a) => pode(papel, a)), papel).toEqual([]);
+    }
+    for (const papel of ['engenharia', 'dpo', 'seguranca'] as Papel[]) {
+      expect(acoes.filter((a) => pode(papel, a)).length, papel).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('PR 9 · a rota da fila', () => {
+  it('devolve só o que o papel alcança, e o resto como contagem', () => {
+    const todos = derivarFila(banco.cenario, Date.now());
+    for (const papel of ['engenharia', 'dpo', 'produto', 'seguranca', 'auditor'] as Papel[]) {
+      const res = chamar<{ itens: ItemDaFila[]; contadores: ContadoresDaFila }>(
+        papel, { metodo: 'GET', caminho: '/v1/fila' },
+      );
+      expect(res.status, papel).toBe(200);
+      const meus = res.body.itens;
+      expect(meus.every((i) => pode(papel, i.acao)), papel).toBe(true);
+      expect(res.body.contadores.deOutrosPapeis, papel).toBe(todos.length - meus.length);
+      // Contagem, nunca lista: o corpo não traz nada dos itens alheios.
+      expect(Object.keys(res.body)).toEqual(['itens', 'contadores']);
+    }
+  });
+
+  it('a fila do produto é vazia e o contador mostra que o trabalho existe', () => {
+    const res = chamar<{ itens: ItemDaFila[]; contadores: ContadoresDaFila }>(
+      'produto', { metodo: 'GET', caminho: '/v1/fila' },
+    );
+    expect(res.body.itens).toEqual([]);
+    expect(res.body.contadores.deOutrosPapeis).toBeGreaterThan(0);
+  });
+
+  it('segmento a mais é rota inexistente, não recorte silencioso', () => {
+    expect(chamar('dpo', { metodo: 'GET', caminho: '/v1/fila/engenharia' }).status).toBe(404);
+  });
+
+  it('ler a fila não grava no trail — nenhum dado pessoal sai daqui', () => {
+    const antes = banco.auditoria.length;
+    chamar('dpo', { metodo: 'GET', caminho: '/v1/fila' });
+    expect(banco.auditoria).toHaveLength(antes);
+  });
+
+  it('cenário desconhecido falha em vez de cair no padrão', () => {
+    // O fallback silencioso fazia um teste do PR 8 pedir 'streaming' e receber
+    // o banco: passava por três cenários exercitando um só.
+    expect(() => new BancoMock('streaming')).toThrow(/Cenário desconhecido/);
+    expect(new BancoMock('midia').cenario.id).toBe('midia');
+  });
+});
+
+describe('PR 9 · T0 na tela', () => {
+  const montarT0 = (papel: Papel, cenario = 'banco') => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel, banco: new BancoMock(cenario), versao: 0, avisos: [] });
+    return render(<MemoryRouter><T0 /></MemoryRouter>);
+  };
+
+  it('mostra exatamente as quatro informações por item, e a faixa de estados', () => {
+    montarT0('dpo');
+    const itens = screen.getAllByRole('article');
+    expect(itens.length).toBeGreaterThan(0);
+
+    const primeiro = itens[0];
+    // As quatro: prazo (na etiqueta de urgência), o que está travado, sua
+    // próxima ação e quem vem depois.
+    expect(within(primeiro).getByText('O que está travado')).toBeInTheDocument();
+    expect(within(primeiro).getByText('Sua próxima ação')).toBeInTheDocument();
+    expect(within(primeiro).getByText(/Para hoje ·|Prazo vencido ·|Próximos 30 dias ·/)).toBeInTheDocument();
+    expect(within(primeiro).getByText(/depois de você|a conclusão para o cronômetro/)).toBeInTheDocument();
+    // Nenhum terceiro rótulo de coluna: mais que quatro vira relatório.
+    expect(within(primeiro).getAllByText(/^O que está travado$|^Sua próxima ação$/)).toHaveLength(2);
+
+    // A faixa vem da máquina de estados, com o atual marcado.
+    const faixa = within(primeiro).getByRole('list');
+    expect(within(faixa).getAllByRole('listitem').length).toBeGreaterThan(2);
+    expect(faixa.querySelectorAll('[aria-current="step"]')).toHaveLength(1);
+  });
+
+  it('a ordem da tela é a ordem da consequência', () => {
+    montarT0('dpo', 'midia');
+    const etiquetas = screen.getAllByRole('article')
+      .map((a) => within(a).getByText(/Prazo vencido ·|Para hoje ·|Próximos 30 dias ·/).textContent!);
+    const faixa = (t: string) => (t.startsWith('Prazo vencido') ? 0 : t.startsWith('Para hoje') ? 1 : 2);
+    const ordem = etiquetas.map(faixa);
+    expect([...ordem].sort()).toEqual(ordem);
+    expect(ordem[0], 'o cenário midia abre com a LIA vencida').toBe(0);
+  });
+
+  it('papel produto: fila vazia, sem protocolo e sem titular na tela', () => {
+    const { container } = montarT0('produto');
+    expect(screen.queryAllByRole('article')).toHaveLength(0);
+    expect(screen.getByText(/Nada pendente para o seu papel/)).toBeInTheDocument();
+
+    const b = useSessao.getState().banco;
+    const texto = container.textContent ?? '';
+    for (const s of b.cenario.solicitacoes) {
+      expect(texto.includes(s.protocolo), `protocolo ${s.protocolo} na tela do produto`).toBe(false);
+      expect(texto.includes(s.titularPseudonimo)).toBe(false);
+    }
+    for (const t of b.cenario.titulares) expect(texto.includes(t.id)).toBe(false);
+  });
+
+  it('fila vazia é estado vazio: nem esqueleto, nem falha', () => {
+    const { container } = montarT0('auditor');
+    expect(container.querySelector('.esqueleto')).toBeNull();
+    expect(container.querySelector('.falha')).toBeNull();
+    expect(container.querySelector('.vazio')).not.toBeNull();
+    // O contador continua dizendo que o trabalho existe.
+    expect(screen.getByText('De outros papéis').parentElement!.textContent).toMatch(/\d/);
+  });
+
+  it('concluir a ação em outra tela tira o item da fila sem recarregar', () => {
+    montarT0('dpo');
+    const b = useSessao.getState().banco;
+    const ripd = b.cenario.ripds[0];
+    expect(screen.getByText(ripd.codigo)).toBeInTheDocument();
+
+    // Fecha a P0 pendente e aprova, como a T3 faz.
+    ripd.recomendacoes.forEach((r) => { r.concluida = true; });
+    const res = request(b, { papel: 'dpo', ator: 'teste', metodo: 'POST', caminho: `/v1/ripds/${ripd.id}/aprovar` });
+    expect(res.status).toBe(200);
+    expect(ripd.status).toBe('vigente');
+
+    act(() => { useSessao.setState((s) => ({ versao: s.versao + 1 })); });
+    expect(screen.queryByText(ripd.codigo)).not.toBeInTheDocument();
+  });
+
+  it('T0 é a entrada do trilho e abre na raiz', () => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    render(<MemoryRouter initialEntries={['/']}><Casca /></MemoryRouter>);
+    expect(screen.getByRole('heading', { level: 1, name: 'Minha fila' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /T0 Minha fila/ })).toBeInTheDocument();
   });
 });
