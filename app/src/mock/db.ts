@@ -56,7 +56,20 @@ export class BancoMock {
   private buscasPorAtor = new Map<string, number[]>();
 
   constructor(cenarioId: string) {
-    this.cenario = estruturaClonada(CENARIOS[cenarioId] ?? CENARIOS.banco);
+    /**
+     * Id desconhecido **falha**, não cai no cenário padrão.
+     *
+     * O `?? CENARIOS.banco` que estava aqui era conveniente e mentiroso: um teste
+     * do PR 8 pedia 'streaming' — o id real é 'midia' — e recebia o banco de
+     * volta, passando por três cenários enquanto exercitava um só. Fallback
+     * silencioso em construtor é o mesmo defeito do fallback silencioso de
+     * versão de tabela: responde por algo que não foi o pedido.
+     */
+    const cenario = CENARIOS[cenarioId];
+    if (!cenario) {
+      throw new Error(`Cenário desconhecido: "${cenarioId}". Os declarados são ${Object.keys(CENARIOS).join(', ')}.`);
+    }
+    this.cenario = estruturaClonada(cenario);
     this.semear();
   }
 

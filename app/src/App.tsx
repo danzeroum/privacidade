@@ -6,6 +6,7 @@ import { PAPEIS, TELAS_BLOQUEADAS } from './mock/permissoes';
 import type { Papel } from './mock/types';
 import { CENARIOS } from './mock/scenarios';
 import { Modal, Nota } from './ui/primitivos';
+import T0 from './screens/T0';
 import T1 from './screens/T1';
 import T2 from './screens/T2';
 import T3 from './screens/T3';
@@ -16,7 +17,10 @@ import T7 from './screens/T7';
 import T8 from './screens/T8';
 import T9 from './screens/T9';
 
-const TELAS = [
+export const TELAS = [
+  // PR 9 — a fila é a entrada: o programa começa pelo que depende de você, e o
+  // painel responde pelo estado do programa logo abaixo.
+  { rota: '/t0', id: 'T0', nome: 'Minha fila', grupo: 'Trabalho' },
   { rota: '/t1', id: 'T1', nome: 'Painel de governança', grupo: 'Esteira de entrega' },
   { rota: '/t2', id: 'T2', nome: 'Catálogo de dados', grupo: 'Esteira de entrega' },
   { rota: '/t3', id: 'T3', nome: 'RIPD e LINDDUN', grupo: 'Esteira de entrega' },
@@ -192,7 +196,8 @@ export function Casca() {
             </div>
           ) : (
             <Routes>
-              <Route path="/" element={<Navigate to="/t1" replace />} />
+              <Route path="/" element={<Navigate to="/t0" replace />} />
+              <Route path="/t0" element={<T0 />} />
               <Route path="/t1" element={<T1 />} />
               <Route path="/t2" element={<T2 />} />
               <Route path="/t3" element={<T3 />} />
@@ -202,7 +207,7 @@ export function Casca() {
               <Route path="/t7" element={<T7 />} />
               <Route path="/t8" element={<T8 />} />
               <Route path="/t9" element={<T9 />} />
-              <Route path="*" element={<Navigate to="/t1" replace />} />
+              <Route path="*" element={<Navigate to="/t0" replace />} />
             </Routes>
           )}
         </main>

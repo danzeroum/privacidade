@@ -7,6 +7,7 @@ import {
   CATEGORIAS, TABELAS, TABELAS_IDS, aplicar, gatilhoCritico, rotuloDoGatilho, ultimaDecisao, vigenteDe,
 } from './decisoes';
 import type { DecisaoRegistrada, TabelaId, Valor } from './decisoes';
+import { contadoresDe, derivarFila, minhaFila } from './fila';
 import { redigir } from '../lib/redator';
 import { sha256 } from '../lib/sha256';
 import { BASES_PARA_SENSIVEL } from './types';
@@ -556,6 +557,30 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
      * — duas coisas diferentes com o mesmo nome na URL é como um oráculo nasce
      * por descuido.
      */
+    /**
+     * PR 9 — T0 · a fila derivada.
+     *
+     * Sem parâmetro nenhum, e isso é desenho: a fila é **a sua**, definida pelo
+     * papel da sessão. Um filtro aqui abriria caminho para consultar a fila de
+     * outro papel por combinação, que é o oráculo que a `deOutrosPapeis` fecha
+     * ao devolver contagem em vez de lista.
+     *
+     * Não grava no trail: nada de dado pessoal sai daqui — os itens carregam
+     * código de artefato, e o protocolo é o código da solicitação, nunca o
+     * titular.
+     */
+    case 'GET fila': {
+      // Um segmento a mais é rota que não existe, e não um recorte silencioso:
+      // `/v1/fila/dpo` precisa cair no 404 do fim, não devolver a fila de quem
+      // perguntou como se o caminho tivesse sido entendido.
+      if (partes[1]) break;
+      const todos = derivarFila(banco.cenario, Date.now());
+      return ok({
+        itens: minhaFila(todos, papel),
+        contadores: contadoresDe(todos, papel),
+      }) as Res<T>;
+    }
+
     case 'GET dmn':
       return ok(catalogoDmn()) as Res<T>;
 

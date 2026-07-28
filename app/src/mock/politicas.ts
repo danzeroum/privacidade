@@ -100,6 +100,14 @@ export const POLITICAS: PoliticaRota[] = [
     nota: 'Mover artefato entre estados. A sequência é da tabela de mock/estados.ts; o conteúdo exigido, da rota.',
   },
 
+  // ── Fila de trabalho (PR 9 · T0) ──────────────────────────────────────────
+  {
+    metodo: 'GET', caminho: /^fila$/,
+    tipo: 'leitura', foraDeEscopo: '403',
+    nota: 'A fila do papel da sessão, derivada dos estados. Leitura sem parâmetro: quem lê recebe a '
+      + 'própria fila e a contagem do que é de outros — contagem, nunca a lista alheia.',
+  },
+
   // ── Tabelas de decisão (PR 8 · DMN) ───────────────────────────────────────
   {
     metodo: 'GET', caminho: /^dmn(\/.*)?$/,
