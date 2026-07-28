@@ -1,6 +1,6 @@
 import { sha256, hashCpf } from '../lib/sha256';
 import type {
-  Campo, Cenario, Incidente, LinddunItem, Maturidade, Risco, Solicitacao, Titular,
+  Achado, Campo, Cenario, Incidente, LinddunItem, Parecer, Maturidade, Risco, Solicitacao, Titular,
 } from './types';
 
 const DIA = 86_400_000;
@@ -53,7 +53,7 @@ const riscosComuns = (r1: Risco, r2: Risco): Risco[] => [
   { codigo: 'R6', descricao: 'Tracking de terceiro ligado por padrão', probabilidade: 3, impacto: 4, dano: 'perda_de_controle', danoTexto: 'Rastreamento sem consentimento livre e informado', tratamento: 'Feature flag default false + gate no CI', tipo: 'mitigar', esforcoSprints: 1, dono: '@eng-pedro', dominio: 'Engenharia', prazo: '22/08', reavaliacao: '22/11', status: 'em_tratamento' },
   { codigo: 'R7', descricao: 'Legítimo interesse sem LIA documentada', probabilidade: 4, impacto: 2, dano: 'perda_de_controle', danoTexto: 'Tratamento sem balanceamento demonstrável', tratamento: 'Preencher e assinar a LIA vinculada', tipo: 'mitigar', esforcoSprints: 0.5, dono: '@dpo-marcela', dominio: 'DPO', prazo: '15/08', reavaliacao: '15/11', status: 'mitigado' },
   { codigo: 'R8', descricao: 'Ausência de RLS no banco principal', probabilidade: 2, impacto: 5, dano: 'material', danoTexto: 'Conta comprometida acessa a base inteira', tratamento: 'RLS por tenant + RBAC por finalidade', tipo: 'mitigar', esforcoSprints: 2, dono: '@seg-rita', dominio: 'Segurança', prazo: '29/08', reavaliacao: '29/11', status: 'em_tratamento' },
-  { codigo: 'R9', descricao: 'Revogação sem cascata de eliminação', probabilidade: 3, impacto: 4, dano: 'perda_de_controle', danoTexto: 'Titular revoga e o dado permanece nos sistemas a jusante', tratamento: 'Job de eliminação por escopo + webhook a parceiros', tipo: 'mitigar', esforcoSprints: 2, dono: '@eng-maria', dominio: 'Engenharia', prazo: '22/08', reavaliacao: '22/11', status: 'aberto' },
+  { codigo: 'R9', descricao: 'Revogação sem cascata de eliminação', probabilidade: 3, impacto: 4, dano: 'perda_de_controle', danoTexto: 'Titular revoga e o dado permanece nos sistemas a jusante', tratamento: 'Job de eliminação por escopo + webhook a parceiros', tipo: 'mitigar', esforcoSprints: 2, dono: '@eng-maria', dominio: 'Engenharia', prazo: '22/08', reavaliacao: '22/11', status: 'identificado' },
   { codigo: 'R10', descricao: 'Backup sem criptografia gerenciada', probabilidade: 1, impacto: 5, dano: 'perda_de_controle', danoTexto: 'Restauração devolve dado já eliminado', tratamento: 'Habilitar SSE-KMS nos snapshots', tipo: 'mitigar', esforcoSprints: 1, dono: '@sre-carlos', dominio: 'SRE', prazo: '08/08', reavaliacao: '08/11', status: 'mitigado' },
 ];
 
@@ -99,6 +99,19 @@ const incidentePadrao = (camposIds: string[], riscoCodigo: string, ripdId: strin
   ripdId,
 }];
 
+/**
+ * PR 7 — parecer e achado ganham identidade para as máquinas deles serem
+ * exercitáveis. Nascem no primeiro estado, como o incidente.
+ */
+const pareceresPadrao = (): Parecer[] => [
+  { id: 'p1', codigo: 'PT-2026-018', ripdId: 'r1', status: 'rascunho', autor: '@eng-maria', devolucoes: 0 },
+];
+
+const achadosPadrao = (): Achado[] => [
+  { id: 'a1', codigo: 'ACH-2026-007', descricao: 'Log de aplicação com CPF em texto claro',
+    origem: 'auditoria interna · trimestre 2', status: 'aberto', criticidade: 'alta', reincidencias: 0 },
+];
+
 const solicitacoesPadrao = (titularIds: string[], sistemas: string[]): Solicitacao[] => {
   const agora = Date.now();
   // Mesmo instante de conclusão, prazos diferentes: s4 fecha três dias antes do
@@ -113,7 +126,7 @@ const solicitacoesPadrao = (titularIds: string[], sistemas: string[]): Solicitac
         { remetente: 'dpo', corpo: 'Recebido. Estou reunindo a linhagem completa; retorno até 31/07 com a relação de destinatários.', quando: '19/07 09:40' },
       ] },
     { id: 's2', protocolo: '2026-0730', titularId: titularIds[1], titularPseudonimo: 'hmac:3b81…cc02', direito: 'eliminacao', status: 'em_analise', nivelVerificacao: 3, sistemas: [sistemas[0]], recebidaEm: '14/07', prazoLimiteMs: agora + 19 * HORA, metaInternaMs: agora - 2 * DIA, mensagens: [] },
-    { id: 's3', protocolo: '2026-0729', titularId: titularIds[2], titularPseudonimo: 'hmac:d20e…8f13', direito: 'revisao_decisao', status: 'aguardando_titular', nivelVerificacao: 2, sistemas: [sistemas[0]], recebidaEm: '26/07', prazoLimiteMs: agora + 3 * DIA, metaInternaMs: agora + 2 * DIA, mensagens: [] },
+    { id: 's3', protocolo: '2026-0729', titularId: titularIds[2], titularPseudonimo: 'hmac:d20e…8f13', direito: 'revisao_decisao', status: 'em_analise', nivelVerificacao: 2, sistemas: [sistemas[0]], recebidaEm: '26/07', prazoLimiteMs: agora + 3 * DIA, metaInternaMs: agora + 2 * DIA, mensagens: [] },
     { id: 's4', protocolo: '2026-0721', titularId: titularIds[0], titularPseudonimo: 'hmac:9f4c…a71b', direito: 'portabilidade', status: 'concluida', nivelVerificacao: 2, sistemas, recebidaEm: '08/07', prazoLimiteMs: agora - 5 * DIA, metaInternaMs: agora - 9 * DIA, concluidaEm: emDia(fimS4), concluidaEmMs: fimS4, desfecho: 'atendido', mensagens: [] },
     { id: 's5', protocolo: '2026-0718', titularId: titularIds[1], titularPseudonimo: 'hmac:3b81…cc02', direito: 'correcao', status: 'concluida', nivelVerificacao: 2, sistemas: [sistemas[0]], recebidaEm: '03/07', prazoLimiteMs: agora - 10 * DIA, metaInternaMs: agora - 14 * DIA, concluidaEm: emDia(fimS5), concluidaEmMs: fimS5, desfecho: 'atendido_parcialmente', mensagens: [] },
   ];
@@ -186,6 +199,8 @@ const banco: Cenario = {
     { slug: 'analytics', nome: 'Pipeline analítico', repositorio: 'danzeroum/analytics', timeDono: '@squad-dados', temInventario: false },
   ],
   campos: camposBanco,
+  pareceres: pareceresPadrao(),
+  achados: achadosPadrao(),
   incidentes: incidentePadrao(['b-cpf', 'b-nome', 'b-hist'], 'R09', 'r1'),
   consentimentos: [
     { campoId: 'b-bio', versao: 'v3', texto: 'Autorizo o uso da minha imagem facial para verificação de identidade na abertura de conta.',
@@ -342,6 +357,8 @@ const varejo: Cenario = {
     { slug: 'fidelidade', nome: 'Programa de fidelidade', repositorio: 'aurora/fidelidade', timeDono: '@squad-crm', temInventario: false },
   ],
   campos: camposVarejo,
+  pareceres: pareceresPadrao(),
+  achados: achadosPadrao(),
   incidentes: incidentePadrao(['v-cpf', 'v-email', 'v-tel'], 'R09', 'r1'),
   consentimentos: [
     { campoId: 'v-email', versao: 'v2', texto: 'Aceito receber comunicações do programa de fidelidade por e-mail.',
@@ -389,7 +406,7 @@ const varejo: Cenario = {
   }],
   riscos: riscosComuns(
     { codigo: 'R1', descricao: 'Dado de saúde alimentando recomendação de marketing', probabilidade: 4, impacto: 5, dano: 'moral', danoTexto: 'Inferência de condição de saúde exposta na vitrine, visível a terceiros no mesmo domicílio', tratamento: 'Segregar base da farmácia; chave KMS própria; proibir join no gate', tipo: 'evitar', esforcoSprints: 1.5, dono: '@squad-saude', dominio: 'Engenharia', prazo: '05/08', reavaliacao: '05/11', status: 'em_tratamento', ripdCodigo: 'RIPD-2026-031' },
-    { codigo: 'R2', descricao: 'Público semelhante enviado a rede de anúncios sem oposição fácil', probabilidade: 4, impacto: 3, dano: 'perda_de_controle', danoTexto: 'Titular não consegue sair da audiência publicitária', tratamento: 'Oposição em um clique + purga de audiência em 24 h', tipo: 'mitigar', esforcoSprints: 1, dono: '@squad-crm', dominio: 'Produto', prazo: '19/08', reavaliacao: '19/11', status: 'aberto' },
+    { codigo: 'R2', descricao: 'Público semelhante enviado a rede de anúncios sem oposição fácil', probabilidade: 4, impacto: 3, dano: 'perda_de_controle', danoTexto: 'Titular não consegue sair da audiência publicitária', tratamento: 'Oposição em um clique + purga de audiência em 24 h', tipo: 'mitigar', esforcoSprints: 1, dono: '@squad-crm', dominio: 'Produto', prazo: '19/08', reavaliacao: '19/11', status: 'identificado' },
   ),
   lias: [{
     id: 'l1', codigo: 'LIA-RECO-002', titulo: 'Recomendação de produtos por comportamento de navegação',
@@ -491,6 +508,8 @@ const midia: Cenario = {
     { slug: 'ads', nome: 'Publicidade', repositorio: 'palco/ads', timeDono: '@squad-ads', temInventario: true },
   ],
   campos: camposMidia,
+  pareceres: pareceresPadrao(),
+  achados: achadosPadrao(),
   incidentes: incidentePadrao(['m-cpf', 'm-inferencia'], 'R09', 'r1'),
   consentimentos: [
     { campoId: 'm-inferencia', versao: 'v5', texto: 'Autorizo o uso do meu histórico de consumo para recomendação e publicidade segmentada.',
@@ -534,7 +553,7 @@ const midia: Cenario = {
     linddun: LINDDUN_BASE.map((l) => ({ ...l, ativo: true })),
   }],
   riscos: riscosComuns(
-    { codigo: 'R1', descricao: 'Inferência reconstrói categoria sensível sem coleta', probabilidade: 5, impacto: 5, dano: 'discriminacao', danoTexto: 'Exposição de característica protegida a anunciantes, com efeito de discriminação sem que o titular tenha informado nada', tratamento: 'Excluir títulos sensíveis do sinal; auditoria de reidentificação por combinação', tipo: 'evitar', esforcoSprints: 1.5, dono: '@bruno.reis', dominio: 'Engenharia', prazo: '02/08', reavaliacao: '02/11', status: 'aberto', ripdCodigo: 'RIPD-2026-008' },
+    { codigo: 'R1', descricao: 'Inferência reconstrói categoria sensível sem coleta', probabilidade: 5, impacto: 5, dano: 'discriminacao', danoTexto: 'Exposição de característica protegida a anunciantes, com efeito de discriminação sem que o titular tenha informado nada', tratamento: 'Excluir títulos sensíveis do sinal; auditoria de reidentificação por combinação', tipo: 'evitar', esforcoSprints: 1.5, dono: '@bruno.reis', dominio: 'Engenharia', prazo: '02/08', reavaliacao: '02/11', status: 'identificado', ripdCodigo: 'RIPD-2026-008' },
     { codigo: 'R2', descricao: 'Perfil infantil em audiência publicitária', probabilidade: 3, impacto: 5, dano: 'moral', danoTexto: 'Publicidade comportamental dirigida a criança (Art. 14)', tratamento: 'Bloqueio de perfis infantis no pipeline de audiência', tipo: 'evitar', esforcoSprints: 0.5, dono: '@squad-conta', dominio: 'Engenharia', prazo: '02/08', reavaliacao: '02/11', status: 'mitigado', ripdCodigo: 'RIPD-2026-008' },
   ),
   lias: [{
@@ -574,7 +593,7 @@ const midia: Cenario = {
   chaves: [
     { alias: 'alias/palco-pii-v1', finalidade: 'assinante_pii', status: 'ativa', criadaHaDias: 120, rotacaoEmDias: 15, criptoShredding: true, dependencias: ['assinantes', 'perfis'] },
     { alias: 'alias/palco-afinidade-v1', finalidade: 'afinidade_sensivel', status: 'ativa', criadaHaDias: 25, rotacaoEmDias: 65, criptoShredding: true, dependencias: ['segmentos'] },
-    { alias: 'alias/palco-pii-v2', finalidade: 'assinante_pii_next', status: 'pendente', criadaHaDias: 0, rotacaoEmDias: 90, criptoShredding: true, dependencias: [] },
+    { alias: 'alias/palco-pii-v2', finalidade: 'assinante_pii_next', status: 'nova', criadaHaDias: 0, rotacaoEmDias: 90, criptoShredding: true, dependencias: [] },
     { alias: 'alias/telemetria-v4', finalidade: 'telemetria', status: 'ativa', criadaHaDias: 45, rotacaoEmDias: 45, criptoShredding: false, dependencias: ['telemetria_bruta'] },
   ],
   rotacao: {
