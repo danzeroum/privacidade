@@ -1,0 +1,59 @@
+# Gate de CI do repositório (C-18).
+#
+# O projeto inteiro sustenta que RIPD é gate de CI, não documento pós-fato — e o
+# repositório não tinha gate nenhum. Este é o mínimo: tipos e testes, rodando em
+# todo push e em todo pull request, sem nenhuma etapa tolerante a falha.
+#
+# Gate que não bloqueia merge é decoração. Para este arquivo valer alguma coisa,
+# o job `verificacao` precisa estar marcado como *required status check* na
+# proteção da branch `main` — instruções no corpo do PR que introduziu o gate.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# Um push novo cancela a execução anterior da mesma referência: fila de CI que
+# roda commit velho atrasa o retorno sem melhorar a garantia.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verificacao:
+    name: Tipos e testes
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # O protótipo vive em app/. O restante do repositório é esquema, API e
+        # documentação, sem cadeia de build própria.
+        working-directory: app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # Cache das dependências pelo lockfile do app.
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      # `npm ci` e não `npm install`: instala exatamente o lockfile e falha se
+      # ele estiver fora de sincronia com o package.json.
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Verificação de tipos
+        run: npx tsc --noEmit
+
+      # As 9 regras LGPD são comportamento testado, não comentário no código.
+      # Um teste vermelho reprova o build inteiro. Nenhuma etapa deste arquivo
+      # tolera falha, e a palavra que faria isso não aparece nele — de propósito,
+      # para que uma varredura simples confirme a ausência.
+      - name: Testes
+        run: npm test
