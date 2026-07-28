@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  body { margin: 0; background: #E9EDEE; -webkit-font-smoothing: antialiased; }
+  a { color: #0B5F66; }
+  a:hover { color: #0F7E86; }
+  :focus-visible { outline: 2px solid #0F7E86; outline-offset: 2px; border-radius: 3px; }
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:#E9EDEE;color:#0E1719;font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:14px;line-height:1.5;display:flex;flex-wrap:wrap;align-items:stretch">
+
+  <nav aria-label="Telas" style="flex:0 1 236px;min-width:212px;background:#FFFFFF;border-right:1px solid #D2DCDD;padding:18px 12px 22px;display:flex;flex-direction:column;gap:2px">
+    <div style="display:flex;flex-direction:column;gap:2px;padding:4px 10px 16px">
+      <span style="font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;font-size:21px;letter-spacing:-.02em">Lastro</span>
+      <span style="font-size:12.5px;color:#6E8184;letter-spacing:.07em;text-transform:uppercase">Governança · LGPD</span>
+    </div>
+
+    <div style="font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;color:#6E8184;padding:12px 10px 6px">Esteira de entrega</div>
+    <sc-for list="{{ navEsteira }}" as="item" hint-placeholder-count="3">
+      <button type="button" style="{{ item.estilo }}" onClick="{{ item.ir }}"><span style="{{ item.estiloId }}">{{ item.id }}</span> {{ item.nome }}</button>
+    </sc-for>
+
+    <div style="font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;color:#6E8184;padding:16px 10px 6px">Operação e prova</div>
+    <sc-for list="{{ navOperacao }}" as="item" hint-placeholder-count="5">
+      <button type="button" style="{{ item.estilo }}" onClick="{{ item.ir }}"><span style="{{ item.estiloId }}">{{ item.id }}</span> {{ item.nome }}</button>
+    </sc-for>
+
+    <div style="margin-top:auto;padding:14px 10px 0;border-top:1px solid #D2DCDD;font-size:12.5px;color:#6E8184;display:flex;flex-direction:column;gap:6px">
+      <span>{{ telasOcultas }}</span>
+      <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px">{{ cenario }} · dados de demonstração</span>
+    </div>
+  </nav>
+
+  <div style="flex:1 1 620px;min-width:0;display:flex;flex-direction:column">
+    <header style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 24px;background:#FFFFFFCC;border-bottom:1px solid #D2DCDD;position:sticky;top:0;z-index:30;backdrop-filter:blur(8px)">
+      <span style="font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184">Público</span>
+      <div style="display:flex;background:#F2F6F6;border:1px solid #D2DCDD;border-radius:4px;padding:2px">
+        <sc-for list="{{ papeisSeg }}" as="p" hint-placeholder-count="5">
+          <button type="button" style="{{ p.estilo }}" onClick="{{ p.trocar }}">{{ p.rotulo }}</button>
+        </sc-for>
+      </div>
+      <label for="cen" style="font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184">Cenário</label>
+      <select id="cen" value="{{ cenario }}" onChange="{{ setCenario }}" style="font:inherit;font-size:13px;border:1px solid #D2DCDD;border-radius:4px;padding:5px 8px;background:#FFFFFF;width:auto">
+        <option value="Crédito IA · financeiro">Crédito IA · financeiro</option>
+        <option value="Rede Aurora · varejo">Rede Aurora · varejo</option>
+        <option value="Palco Streaming · mídia">Palco Streaming · mídia</option>
+      </select>
+      <span style="flex:1"></span>
+      <button type="button" onClick="{{ alternarApresentacao }}" style="display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:999px;cursor:pointer;font:inherit;font-size:12.5px;font-weight:600;background:#DCEAEA;border:1px solid #0B5F6659;color:#0B5F66">Modo apresentação</button>
+      <span style="display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:999px;font-size:12.5px;font-weight:600;background:#F2F6F6;border:1px solid #D2DCDD;color:#495A5D">Dados mascarados por padrão</span>
+    </header>
+
+    <sc-if value="{{ aviso }}">
+      <div role="status" style="margin:14px 24px 0;padding:11px 14px;background:#DDEBE0;border:1px solid #2F6E4552;border-left:3px solid #2F6E45;border-radius:0 4px 4px 0;display:flex;gap:12px;align-items:flex-start;font-size:13px;color:#0E1719">
+        <span style="flex:1">{{ aviso }}</span>
+        <button type="button" onClick="{{ fecharAviso }}" style="border:0;background:none;cursor:pointer;color:#495A5D;font:inherit">Fechar</button>
+      </div>
+    </sc-if>
+
+    <main style="padding:24px;max-width:1420px">
+
+      <sc-if value="{{ eT1 }}" hint-placeholder-val="{{ true }}">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;padding:2px 7px;border-radius:3px;background:#F2F6F6;border:1px solid #D2DCDD;color:#495A5D">metrics-collector.py</span>
+            <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;padding:2px 7px;border-radius:3px;background:#F2F6F6;border:1px solid #D2DCDD;color:#495A5D">privacy-ci-gate.yml</span>
+            <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;padding:2px 7px;border-radius:3px;background:#F2F6F6;border:1px solid #D2DCDD;color:#495A5D">risk-matrix.csv</span>
+          </div>
+          <h1 style="margin:0;font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;font-size:30px;line-height:1.15;letter-spacing:-.01em">Painel de governança</h1>
+          <p style="margin:8px 0 0;color:#495A5D;max-width:68ch;font-size:14.5px;text-wrap:pretty">Maturidade, risco concentrado e o que a esteira barrou nas últimas 24 h.</p>
+          <sc-if value="{{ apresentacao }}">
+            <p style="margin:12px 0 0;padding:10px 14px;border-left:2px solid #0B5F66;background:#F2F6F6;border-radius:0 4px 4px 0;font-size:13.5px;color:#495A5D;max-width:74ch">Nota de apresentação · cada número vem de um snapshot imutável: dá para reproduzir o que foi apresentado no comitê do mês passado.</p>
+          </sc-if>
+          <sc-if value="{{ anotar }}">
+            <p style="margin:14px 0 0;font-size:12.5px;color:#6E8184;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">correções aplicadas · T1-01 · T1-02 · T1-03 · C-09 · C-11 · C-16</p>
+          </sc-if>
+
+          <sc-if value="{{ demo }}">
+            <div style="margin-top:18px;padding:12px 16px;border-radius:8px;border:1px solid #8E5C0852;background:repeating-linear-gradient(135deg,#F3E7CE 0 10px,#EFE0C0 10px 20px);display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+              <span style="font-weight:700;font-size:13.5px">Modo demonstração ativo</span>
+              <span style="font-size:13px;color:#495A5D;flex:1">R11 é um incidente fictício injetado nesta sessão. Números e captura de tela não servem para o comitê enquanto esta faixa estiver visível.</span>
+              <button type="button" onClick="{{ alternarDemo }}" style="border:1px solid #8E5C0866;background:#FFFFFF;border-radius:4px;padding:6px 13px;cursor:pointer;font:inherit;font-size:13px">Encerrar demonstração</button>
+            </div>
+          </sc-if>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-top:20px">
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12.5px;color:#495A5D">Cobertura do inventário</span>
+              <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:32px;line-height:1;font-variant-numeric:tabular-nums">94<small style="font-size:15px;color:#6E8184">%</small></span>
+              <div style="height:4px;border-radius:2px;background:#E4EAEB;overflow:hidden"><i style="display:block;height:100%;width:94%;background:#2F6E45"></i></div>
+              <span style="font-size:12.5px;color:#6E8184"><b style="color:#2F6E45">↑ 6</b> vs. mês anterior · meta 95%</span>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12.5px;color:#495A5D">PRs bloqueados hoje</span>
+              <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:32px;line-height:1;font-variant-numeric:tabular-nums">2</span>
+              <span style="font-size:12.5px;color:#6E8184">gate crítico acionado · exige RIPD aprovado</span>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12.5px;color:#495A5D">Solicitações no prazo</span>
+              <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:32px;line-height:1;font-variant-numeric:tabular-nums">96<small style="font-size:15px;color:#6E8184">%</small></span>
+              <span style="font-size:12.5px;color:#6E8184">concluídas dentro do prazo legal · últimos 90 dias</span>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12.5px;color:#495A5D">Incidentes abertos</span>
+              <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:32px;line-height:1;font-variant-numeric:tabular-nums;color:#9E1F26">1</span>
+              <span style="font-size:12.5px;color:#6E8184">INC-2026-003 · prazo de comunicação correndo</span>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px;margin-top:14px;align-items:start">
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+                <h3 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Risco por esforço de tratamento</h3>
+                <button type="button" onClick="{{ alternarDemo }}" style="border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;padding:6px 13px;cursor:pointer;font:inherit;font-size:13px">Simular violação</button>
+              </div>
+              <p style="margin:0 0 12px;font-size:13px;color:#495A5D">Lista ordenada por retorno: score alto com esforço baixo primeiro. A reclassificação de <b>P × I</b> acontece na T5 — aqui o botão leva para lá com o risco já selecionado.</p>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <sc-for list="{{ riscos }}" as="r" hint-placeholder-count="6">
+                  <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:9px 10px;border:1px solid #D2DCDD;border-radius:6px;background:#F2F6F6">
+                    <div style="min-width:0">
+                      <div style="font-size:13.5px"><b style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px">{{ r.cod }}</b> {{ r.desc }}</div>
+                      <div style="font-size:12.5px;color:#6E8184">score {{ r.score }} · {{ r.esforco }} sprint · {{ r.dono }} · {{ r.status }}</div>
+                    </div>
+                    <button type="button" onClick="{{ r.selecionar }}" style="border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;padding:6px 12px;cursor:pointer;font:inherit;font-size:12.5px;white-space:nowrap">Selecionar</button>
+                  </div>
+                </sc-for>
+              </div>
+              <p style="margin:12px 0 0;font-size:12.5px;color:#6E8184">Mesma informação da dispersão anterior, navegável por teclado e legível na impressão do comitê.</p>
+            </div>
+
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h3 style="margin:0 0 12px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">O que a esteira barrou</h3>
+              <div style="overflow-x:auto">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:460px">
+                  <thead><tr>
+                    <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">PR</th>
+                    <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Regra</th>
+                    <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">O que aconteceu</th>
+                    <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD"></th>
+                  </tr></thead>
+                  <tbody>
+                    <tr>
+                      <td style="padding:10px;border-bottom:1px solid #D2DCDD;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px">#4821</td>
+                      <td style="padding:10px;border-bottom:1px solid #D2DCDD"><span style="display:inline-flex;padding:2px 8px;border-radius:999px;font-size:12.5px;font-weight:600;background:#F5DEDF;color:#9E1F26;border:1px solid #9E1F2652">PII-EM-LOG</span></td>
+                      <td style="padding:10px;border-bottom:1px solid #D2DCDD;font-size:13px">CPF em texto claro no logger de cobrança.</td>
+                      <td style="padding:10px;border-bottom:1px solid #D2DCDD"><span style="font-size:12.5px;color:#0B5F66">Abrir RIPD do PR #4821 →</span></td>
+                    </tr>
+                    <tr>
+                      <td style="padding:10px;border-bottom:1px solid #D2DCDD;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px">#4830</td>
+                      <td style="padding:10px;border-bottom:1px solid #D2DCDD"><span style="display:inline-flex;padding:2px 8px;border-radius:999px;font-size:12.5px;font-weight:600;background:#F3E7CE;color:#8E5C08;border:1px solid #8E5C0852">SEM-RETENCAO</span></td>
+                      <td style="padding:10px;border-bottom:1px solid #D2DCDD;font-size:13px">Campo novo sem prazo de retenção declarado.</td>
+                      <td style="padding:10px;border-bottom:1px solid #D2DCDD"><span style="font-size:12.5px;color:#0B5F66">Abrir RIPD do PR #4830 →</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ eT2 }}">
+        <div>
+          <h1 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:30px;line-height:1.15">Catálogo e consentimentos</h1>
+          <p style="margin:8px 0 0;color:#495A5D;max-width:68ch;font-size:14.5px;text-wrap:pretty">O ROPA é lido dos repositórios. Cada campo carrega dono, finalidade, base legal, prazo — e, quando a base é consentimento, a prova do consentimento.</p>
+          <sc-if value="{{ anotar }}">
+            <p style="margin:14px 0 0;font-size:12.5px;color:#6E8184;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">correções aplicadas · C-01 · C-08 · C-12 · T2-01 · T2-02 · T2-03</p>
+          </sc-if>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-top:20px;align-items:start">
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h3 style="margin:0 0 6px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Registro de consentimento</h3>
+              <p style="margin:0 0 12px;font-size:13px;color:#495A5D">A base “consentimento” só é aceita no inventário com um registro vivo aqui. Revogar bloqueia o tratamento e aciona o gate, como a LIA vencida.</p>
+              <dl style="display:grid;grid-template-columns:minmax(104px,124px) minmax(0,1fr);gap:9px;margin:0;font-size:13px">
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Campo</dt>
+                <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px">biometria_facial</dd>
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Texto v3</dt>
+                <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD">“Autorizo o uso da minha imagem facial para verificação de identidade na abertura de conta.”</dd>
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Coletado</dt>
+                <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD">14/03/2026 · app iOS · IP registrado · hash <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">a91c…44de</span></dd>
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Estado</dt>
+                <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD"><span style="display:inline-flex;padding:2px 8px;border-radius:999px;font-size:12.5px;font-weight:600;background:#DDEBE0;color:#2F6E45;border:1px solid #2F6E4552">ativo · 8.412 titulares</span></dd>
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0">Revogações</dt>
+                <dd style="margin:0;padding:5px 0">37 no mês · propagadas em até 24 h para 3 sistemas</dd>
+              </dl>
+            </div>
+
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h3 style="margin:0 0 6px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Buscar titular</h3>
+              <p style="margin:0 0 12px;font-size:13px;color:#495A5D">Disponível apenas para papéis que operam o balcão. A consulta é registrada antes da resposta, como qualquer acesso.</p>
+              <sc-if value="{{ naoPodeBuscar }}">
+                <div style="padding:12px 14px;background:#F2F6F6;border:1px solid #D2DCDD;border-radius:6px;font-size:13px;color:#495A5D">
+                  <b style="color:#0E1719">Não disponível para o seu papel.</b> O campo não é renderizado e nenhuma requisição de busca parte desta sessão. Antes, este cartão aparecia para todos os papéis e a rota respondia sem checar nem registrar.
+                </div>
+              </sc-if>
+              <sc-if value="{{ podeBuscar }}">
+                <div>
+                  <div style="display:flex;flex-direction:column;gap:5px">
+                    <label for="cpfbusca" style="font-size:12.5px;color:#495A5D;font-weight:600">CPF do titular</label>
+                    <input id="cpfbusca" type="text" autocomplete="off" inputMode="numeric" placeholder="•••.•••.•••-••" style="font:inherit;font-size:13px;border:1px solid #D2DCDD;border-radius:4px;padding:7px 9px;background:#FFFFFF" />
+                  </div>
+                  <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
+                    <button type="button" style="border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Calcular hash e buscar</button>
+                    <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">sai do navegador: 9f2c4b18…</span>
+                  </div>
+                  <p style="margin:12px 0 0;font-size:12.5px;color:#6E8184">O documento não entra na requisição. O campo é limpo assim que o hash é calculado, e a consulta é gravada no audit trail antes da resposta.</p>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+
+          <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;margin-top:14px">
+            <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+              <h3 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Campos catalogados</h3>
+              <span style="font-size:12.5px;color:#6E8184">filtros ativos: base legal “todas” · sensível “todos” — <span style="color:#0B5F66">limpar</span></span>
+            </div>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:720px">
+                <thead><tr>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Campo</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Como é guardado</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Base legal</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Retenção</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Estado</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD"></th>
+                </tr></thead>
+                <tbody>
+                  <tr>
+                    <td style="padding:10px;border-bottom:1px solid #D2DCDD"><span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">cpf</span><div style="font-size:12.5px;color:#6E8184">core-credito · titulares</div></td>
+                    <td style="padding:10px;border-bottom:1px solid #D2DCDD;font-size:13px">HMAC com chave no KMS<div style="font-size:12.5px;color:#6E8184">pseudônimo reversível pelo serviço autorizado — continua sendo dado pessoal</div></td>
+                    <td style="padding:10px;border-bottom:1px solid #D2DCDD;font-size:13px">execução de contrato</td>
+                    <td style="padding:10px;border-bottom:1px solid #D2DCDD;font-size:13px">5 anos</td>
+                    <td style="padding:10px;border-bottom:1px solid #D2DCDD"><span style="display:inline-flex;padding:2px 8px;border-radius:999px;font-size:12.5px;font-weight:600;background:#DDEBE0;color:#2F6E45;border:1px solid #2F6E4552">completo</span></td>
+                    <td style="padding:10px;border-bottom:1px solid #D2DCDD"><span style="font-size:12.5px;color:#0B5F66">Ver linhagem</span></td>
+                  </tr>
+                  <tr>
+                    <td style="padding:10px;border-bottom:1px solid #D2DCDD"><span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">biometria_facial</span> <span style="display:inline-flex;padding:2px 8px;border-radius:999px;font-size:12.5px;font-weight:600;background:#EBDFF3;color:#6C3A8C;border:1px solid #6C3A8C59">sensível</span><div style="font-size:12.5px;color:#6E8184">onboarding · kyc</div></td>
+                    <td style="padding:10px;border-bottom:1px solid #D2DCDD;font-size:13px">Criptografado, DEK por registro<div style="font-size:12.5px;color:#6E8184">destruir a chave elimina o dado (cripto-shredding)</div></td>
+                    <td style="padding:10px;border-bottom:1px solid #D2DCDD;font-size:13px">consentimento v3</td>
+                    <td style="padding:10px;border-bottom:1px solid #D2DCDD;font-size:13px">até revogação</td>
+                    <td style="padding:10px;border-bottom:1px solid #D2DCDD"><span style="display:inline-flex;padding:2px 8px;border-radius:999px;font-size:12.5px;font-weight:600;background:#DDEBE0;color:#2F6E45;border:1px solid #2F6E4552">completo</span></td>
+                    <td style="padding:10px;border-bottom:1px solid #D2DCDD"><span style="font-size:12.5px;color:#0B5F66">Ver linhagem</span></td>
+                  </tr>
+                  <tr>
+                    <td style="padding:10px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">score_risco</span><div style="font-size:12.5px;color:#6E8184">motor-decisao · features</div></td>
+                    <td style="padding:10px;font-size:13px">Valor em claro<div style="font-size:12.5px;color:#6E8184">só com finalidade declarada e mascaramento na exibição</div></td>
+                    <td style="padding:10px;font-size:13px">legítimo interesse <span style="display:inline-flex;padding:2px 8px;border-radius:999px;font-size:12.5px;font-weight:600;background:#F5DEDF;color:#9E1F26;border:1px solid #9E1F2652">LIA vencida</span></td>
+                    <td style="padding:10px;font-size:13px">18 meses</td>
+                    <td style="padding:10px"><span style="display:inline-flex;padding:2px 8px;border-radius:999px;font-size:12.5px;font-weight:600;background:#F5DEDF;color:#9E1F26;border:1px solid #9E1F2652">sem base vigente</span></td>
+                    <td style="padding:10px"><span style="font-size:12.5px;color:#0B5F66">Ver linhagem</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p style="margin:12px 0 0;font-size:12.5px;color:#495A5D">Nenhum valor de titular aparece nesta tela — o catálogo descreve campos, não conteúdo. A explicação de cada forma de guarda agora é texto na própria célula, não tooltip.</p>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ eT3 }}">
+        <div>
+          <h1 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:30px;line-height:1.15">RIPD e LINDDUN</h1>
+          <p style="margin:8px 0 0;color:#495A5D;max-width:68ch;font-size:14.5px;text-wrap:pretty">A triagem já rodou no PR #4821. O parecer é preenchido com evidência técnica e volta como commit no próprio pull request.</p>
+          <sc-if value="{{ anotar }}">
+            <p style="margin:14px 0 0;font-size:12.5px;color:#6E8184;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">correções aplicadas · T3-01 · T3-02 · T3-03 · C-10</p>
+          </sc-if>
+
+          <div style="margin-top:18px;padding:14px 16px;border-radius:8px;border:1px solid #9E1F2652;background:#F5DEDF;display:flex;gap:13px;align-items:flex-start">
+            <div style="flex:1">
+              <h4 style="margin:0 0 3px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:15.5px">Merge bloqueado — PR #4821 · core-credito</h4>
+              <p style="margin:0;font-size:13px;color:#495A5D">Faltam <b>2 requisitos</b> para o RIPD fechar: 1 recomendação P0 em aberto e o fluxo de dados sem nós reconhecidos. O status check só volta a verde depois da aprovação do DPO.</p>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-top:14px;align-items:start">
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h3 style="margin:0 0 14px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Parecer técnico — 3 de 5 seções completas</h3>
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <div style="display:grid;grid-template-columns:26px minmax(0,1fr);gap:12px;align-items:start">
+                  <span style="width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:#0B5F66;color:#FFFFFF;font-family:ui-monospace,Menlo,monospace;font-size:12.5px">1</span>
+                  <div><b style="font-size:14px">Contexto e escopo</b><div style="font-size:12.5px;color:#6E8184">completo · 412 caracteres, fora de escopo declarado</div></div>
+                </div>
+                <div style="display:grid;grid-template-columns:26px minmax(0,1fr);gap:12px;align-items:start">
+                  <span style="width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:#0B5F66;color:#FFFFFF;font-family:ui-monospace,Menlo,monospace;font-size:12.5px">2</span>
+                  <div><b style="font-size:14px">Dados tratados</b><div style="font-size:12.5px;color:#6E8184">completo · 6 campos importados do catálogo</div></div>
+                </div>
+                <div style="display:grid;grid-template-columns:26px minmax(0,1fr);gap:12px;align-items:start">
+                  <span style="width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:#FFFFFF;border:1px solid #8E5C08;color:#8E5C08;font-family:ui-monospace,Menlo,monospace;font-size:12.5px">3</span>
+                  <div><b style="font-size:14px">Fluxo de dados</b><div style="font-size:12.5px;color:#8E5C08">incompleto · nenhum nó reconhecido no diagrama</div></div>
+                </div>
+                <div style="display:grid;grid-template-columns:26px minmax(0,1fr);gap:12px;align-items:start">
+                  <span style="width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:#0B5F66;color:#FFFFFF;font-family:ui-monospace,Menlo,monospace;font-size:12.5px">4</span>
+                  <div>
+                    <b style="font-size:14px">Base legal por operação</b>
+                    <div style="font-size:12.5px;color:#6E8184">completo · 4 operações, todas com base compatível</div>
+                    <div style="margin-top:10px;padding:11px 13px;background:#DDEBE0;border:1px solid #2F6E4552;border-radius:6px;font-size:13px">
+                      <b>Combinação aceita.</b> <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">renda_declarada</span> com <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">protecao_credito</span>: o campo não é sensível e a base consta do inventário desde 04/2025.
+                    </div>
+                  </div>
+                </div>
+                <div style="display:grid;grid-template-columns:26px minmax(0,1fr);gap:12px;align-items:start">
+                  <span style="width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:#FFFFFF;border:1px solid #8E5C08;color:#8E5C08;font-family:ui-monospace,Menlo,monospace;font-size:12.5px">5</span>
+                  <div><b style="font-size:14px">Recomendações</b><div style="font-size:12.5px;color:#8E5C08">1 recomendação P0 em aberto — “redigir CPF no logger de cobrança”, @eng-joao, 02/08</div></div>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid #D2DCDD;padding-top:14px;margin-top:16px">
+                <button type="button" style="border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Pré-visualizar e baixar RIPD.md</button>
+                <button type="button" style="border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Anexar ao PR #4821</button>
+              </div>
+              <p style="margin:10px 0 0;font-size:12.5px;color:#6E8184">Último anexo: commit <span style="font-family:ui-monospace,Menlo,monospace">a91f2c0</span> por Maria Souza às 09:12 — visível no PR.</p>
+            </div>
+
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h3 style="margin:0 0 12px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Aprovação do DPO</h3>
+              <div style="padding:11px 13px;background:#F3E7CE;border:1px solid #8E5C0852;border-radius:6px;font-size:13px">
+                <b>Aprovação indisponível enquanto houver P0 em aberto.</b> A recusa aparece aqui, no controle, e não como aviso no canto da tela.
+              </div>
+              <button type="button" disabled style="margin-top:12px;border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;padding:7px 14px;font:inherit;font-size:13px;opacity:.45;cursor:not-allowed">Aprovar como DPO</button>
+              <p style="margin:12px 0 0;font-size:12.5px;color:#6E8184">A aprovação fica assinada com o hash do documento e repõe o status check do PR.</p>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ eT4 }}">
+        <div>
+          <h1 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:30px;line-height:1.15">Direitos do titular</h1>
+          <p style="margin:8px 0 0;color:#495A5D;max-width:68ch;font-size:14.5px;text-wrap:pretty">Cada direito do Art. 18 é um endpoint com prazo, nível de verificação e evidência. Selecione o protocolo para trabalhar nele.</p>
+          <sc-if value="{{ anotar }}">
+            <p style="margin:14px 0 0;font-size:12.5px;color:#6E8184;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">correções aplicadas · T4-01 · T4-02 · T4-03 · T4-04 · T4-05 · C-03 · C-04 · C-05 · C-15</p>
+          </sc-if>
+
+          <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;margin-top:20px">
+            <h3 style="margin:0 0 12px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Fila de atendimento</h3>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:680px">
+                <thead><tr>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Protocolo</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Direito</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Titular</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Prazo</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Estado</th>
+                </tr></thead>
+                <tbody>
+                  <sc-for list="{{ solicitacoes }}" as="s" hint-placeholder-count="4">
+                    <tr style="{{ s.estilo }}" onClick="{{ s.selecionar }}">
+                      <td style="padding:10px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px">{{ s.id }}</td>
+                      <td style="padding:10px;font-size:13px">{{ s.direito }}</td>
+                      <td style="padding:10px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px">{{ s.titular }}</td>
+                      <td style="padding:10px;font-size:13px">{{ s.restante }}</td>
+                      <td style="padding:10px;font-size:13px">{{ s.rotuloStatus }}</td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+            <p style="margin:12px 0 0;font-size:12.5px;color:#6E8184">A linha selecionada define protocolo <b>e</b> titular — não existe mais um “protocolo em foco” fixo, nem busca que troque o titular por baixo do contexto.</p>
+          </div>
+
+          <div style="margin-top:14px;padding:14px 16px;border-radius:8px;border:1px solid #0B5F6640;background:#DCEAEA;display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <span style="font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#495A5D">Trabalhando em</span>
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:15px;font-weight:600">{{ foco.id }}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <span style="font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#495A5D">Titular</span>
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:15px">{{ foco.titular }} · {{ foco.titularId }}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <span style="font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#495A5D">Direito</span>
+              <span style="font-size:15px">{{ foco.direito }}</span>
+            </div>
+            <span style="flex:1"></span>
+            <sc-if value="{{ podeConcluir }}">
+              <button type="button" onClick="{{ abrirConclusao }}" style="border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Concluir atendimento</button>
+            </sc-if>
+            <sc-if value="{{ focoConcluido }}">
+              <span style="display:inline-flex;padding:4px 10px;border-radius:999px;font-size:12.5px;font-weight:600;background:#DDEBE0;color:#2F6E45;border:1px solid #2F6E4552">concluído · cronômetro parado</span>
+            </sc-if>
+          </div>
+
+          <sc-if value="{{ concluindo }}">
+            <div style="margin-top:14px;background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h3 style="margin:0 0 12px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Concluir {{ foco.id }}</h3>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px">
+                <div style="display:flex;flex-direction:column;gap:5px">
+                  <label for="desfecho" style="font-size:12.5px;color:#495A5D;font-weight:600">Desfecho</label>
+                  <select id="desfecho" value="{{ desfecho }}" onChange="{{ setDesfecho }}" style="font:inherit;font-size:13px;border:1px solid #D2DCDD;border-radius:4px;padding:7px 9px;background:#FFFFFF">
+                    <option value="atendido">atendido integralmente</option>
+                    <option value="atendido parcialmente">atendido parcialmente</option>
+                    <option value="recusado com fundamento">recusado com fundamento legal</option>
+                  </select>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:5px">
+                  <label for="evid" style="font-size:12.5px;color:#495A5D;font-weight:600">Evidência da resposta</label>
+                  <input id="evid" type="text" value="{{ evidencia }}" onChange="{{ setEvidencia }}" placeholder="pacote assinado, ata, e-mail protocolado…" style="font:inherit;font-size:13px;border:1px solid #D2DCDD;border-radius:4px;padding:7px 9px;background:#FFFFFF" />
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+                <button type="button" onClick="{{ concluir }}" style="border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Registrar conclusão</button>
+                <button type="button" onClick="{{ fecharConclusao }}" style="border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Cancelar</button>
+              </div>
+            </div>
+          </sc-if>
+
+          <div style="margin-top:14px;background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+            <div role="tablist" aria-label="Seções do protocolo" style="display:flex;gap:2px;border-bottom:1px solid #D2DCDD;margin-bottom:16px;overflow-x:auto">
+              <sc-for list="{{ abas }}" as="a" hint-placeholder-count="4">
+                <button type="button" role="tab" id="{{ a.idTab }}" aria-controls="{{ a.idPainel }}" aria-selected="{{ a.selecionada }}" tabIndex="{{ a.foco }}" onKeyDown="{{ a.tecla }}" style="{{ a.estilo }}" onClick="{{ a.ir }}">{{ a.rot }}</button>
+              </sc-for>
+            </div>
+
+            <sc-if value="{{ abaDados }}" hint-placeholder-val="{{ true }}">
+              <div role="tabpanel" id="painel-dados" aria-labelledby="tab-dados" tabIndex="0">
+                <p style="margin:0 0 14px;padding:10px 13px;background:#F3E7CE;border:1px solid #8E5C0852;border-left:2px solid #8E5C08;border-radius:0 4px 4px 0;font-size:13px;color:#495A5D">Nenhum valor foi carregado. O servidor só envia o campo que você abrir, com finalidade compatível com o catálogo, e o registro é gravado antes da resposta.</p>
+                <dl style="display:grid;grid-template-columns:minmax(120px,150px) minmax(0,1fr);gap:10px;margin:0;font-size:13px">
+                  <sc-for list="{{ campos }}" as="c" hint-placeholder-count="5">
+                    <div style="display:contents">
+                      <dt style="color:#6E8184;font-size:12.5px;padding:7px 0;border-bottom:1px solid #D2DCDD">{{ c.rotulo }}</dt>
+                      <dd style="margin:0;padding:7px 0;border-bottom:1px solid #D2DCDD;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                        <span style="display:inline-flex;align-items:center;gap:8px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;background:#F2F6F6;border:1px dashed #B6C4C6;border-radius:4px;padding:3px 9px">{{ c.mostrado }}</span>
+                        <sc-if value="{{ c.aberto }}">
+                          <span style="font-size:12.5px;color:#8E5C08;font-variant-numeric:tabular-nums">volta a mascarar em {{ restanteSeg }} · registro {{ registroAtual }}</span>
+                        </sc-if>
+                        <sc-if value="{{ c.podeRevelar }}">
+                          <button type="button" onClick="{{ c.abrir }}" style="border:0;background:none;cursor:pointer;color:#0B5F66;font:inherit;font-size:12.5px;font-weight:600;text-decoration:underline;text-underline-offset:2px">revelar</button>
+                        </sc-if>
+                        <sc-if value="{{ c.sens }}">
+                          <span style="display:inline-flex;padding:2px 8px;border-radius:999px;font-size:12.5px;font-weight:600;background:#EBDFF3;color:#6C3A8C;border:1px solid #6C3A8C59">sensível · não revelável em tela alguma</span>
+                        </sc-if>
+                      </dd>
+                    </div>
+                  </sc-for>
+                </dl>
+                <div style="margin-top:16px;padding:12px 14px;background:#F2F6F6;border:1px solid #D2DCDD;border-radius:6px">
+                  <b style="font-size:13.5px">Portabilidade</b>
+                  <p style="margin:4px 0 0;font-size:13px;color:#495A5D">Gera pacote assinado com link expirável em 24 h, para um titular por vez, com o mesmo rito de finalidade e registro da revelação. <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;background:#F3E7CE;border:1px solid #8E5C0852;border-radius:3px;padding:1px 6px">ainda não implementado neste protótipo</span></p>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ abaRevisao }}">
+              <div role="tabpanel" id="painel-revisao" aria-labelledby="tab-revisao" tabIndex="0">
+                <div style="padding:14px 16px;border-radius:8px;border:1px solid #9E1F2652;background:#F5DEDF;margin-bottom:14px">
+                  <h4 style="margin:0 0 3px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:15.5px">Decisão automatizada contestada</h4>
+                  <p style="margin:0;font-size:13px;color:#495A5D">Crédito reprovado pelo modelo <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">score-v4.2</span>. A revisão humana precisa de decisão, justificativa e registro — e vale como resposta ao titular.</p>
+                </div>
+                <sc-if value="{{ podeRevisar }}">
+                  <div style="display:flex;flex-direction:column;gap:12px;max-width:560px">
+                    <div style="display:flex;flex-direction:column;gap:5px">
+                      <label for="dec" style="font-size:12.5px;color:#495A5D;font-weight:600">Decisão do analista</label>
+                      <select id="dec" value="{{ decisaoRevisao }}" onChange="{{ setDecisaoRevisao }}" style="font:inherit;font-size:13px;border:1px solid #D2DCDD;border-radius:4px;padding:7px 9px;background:#FFFFFF">
+                        <option value="">Selecione…</option>
+                        <option value="mantida">Manter o resultado</option>
+                        <option value="revertida">Reverter</option>
+                        <option value="aprovada com limite reduzido">Aprovar com limite reduzido</option>
+                      </select>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:5px">
+                      <label for="justrev" style="font-size:12.5px;color:#495A5D;font-weight:600">Fundamento da revisão (mínimo 20 caracteres)</label>
+                      <textarea id="justrev" value="{{ justRevisao }}" onChange="{{ setJustRevisao }}" placeholder="Ex.: comprovante de renda apresentado no protocolo altera a faixa usada pelo modelo." style="font:inherit;font-size:13px;border:1px solid #D2DCDD;border-radius:4px;padding:7px 9px;background:#FFFFFF;min-height:76px;resize:vertical"></textarea>
+                    </div>
+                    <button type="button" onClick="{{ registrarRevisao }}" disabled="{{ revisaoInvalida }}" style="align-self:flex-start;border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Registrar revisão e responder ao titular</button>
+                    <sc-if value="{{ revisaoRegistrada }}">
+                      <p style="margin:0;padding:10px 13px;background:#DDEBE0;border:1px solid #2F6E4552;border-radius:6px;font-size:13px">Decisão <b>{{ revisaoRegistrada }}</b> registrada no audit trail com o fundamento anexado.</p>
+                    </sc-if>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ naoPodeRevisar }}">
+                  <p style="margin:0;padding:11px 13px;background:#F2F6F6;border:1px solid #D2DCDD;border-radius:6px;font-size:13px;color:#495A5D"><b style="color:#0E1719">Reverter decisão é ação do DPO.</b> O seletor não é renderizado para o seu papel, e a rota de revisão não aceita esta sessão.</p>
+                </sc-if>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ abaCompart }}">
+              <div role="tabpanel" id="painel-compart" aria-labelledby="tab-compart" tabIndex="0" style="overflow-x:auto">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:560px">
+                  <thead><tr>
+                    <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Destino</th>
+                    <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Finalidade</th>
+                    <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Transferência</th>
+                    <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Última remessa</th>
+                  </tr></thead>
+                  <tbody>
+                    <tr><td style="padding:10px;border-bottom:1px solid #D2DCDD">Bureau de crédito</td><td style="padding:10px;border-bottom:1px solid #D2DCDD">análise de crédito</td><td style="padding:10px;border-bottom:1px solid #D2DCDD">nacional</td><td style="padding:10px;border-bottom:1px solid #D2DCDD">26/07/2026</td></tr>
+                    <tr><td style="padding:10px">Antifraude (EUA)</td><td style="padding:10px">prevenção de fraude</td><td style="padding:10px"><span style="display:inline-flex;padding:2px 8px;border-radius:999px;font-size:12.5px;font-weight:600;background:#F3E7CE;color:#8E5C08;border:1px solid #8E5C0852">SCC ANPD · Art. 33</span></td><td style="padding:10px">27/07/2026</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ abaMensagens }}">
+              <div role="tabpanel" id="painel-mensagens" aria-labelledby="tab-mensagens" tabIndex="0" style="display:flex;flex-direction:column;gap:10px;max-width:640px">
+                <div style="align-self:flex-start;background:#F2F6F6;border:1px solid #D2DCDD;border-radius:8px;padding:10px 13px;font-size:13px">
+                  <span style="display:block;font-size:12.5px;color:#6E8184;text-transform:uppercase;letter-spacing:.05em">titular · 26/07 14:02</span>
+                  Quero saber quais dados vocês têm sobre mim e para quê.
+                </div>
+                <div style="align-self:flex-end;background:#DCEAEA;border-radius:8px;padding:10px 13px;font-size:13px">
+                  <span style="display:block;font-size:12.5px;color:#6E8184;text-transform:uppercase;letter-spacing:.05em">dpo · 26/07 16:40</span>
+                  Recebido. O pacote sai pelo protocolo P-2026-0731 em até 5 dias úteis.
+                </div>
+                <p style="margin:0;font-size:12.5px;color:#6E8184">O canal recusa documento em texto claro: CPF e e-mail são removidos antes de gravar, aqui e na justificativa de acesso.</p>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ modalAberto }}">
+        <div style="position:fixed;inset:0;background:rgba(4,12,13,.55);display:grid;place-items:center;z-index:100;padding:16px">
+          <div role="dialog" aria-modal="true" style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;max-width:560px;width:100%;max-height:88vh;overflow:auto;box-shadow:0 18px 40px -18px rgba(14,23,25,.5)">
+            <h3 style="margin:0;padding:16px 20px 0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:18px">{{ tituloModal }}</h3>
+            <div style="padding:14px 20px;display:flex;flex-direction:column;gap:13px">
+              <div style="display:flex;gap:14px;flex-wrap:wrap;padding:10px 13px;background:#DCEAEA;border-radius:6px;font-size:12.5px">
+                <span><b>Protocolo</b> {{ foco.id }}</span>
+                <span><b>Titular</b> {{ foco.titular }}</span>
+                <span><b>Direito</b> {{ foco.direito }}</span>
+              </div>
+              <p style="margin:0;padding:10px 13px;background:#F3E7CE;border:1px solid #8E5C0852;border-left:2px solid #8E5C08;border-radius:0 4px 4px 0;font-size:12.5px;color:#495A5D">A tentativa é gravada <b>antes</b> da resposta, com o seu nome, o protocolo, a finalidade e o campo exibido. O valor volta a mascarar em 60 s.</p>
+              <div style="display:flex;flex-direction:column;gap:5px">
+                <label for="fin" style="font-size:12.5px;color:#495A5D;font-weight:600">Finalidade — só as compatíveis com o catálogo deste campo</label>
+                <select id="fin" value="{{ finalidade }}" onChange="{{ setFinalidade }}" style="font:inherit;font-size:13px;border:1px solid #D2DCDD;border-radius:4px;padding:7px 9px;background:#FFFFFF">
+                  <sc-for list="{{ opcoesFinalidade }}" as="o" hint-placeholder-count="2">
+                    <option value="{{ o.valor }}">{{ o.rotulo }}</option>
+                  </sc-for>
+                </select>
+                <span style="font-size:12.5px;color:#6E8184">Recusadas para este campo: {{ incompativeis }} — a finalidade pedida precisa constar do inventário.</span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:5px">
+                <label for="mot" style="font-size:12.5px;color:#495A5D;font-weight:600">Motivo</label>
+                <select id="mot" value="{{ motivo }}" onChange="{{ setMotivo }}" style="font:inherit;font-size:13px;border:1px solid #D2DCDD;border-radius:4px;padding:7px 9px;background:#FFFFFF">
+                  <option value="">Selecione…</option>
+                  <option value="confirmar identidade">confirmar identidade do solicitante</option>
+                  <option value="conferir divergência">conferir divergência apontada pelo titular</option>
+                  <option value="instruir resposta">instruir a resposta do protocolo</option>
+                </select>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:5px">
+                <label for="obs" style="font-size:12.5px;color:#495A5D;font-weight:600">Observação (opcional)</label>
+                <textarea id="obs" value="{{ obs }}" onChange="{{ setObs }}" placeholder="Contexto curto. Documentos são removidos automaticamente." style="font:inherit;font-size:13px;border:1px solid #D2DCDD;border-radius:4px;padding:7px 9px;background:#FFFFFF;min-height:64px;resize:vertical"></textarea>
+                <sc-if value="{{ obsTemPii }}">
+                  <p role="alert" style="margin:0;padding:9px 12px;background:#F5DEDF;border:1px solid #9E1F2652;border-radius:6px;font-size:12.5px">A observação contém documento em texto claro. Será gravada assim: <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">{{ obsRedigida }}</span></p>
+                </sc-if>
+              </div>
+            </div>
+            <div style="padding:13px 20px;border-top:1px solid #D2DCDD;display:flex;justify-content:flex-end;gap:8px;background:#F2F6F6;border-radius:0 0 8px 8px">
+              <button type="button" onClick="{{ fecharModal }}" style="border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Cancelar</button>
+              <button type="button" onClick="{{ confirmarRevelar }}" disabled="{{ revelarInvalido }}" style="border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Registrar e revelar</button>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ confirmandoCenario }}">
+        <div style="position:fixed;inset:0;background:rgba(4,12,13,.55);display:grid;place-items:center;z-index:110;padding:16px">
+          <div role="dialog" aria-modal="true" style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;max-width:460px;width:100%;box-shadow:0 18px 40px -18px rgba(14,23,25,.5)">
+            <h3 style="margin:0;padding:16px 20px 0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:18px">Trocar de cenário descarta registros</h3>
+            <div style="padding:14px 20px;font-size:13.5px;color:#495A5D">{{ textoConfirmacao }}</div>
+            <div style="padding:13px 20px;border-top:1px solid #D2DCDD;display:flex;justify-content:flex-end;gap:8px;background:#F2F6F6;border-radius:0 0 8px 8px">
+              <button type="button" onClick="{{ cancelarTroca }}" style="border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Ficar neste cenário</button>
+              <button type="button" onClick="{{ confirmarTroca }}" style="border:1px solid #9E1F26;background:#9E1F26;color:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Trocar e descartar</button>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ eT5 }}">
+        <div>
+          <h1 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:30px;line-height:1.15">Riscos e RACI</h1>
+          <p style="margin:8px 0 0;color:#495A5D;max-width:68ch;font-size:14.5px;text-wrap:pretty">Seis riscos, um dono cada. Reclassificar muda a prioridade do programa — por isso exige justificativa registrada, e agora pode ser feito por teclado.</p>
+          <sc-if value="{{ anotar }}">
+            <p style="margin:14px 0 0;font-size:12.5px;color:#6E8184;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">correções aplicadas · T5-01 · T5-02 · T5-03 · C-12</p>
+          </sc-if>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px;margin-top:20px;align-items:start">
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h3 style="margin:0 0 4px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Matriz probabilidade × impacto</h3>
+              <p style="margin:0 0 12px;font-size:12.5px;color:#6E8184">Cada risco é um botão: Tab navega, Enter seleciona. A grade substituiu o arrasto — que não existia para teclado nem para toque.</p>
+              <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;touch-action:none">
+                <sc-for list="{{ celulas }}" as="cel" hint-placeholder-count="25">
+                  <div style="{{ cel.estilo }}">
+                    <sc-for list="{{ cel.itens }}" as="r" hint-placeholder-count="0">
+                      <button type="button" style="{{ r.estilo }}" onClick="{{ r.selecionar }}">{{ r.cod }}</button>
+                    </sc-for>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:12.5px;color:#6E8184;margin-top:6px">
+                <span>probabilidade 1 → 5</span><span>impacto 5 (topo) → 1</span>
+              </div>
+              <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:#495A5D;margin-top:10px">
+                <span style="display:inline-flex;align-items:center;gap:5px"><i style="width:9px;height:9px;border-radius:50%;background:#9E1F26;display:inline-block"></i> Material</span>
+                <span style="display:inline-flex;align-items:center;gap:5px"><i style="width:9px;height:9px;border-radius:50%;background:#8E5C08;display:inline-block"></i> Moral / perda de controle</span>
+                <span style="display:inline-flex;align-items:center;gap:5px"><i style="width:9px;height:9px;border-radius:50%;background:#6C3A8C;display:inline-block"></i> Discriminação</span>
+              </div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:13px">
+              <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+                <h3 style="margin:0 0 10px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">{{ riscoSel.cod }} · {{ riscoSel.desc }}</h3>
+                <dl style="display:grid;grid-template-columns:minmax(96px,116px) minmax(0,1fr);gap:9px;margin:0;font-size:13px">
+                  <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Score</dt>
+                  <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD"><b style="font-family:ui-monospace,Menlo,monospace">{{ riscoSel.score }}</b> <span style="color:#6E8184">(P {{ riscoSel.p }} × I {{ riscoSel.i }})</span></dd>
+                  <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Dono</dt>
+                  <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD;font-family:ui-monospace,Menlo,monospace;font-size:12.5px">{{ riscoSel.dono }} · {{ riscoSel.dominio }}</dd>
+                  <dt style="color:#6E8184;font-size:12.5px;padding:5px 0">Estado</dt>
+                  <dd style="margin:0;padding:5px 0">{{ riscoSel.status }} · esforço {{ riscoSel.esforco }} sprint</dd>
+                </dl>
+                <button type="button" onClick="{{ abrirReclass }}" style="margin-top:12px;border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Reclassificar P × I</button>
+              </div>
+
+              <sc-if value="{{ pendente }}">
+                <div style="background:#FFFFFF;border:1px solid #0B5F6640;border-radius:8px;padding:16px 18px">
+                  <h4 style="margin:0 0 8px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:15.5px">Nova classificação</h4>
+                  <p style="margin:0 0 12px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#495A5D">{{ pendenteTexto }}</p>
+                  <div style="display:flex;gap:18px;flex-wrap:wrap">
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <span style="font-size:12.5px;color:#495A5D;font-weight:600">Probabilidade</span>
+                      <button type="button" onClick="{{ descP }}" aria-label="Diminuir probabilidade" style="border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;width:32px;height:32px;cursor:pointer;font:inherit">−</button>
+                      <button type="button" onClick="{{ subP }}" aria-label="Aumentar probabilidade" style="border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;width:32px;height:32px;cursor:pointer;font:inherit">+</button>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <span style="font-size:12.5px;color:#495A5D;font-weight:600">Impacto</span>
+                      <button type="button" onClick="{{ descI }}" aria-label="Diminuir impacto" style="border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;width:32px;height:32px;cursor:pointer;font:inherit">−</button>
+                      <button type="button" onClick="{{ subI }}" aria-label="Aumentar impacto" style="border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;width:32px;height:32px;cursor:pointer;font:inherit">+</button>
+                    </div>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:5px;margin-top:14px">
+                    <label for="jr" style="font-size:12.5px;color:#495A5D;font-weight:600">Justificativa da nova classificação (mínimo 20 caracteres) — <span style="color:#6E8184">{{ contadorRisco }}</span></label>
+                    <textarea id="jr" value="{{ justRisco }}" onChange="{{ setJustRisco }}" placeholder="Ex.: pseudonimização HMAC em produção desde 04/08 reduz a probabilidade de exposição." style="font:inherit;font-size:13px;border:1px solid #D2DCDD;border-radius:4px;padding:7px 9px;background:#FFFFFF;min-height:72px;resize:vertical"></textarea>
+                  </div>
+                  <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+                    <button type="button" onClick="{{ aplicarReclass }}" disabled="{{ justRiscoCurta }}" style="border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Registrar reclassificação</button>
+                    <button type="button" onClick="{{ cancelarReclass }}" style="border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Descartar</button>
+                  </div>
+                </div>
+              </sc-if>
+
+              <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+                <h4 style="margin:0 0 8px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:15.5px">Reclassificações registradas</h4>
+                <sc-if value="{{ semReclass }}" hint-placeholder-val="{{ true }}">
+                  <p style="margin:0;font-size:13px;color:#495A5D">Nenhuma nesta sessão. Reclassifique um risco acima — o registro fica aqui com a justificativa anexada.</p>
+                </sc-if>
+                <sc-for list="{{ reclassificacoes }}" as="rc" hint-placeholder-count="0">
+                  <div style="padding-bottom:9px;border-bottom:1px solid #D2DCDD;margin-bottom:9px">
+                    <div style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">{{ rc.cod }} · {{ rc.texto }} · {{ rc.ator }}</div>
+                    <div style="font-size:13px;color:#495A5D">{{ rc.just }}</div>
+                  </div>
+                </sc-for>
+                <p style="margin:10px 0 0;font-size:12.5px;color:#6E8184">Trocar de cenário recria o banco da demonstração: a plataforma avisa antes de descartar estes registros.</p>
+              </div>
+
+              <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+                <h4 style="margin:0 0 8px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:15.5px">RACI — quem responde</h4>
+                <p style="margin:0 0 10px;font-size:12.5px;color:#6E8184">Um único accountable por processo, garantido por índice no banco. A ação legítima é transferir, com justificativa — não “tentar promover” e receber recusa.</p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px">
+                  <span>Resposta a incidente:</span>
+                  <span style="display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:#0B5F66;color:#FFFFFF;font-size:12.5px;font-weight:700">A</span>
+                  <span style="color:#495A5D">DPO</span>
+                  <button type="button" style="border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;padding:5px 11px;cursor:pointer;font:inherit;font-size:12.5px">Transferir accountable</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ eT6 }}">
+        <div>
+          <h1 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:30px;line-height:1.15">Expurgo e auditoria</h1>
+          <p style="margin:8px 0 0;color:#495A5D;max-width:68ch;font-size:14.5px;text-wrap:pretty">A prova diária de que o prazo foi cumprido, e a cadeia que mostra se alguém mexeu no registro.</p>
+          <sc-if value="{{ anotar }}">
+            <p style="margin:14px 0 0;font-size:12.5px;color:#6E8184;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">correções aplicadas · T6-01 · T6-02 · T6-03 · C-02 · C-06</p>
+          </sc-if>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-top:20px">
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12.5px;color:#495A5D">Eliminados hoje</span>
+              <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:32px;line-height:1">184.203</span>
+              <span style="font-size:12.5px;color:#6E8184">7 tabelas · 3 sistemas</span>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12.5px;color:#495A5D">Cadeia de auditoria</span>
+              <sc-if value="{{ verificacao }}">
+                <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:32px;line-height:1;color:#2F6E45">íntegra</span>
+              </sc-if>
+              <sc-if value="{{ verificacao }}">
+                <span style="font-size:12.5px;color:#6E8184">última verificação {{ verificacao.quando }} por {{ verificacao.ator }} · registrada no trail</span>
+              </sc-if>
+              <button type="button" onClick="{{ verificar }}" style="align-self:flex-start;margin-top:4px;border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;padding:6px 13px;cursor:pointer;font:inherit;font-size:13px">Verificar integridade</button>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12.5px;color:#495A5D">Exportação do trail</span>
+              <sc-if value="{{ podeExportar }}">
+                <button type="button" onClick="{{ exportar }}" style="align-self:flex-start;border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;padding:6px 13px;cursor:pointer;font:inherit;font-size:13px">Exportar CSV assinado</button>
+              </sc-if>
+              <sc-if value="{{ exportado }}">
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">{{ exportado }}</span>
+              </sc-if>
+              <span style="font-size:12.5px;color:#6E8184">Exportar o registro de acessos é, ele mesmo, um acesso: fica gravado antes de o arquivo ser gerado.</span>
+            </div>
+          </div>
+
+          <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;margin-top:14px">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+              <h3 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px;flex:1">Audit trail</h3>
+              <input type="search" value="{{ filtroLog }}" onChange="{{ setFiltroLog }}" placeholder="Filtrar por ator, ação ou recurso…" style="font:inherit;font-size:13px;border:1px solid #D2DCDD;border-radius:4px;padding:6px 9px;background:#FFFFFF;min-width:220px" />
+            </div>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:680px">
+                <thead><tr>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">#</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Quando</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Quem</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Ação</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Recurso</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Finalidade</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Hash</th>
+                </tr></thead>
+                <tbody>
+                  <sc-for list="{{ logs }}" as="l" hint-placeholder-count="4">
+                    <tr>
+                      <td style="padding:9px 10px;border-bottom:1px solid #D2DCDD;font-family:ui-monospace,Menlo,monospace;font-size:12.5px">{{ l.id }}</td>
+                      <td style="padding:9px 10px;border-bottom:1px solid #D2DCDD;font-family:ui-monospace,Menlo,monospace;font-size:12.5px">{{ l.hora }}</td>
+                      <td style="padding:9px 10px;border-bottom:1px solid #D2DCDD;font-size:13px">{{ l.ator }} <span style="color:#6E8184">{{ l.papel }}</span></td>
+                      <td style="padding:9px 10px;border-bottom:1px solid #D2DCDD;font-size:13px">{{ l.acao }}</td>
+                      <td style="padding:9px 10px;border-bottom:1px solid #D2DCDD;font-family:ui-monospace,Menlo,monospace;font-size:12.5px">{{ l.rec }}</td>
+                      <td style="padding:9px 10px;border-bottom:1px solid #D2DCDD;font-size:13px">{{ l.fim }}</td>
+                      <td style="padding:9px 10px;border-bottom:1px solid #D2DCDD;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">{{ l.hash }}</td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+            <sc-if value="{{ logsVazio }}">
+              <p style="margin:12px 0 0;padding:10px 13px;background:#F2F6F6;border:1px solid #D2DCDD;border-radius:6px;font-size:13px;color:#495A5D">Nenhuma linha corresponde ao filtro. Se a cadeia estiver quebrada, o bloco divergente pode estar fora deste recorte — limpe o filtro antes de concluir que está tudo certo.</p>
+            </sc-if>
+          </div>
+
+          <sc-if value="{{ podeDemoAtaque }}">
+            <div style="margin-top:14px;background:#FFFFFF;border:1px dashed #B6C4C6;border-radius:8px;padding:16px 18px">
+              <h4 style="margin:0 0 4px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:15.5px">Demonstração de ataque</h4>
+              <p style="margin:0 0 12px;font-size:12.5px;color:#6E8184">Bloco isolado, visível apenas para papéis que escrevem e apenas em ambiente de demonstração. As rotas ficam atrás da mesma guarda de escrita das demais.</p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button type="button" style="border:1px solid #9E1F2666;color:#9E1F26;background:#FFFFFF;border-radius:4px;padding:6px 13px;cursor:pointer;font:inherit;font-size:13px">Tentar editar uma linha (409)</button>
+                <button type="button" style="border:1px solid #9E1F2666;color:#9E1F26;background:#FFFFFF;border-radius:4px;padding:6px 13px;cursor:pointer;font:inherit;font-size:13px">Forjar edição no banco</button>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ eT7 }}">
+        <div>
+          <h1 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:30px;line-height:1.15">Chaves e criptografia</h1>
+          <p style="margin:8px 0 0;color:#495A5D;max-width:68ch;font-size:14.5px;text-wrap:pretty">Ciclo de rotação em curso, quem depende de cada chave e onde destruir a chave equivale a destruir o dado.</p>
+          <sc-if value="{{ anotar }}">
+            <p style="margin:14px 0 0;font-size:12.5px;color:#6E8184;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">correções aplicadas · T7-01 · T7-02</p>
+          </sc-if>
+
+          <div style="margin-top:20px;background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+            <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline;margin-bottom:12px">
+              <h3 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">alias/pii-cobranca — rotação vence em 8 dias</h3>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button type="button" style="border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:4px;padding:6px 13px;cursor:pointer;font:inherit;font-size:13px">Agendar rotação</button>
+                <button type="button" style="border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;padding:6px 13px;cursor:pointer;font:inherit;font-size:13px">Promover canary</button>
+              </div>
+            </div>
+            <div style="display:flex;overflow-x:auto">
+              <div style="flex:1;min-width:150px;padding:13px 14px;border:1px solid #2F6E4547;background:#DDEBE0;border-radius:8px 0 0 8px"><b style="font-size:12.5px">1 · Nova chave</b><p style="margin:4px 0 0;font-size:12.5px;color:#495A5D">criada e auditada</p></div>
+              <div style="flex:1;min-width:150px;padding:13px 14px;border:1px solid #0B5F6666;border-left:0;background:#DCEAEA"><b style="font-size:12.5px">2 · Recriptografia</b><p style="margin:4px 0 0;font-size:12.5px;color:#495A5D">62,4% · dois aliases válidos</p></div>
+              <div style="flex:1;min-width:150px;padding:13px 14px;border:1px solid #D2DCDD;border-left:0;background:#F2F6F6"><b style="font-size:12.5px">3 · Canary</b><p style="margin:4px 0 0;font-size:12.5px;color:#495A5D">pendente</p></div>
+              <div style="flex:1;min-width:150px;padding:13px 14px;border:1px solid #D2DCDD;border-left:0;background:#F2F6F6;border-radius:0 8px 8px 0"><b style="font-size:12.5px">4 · Revogação</b><p style="margin:4px 0 0;font-size:12.5px;color:#495A5D">pendente</p></div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-top:14px;align-items:start">
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h4 style="margin:0 0 10px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:15.5px">Campos com cripto-shredding suportado</h4>
+              <dl style="display:grid;grid-template-columns:minmax(140px,180px) minmax(0,1fr);gap:9px;margin:0;font-size:13px">
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD;font-family:ui-monospace,Menlo,monospace">kyc.biometria_facial</dt>
+                <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD">DEK por registro · eliminação comprovável</dd>
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0">titulares.cpf</dt>
+                <dd style="margin:0;padding:5px 0">HMAC com chave no KMS · eliminação comprovável</dd>
+              </dl>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h4 style="margin:0 0 10px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:15.5px">Chaves sem suporte a shredding</h4>
+              <p style="margin:0 0 10px;padding:10px 13px;background:#F5DEDF;border:1px solid #9E1F2652;border-radius:6px;font-size:13px">Enquanto <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">alias/backup-frio</span> não suportar, uma restauração devolve dados já eliminados — é o risco R10 da matriz.</p>
+              <button type="button" style="border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;padding:6px 13px;cursor:pointer;font:inherit;font-size:13px">Abrir incidente a partir desta pendência</button>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ eT8 }}">
+        <div>
+          <h1 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:30px;line-height:1.15">Editor de LIA</h1>
+          <p style="margin:8px 0 0;color:#495A5D;max-width:68ch;font-size:14.5px;text-wrap:pretty">Legítimo interesse não se afirma, se demonstra: três passos com justificativa, evidência com hash e assinatura do DPO.</p>
+          <sc-if value="{{ anotar }}">
+            <p style="margin:14px 0 0;font-size:12.5px;color:#6E8184;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">correções aplicadas · T8-01 · T8-02 · T8-03</p>
+          </sc-if>
+
+          <div style="margin-top:18px;padding:14px 16px;border-radius:8px;border:1px solid #9E1F2652;background:#F5DEDF;display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+            <div style="flex:1;min-width:280px">
+              <h4 style="margin:0 0 3px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:15.5px">LIA-2025-07 vencida há 18 dias — campos vinculados sem base legal</h4>
+              <p style="margin:0;font-size:13px;color:#495A5D">O gate de CI está bloqueando qualquer PR que toque <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">score_risco</span>.</p>
+            </div>
+            <button type="button" style="border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Abrir renovação</button>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-top:14px;align-items:start">
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h3 style="margin:0 0 12px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Passo 3 · Balanceamento</h3>
+              <p style="margin:0 0 12px;font-size:13px;color:#495A5D">Cada eixo agora exige uma linha de justificativa. O veredito deixa de ser uma subtração e passa a citar a mitigação que o sustenta.</p>
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <div style="display:flex;flex-direction:column;gap:5px">
+                  <label for="ben" style="font-size:12.5px;color:#495A5D;font-weight:600">Benefício para o controlador — por quê?</label>
+                  <textarea id="ben" style="font:inherit;font-size:13px;border:1px solid #D2DCDD;border-radius:4px;padding:7px 9px;background:#FFFFFF;min-height:60px;resize:vertical">Redução de 31% na inadimplência dos 90 dias, medida em teste A/B com 40 mil contratos.</textarea>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:5px">
+                  <label for="dan" style="font-size:12.5px;color:#495A5D;font-weight:600">Dano ao titular — por quê?</label>
+                  <textarea id="dan" style="font:inherit;font-size:13px;border:1px solid #D2DCDD;border-radius:4px;padding:7px 9px;background:#FFFFFF;min-height:60px;resize:vertical">Perfilamento sem expectativa clara; o titular não espera que o histórico de navegação componha o score.</textarea>
+                </div>
+              </div>
+              <div style="margin-top:14px;padding:12px 14px;background:#F3E7CE;border:1px solid #8E5C0852;border-radius:6px;font-size:13px">
+                <b>Sustenta com mitigação.</b> Válido enquanto pseudonimização, retenção de 18 meses e oposição em um clique continuarem ativas. Se uma delas cair, a LIA volta para revisão automaticamente.
+              </div>
+            </div>
+
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h3 style="margin:0 0 12px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Campos vinculados</h3>
+              <div style="display:flex;flex-direction:column;gap:5px">
+                <label for="camp" style="font-size:12.5px;color:#495A5D;font-weight:600">Vincular outro campo</label>
+                <select id="camp" style="font:inherit;font-size:13px;border:1px solid #D2DCDD;border-radius:4px;padding:7px 9px;background:#FFFFFF">
+                  <option>score_risco — elegível</option>
+                  <option>historico_pagamento — elegível</option>
+                  <option>endereco_ip — elegível</option>
+                  <option disabled>biometria_facial — sensível, Art. 11 não admite legítimo interesse</option>
+                  <option disabled>dado_saude — sensível, Art. 11 não admite legítimo interesse</option>
+                </select>
+                <span style="font-size:12.5px;color:#6E8184">Os inelegíveis aparecem com o motivo e não podem ser escolhidos — prevenir o erro em vez de demonstrá-lo.</span>
+              </div>
+              <p style="margin:14px 0 0;font-size:12.5px;color:#6E8184">Assinatura: pendente. O botão indica qual alternativa do Passo 2 ainda bloqueia a assinatura e leva o foco até ela.</p>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ eT9 }}">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;padding:2px 7px;border-radius:3px;background:#F2F6F6;border:1px solid #D2DCDD;color:#495A5D">Art. 48</span>
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;padding:2px 7px;border-radius:3px;background:#F2F6F6;border:1px solid #D2DCDD;color:#495A5D">tela nova</span>
+          </div>
+          <h1 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:30px;line-height:1.15">Incidentes</h1>
+          <p style="margin:8px 0 0;color:#495A5D;max-width:68ch;font-size:14.5px;text-wrap:pretty">O dia ruim também é processo: escopo vindo do catálogo, decisão de comunicar com fundamento registrado e prazo à vista.</p>
+          <sc-if value="{{ anotar }}">
+            <p style="margin:14px 0 0;font-size:12.5px;color:#6E8184;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">correção aplicada · C-07 — lacuna de cobertura do programa</p>
+          </sc-if>
+
+          <div style="margin-top:18px;padding:14px 16px;border-radius:8px;border:1px solid #9E1F2652;background:#F5DEDF;display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <span style="font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#495A5D">Incidente</span>
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:15px;font-weight:600">INC-2026-003</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <span style="font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#495A5D">Detectado há</span>
+              <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:24px;line-height:1">6 h 12 min</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <span style="font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#495A5D">Decisão de comunicar</span>
+              <span style="font-size:15px;color:#9E1F26;font-weight:600">pendente</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <span style="font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#495A5D">Origem</span>
+              <span style="font-size:15px">alerta de volume · API de cobrança</span>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-top:14px;align-items:start">
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h3 style="margin:0 0 10px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Escopo — lido do catálogo</h3>
+              <dl style="display:grid;grid-template-columns:minmax(120px,150px) minmax(0,1fr);gap:9px;margin:0;font-size:13px">
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Campos atingidos</dt>
+                <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD"><span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">cpf</span>, <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">nome</span>, <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">historico_pagamento</span></dd>
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Categoria</dt>
+                <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD">pessoal · nenhum campo sensível na janela do incidente</dd>
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Titulares</dt>
+                <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD">4.118 estimados · faixa confirmada por contagem no log de acesso</dd>
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Risco previsto</dt>
+                <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD">R09 · CPF em texto claro no log — score 12, em tratamento</dd>
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0">RIPD relacionado</dt>
+                <dd style="margin:0;padding:5px 0">RIPD-2026-014 · recomendação P0 “redigir CPF no logger” ainda aberta</dd>
+              </dl>
+            </div>
+
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h3 style="margin:0 0 10px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Decisão de comunicação</h3>
+              <sc-if value="{{ podeIncidente }}">
+                <div style="display:flex;flex-direction:column;gap:12px">
+                  <div style="display:flex;flex-direction:column;gap:5px">
+                    <label for="com" style="font-size:12.5px;color:#495A5D;font-weight:600">Decisão</label>
+                    <select id="com" value="{{ comunicar }}" onChange="{{ setComunicar }}" style="font:inherit;font-size:13px;border:1px solid #D2DCDD;border-radius:4px;padding:7px 9px;background:#FFFFFF">
+                      <option value="">Selecione…</option>
+                      <option value="comunicar ANPD e titulares">comunicar à ANPD e aos titulares</option>
+                      <option value="comunicar somente ANPD">comunicar somente à ANPD</option>
+                      <option value="não comunicar">não comunicar — risco não relevante</option>
+                    </select>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:5px">
+                    <label for="jinc" style="font-size:12.5px;color:#495A5D;font-weight:600">Fundamento (mínimo 20 caracteres) — fica anexado para sempre</label>
+                    <textarea id="jinc" value="{{ justIncidente }}" onChange="{{ setJustIncidente }}" placeholder="Ex.: exposição confirmada de CPF e nome de 4.118 titulares por token válido; risco de fraude por engenharia social." style="font:inherit;font-size:13px;border:1px solid #D2DCDD;border-radius:4px;padding:7px 9px;background:#FFFFFF;min-height:80px;resize:vertical"></textarea>
+                  </div>
+                  <button type="button" onClick="{{ registrarIncidente }}" disabled="{{ incidenteInvalido }}" style="align-self:flex-start;border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Registrar decisão</button>
+                  <sc-if value="{{ incidenteRegistrado }}">
+                    <p style="margin:0;padding:10px 13px;background:#DDEBE0;border:1px solid #2F6E4552;border-radius:6px;font-size:13px">Decisão <b>{{ incidenteRegistrado }}</b> gravada no trail encadeado. A comunicação sai do mesmo ato, com o texto versionado.</p>
+                  </sc-if>
+                </div>
+              </sc-if>
+              <p style="margin:14px 0 0;font-size:12.5px;color:#6E8184">Decidir não comunicar também é decisão registrada — é o que a fiscalização examina primeiro.</p>
+            </div>
+          </div>
+
+          <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;margin-top:14px">
+            <h3 style="margin:0 0 12px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Linha do tempo</h3>
+            <div style="display:flex;flex-direction:column;gap:10px;font-size:13px">
+              <div style="display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:12px;padding-bottom:9px;border-bottom:1px solid #D2DCDD">
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">04:06</span>
+                <span>Alerta de volume disparado: 4.118 leituras por um único token em 9 minutos.</span>
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">c41a…88b2</span>
+              </div>
+              <div style="display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:12px;padding-bottom:9px;border-bottom:1px solid #D2DCDD">
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">04:31</span>
+                <span>Token revogado e escopo do principal reduzido. Contenção confirmada por Rita Nunes.</span>
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">9d02…1f47</span>
+              </div>
+              <div style="display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:12px">
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">06:14</span>
+                <span>Escopo apurado a partir do catálogo e do log de acesso. Aguardando decisão de comunicação.</span>
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">be77…3a05</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;mostrarAnotacoes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Revisão&quot;}}">
+class Component extends DCLogic {
+  telas = [
+    { id: 't1', nome: 'Painel de governança', grupo: 'Esteira de entrega' },
+    { id: 't2', nome: 'Catálogo e consentimentos', grupo: 'Esteira de entrega' },
+    { id: 't3', nome: 'RIPD e LINDDUN', grupo: 'Esteira de entrega' },
+    { id: 't4', nome: 'Direitos do titular', grupo: 'Operação e prova' },
+    { id: 't5', nome: 'Riscos e RACI', grupo: 'Operação e prova' },
+    { id: 't6', nome: 'Expurgo e auditoria', grupo: 'Operação e prova' },
+    { id: 't7', nome: 'Chaves e criptografia', grupo: 'Operação e prova' },
+    { id: 't8', nome: 'Editor de LIA', grupo: 'Operação e prova' },
+    { id: 't9', nome: 'Incidentes', grupo: 'Operação e prova' },
+  ];
+  papeis = [
+    { id: 'engenharia', rotulo: 'Engenharia' },
+    { id: 'dpo', rotulo: 'DPO' },
+    { id: 'produto', rotulo: 'Produto' },
+    { id: 'seguranca', rotulo: 'Segurança' },
+    { id: 'auditor', rotulo: 'Auditor externo' },
+  ];
+  acoes = {
+    engenharia: ['escrever', 'gerar_ripd', 'ver_gate_detalhe', 'ver_pipeline', 'ver_log_kms', 'rodar_expurgo', 'ver_portal', 'ver_total', 'abrir_incidente'],
+    dpo: ['escrever', 'revelar_pii', 'aprovar_ripd', 'assinar_lia', 'gerenciar_risco', 'ver_portal', 'ver_total', 'rodar_expurgo', 'buscar_titular', 'concluir_solicitacao', 'revisar_decisao', 'exportar_auditoria', 'comunicar_incidente'],
+    produto: ['ver_portal'],
+    seguranca: ['escrever', 'ver_pipeline', 'ver_log_kms', 'ver_gate_detalhe', 'ver_total', 'rodar_expurgo', 'abrir_incidente'],
+    auditor: [],
+  };
+  bloqueadas = { seguranca: ['t4'], produto: ['t6', 't7'] };
+
+  riscos = [
+    { cod: 'R01', desc: 'Reidentificação por hash de CPF em base pública', p: 3, i: 4, dano: 'material', esforco: 0.5, dono: '@eng-maria', dominio: 'Engenharia', status: 'em_tratamento' },
+    { cod: 'R04', desc: 'Decisão automatizada com efeito discriminatório', p: 4, i: 5, dano: 'discriminacao', esforco: 1.5, dono: '@dpo-marcela', dominio: 'DPO', status: 'aberto' },
+    { cod: 'R07', desc: 'Transferência internacional sem cláusulas do Art. 33', p: 3, i: 5, dano: 'perda_de_controle', esforco: 0.75, dono: '@jur-ana', dominio: 'Jurídico', status: 'aberto' },
+    { cod: 'R09', desc: 'CPF em texto claro no log de aplicação', p: 4, i: 3, dano: 'moral', esforco: 0.25, dono: '@eng-joao', dominio: 'Engenharia', status: 'em_tratamento' },
+    { cod: 'R10', desc: 'Backup imutável sem cripto-shredding', p: 2, i: 5, dano: 'perda_de_controle', esforco: 2, dono: '@seg-rita', dominio: 'Segurança', status: 'aberto' },
+    { cod: 'R02', desc: 'Retenção indeterminada em tabela de eventos', p: 3, i: 2, dano: 'perda_de_controle', esforco: 0.5, dono: '@dados-caio', dominio: 'Dados', status: 'mitigado' },
+  ];
+  cor = { material: '#9E1F26', discriminacao: '#6C3A8C', moral: '#8E5C08', perda_de_controle: '#8E5C08' };
+
+  camposTitular = [
+    { chave: 'cpf', rotulo: 'CPF', mascara: '•••.•••.•••-42', sens: false, base: 'execucao_contrato', finalidades: ['atendimento', 'cobranca'], valor: '347.912.884-42' },
+    { chave: 'nome', rotulo: 'Nome civil', mascara: 'M•••• A••••• S••••', sens: false, base: 'execucao_contrato', finalidades: ['atendimento'], valor: 'Marina Alves Serpa' },
+    { chave: 'email', rotulo: 'E-mail', mascara: 'm•••••@•••••.com', sens: false, base: 'execucao_contrato', finalidades: ['atendimento'], valor: 'marina.s@exemplo.com' },
+    { chave: 'renda', rotulo: 'Renda declarada', mascara: 'R$ ••.•••,••', sens: false, base: 'protecao_credito', finalidades: ['cobranca'], valor: 'R$ 11.480,00' },
+    { chave: 'biometria', rotulo: 'Biometria facial', mascara: '—', sens: true, base: 'consentimento', finalidades: [], valor: null },
+  ];
+  rotuloFinalidade = {
+    atendimento: 'atendimento — responder solicitação do titular',
+    cobranca: 'cobranca — negociação de dívida',
+    auditoria: 'auditoria — verificação de conformidade',
+    marketing: 'marketing — comunicação comercial',
+  };
+
+  solicitacoes = [
+    { id: 'P-2026-0731', direito: 'Acesso (Art. 18, II)', titular: 'hmac:9f2c…a1d4', titularId: 'T-4471', sistemas: 2, restanteH: 76, status: 'em análise', verificacao: 2 },
+    { id: 'P-2026-0729', direito: 'Revisão de decisão (Art. 20)', titular: 'hmac:5b71…c033', titularId: 'T-3980', sistemas: 1, restanteH: 18, status: 'em análise', verificacao: 3 },
+    { id: 'P-2026-0715', direito: 'Portabilidade (Art. 18, V)', titular: 'hmac:2d08…77ae', titularId: 'T-5502', sistemas: 2, restanteH: 155, status: 'aberta', verificacao: 2 },
+    { id: 'P-2026-0718', direito: 'Eliminação (Art. 18, VI)', titular: 'hmac:aa41…9b20', titularId: 'T-2214', sistemas: 4, restanteH: 0, status: 'concluída', verificacao: 3 },
+  ];
+
+  state = {
+    tela: 't1', papel: 'dpo', apresentacao: false, demo: false,
+    cenario: 'Crédito IA · financeiro', confirmandoCenario: null, reclass: [],
+    riscoSel: 'R04', pendente: null, justRisco: '',
+    protocolo: 'P-2026-0731', aba: 'dados',
+    revelarCampo: null, finalidade: '', motivo: '', obs: '',
+    revelado: null, tick: 0, registro: 1041,
+    concluindo: false, desfecho: 'atendido', evidencia: '', concluidos: {},
+    verificacao: null, filtroLog: '', exportado: null,
+    decisaoRevisao: '', justRevisao: '', revisaoRegistrada: null,
+    comunicar: '', justIncidente: '', incidenteRegistrado: null,
+    aviso: null,
+  };
+
+  componentDidMount() {
+    this.timer = setInterval(() => { if (this.state.revelado) this.setState({ tick: Date.now() }); }, 1000);
+  }
+  componentWillUnmount() { clearInterval(this.timer); }
+
+  pode(a) { return (this.acoes[this.state.papel] || []).includes(a); }
+  avisar(texto) { this.setState({ aviso: texto }); }
+  redigir(t) { return t.replace(/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/g, '[CPF REMOVIDO]').replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[E-MAIL REMOVIDO]'); }
+
+  renderVals() {
+    const ABAS = [['dados', 'Dados do titular'], ['compart', 'Compartilhamentos'], ['revisao', 'Revisão de decisão'], ['mensagens', 'Mensagens']];
+    const s = this.state;
+    const papel = s.papel;
+    const bloq = this.bloqueadas[papel] || [];
+    const visiveis = this.telas.filter((t) => !bloq.includes(t.id));
+    const nav = (grupo) => visiveis.filter((t) => t.grupo === grupo).map((t) => ({
+      ...t,
+      ir: () => this.setState({ tela: t.id }),
+      estilo: 'display:flex;align-items:baseline;gap:9px;width:100%;text-align:left;padding:8px 10px;border:0;border-radius:4px;cursor:pointer;font:inherit;font-size:13.5px;'
+        + (s.tela === t.id ? 'background:#DCEAEA;color:#0E1719;font-weight:600' : 'background:none;color:#495A5D'),
+      estiloId: 'font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;min-width:20px;'
+        + (s.tela === t.id ? 'color:#0B5F66' : 'color:#6E8184'),
+    }));
+
+    const sol = this.solicitacoes.map((x) => ({
+      ...x,
+      concluido: Boolean(s.concluidos[x.id]) || x.status === 'concluída',
+      rotuloStatus: s.concluidos[x.id] ? s.concluidos[x.id] : x.status,
+      restante: x.restanteH === 0 ? '—' : (x.restanteH >= 24 ? Math.floor(x.restanteH / 24) + ' d ' + (x.restanteH % 24) + ' h' : x.restanteH + ' h'),
+      urgente: x.restanteH > 0 && x.restanteH < 24,
+      selecionar: () => this.setState({ protocolo: x.id, revelado: null, revelarCampo: null, concluindo: false }),
+      estilo: 'cursor:pointer;border-bottom:1px solid #D2DCDD;'
+        + (s.protocolo === x.id ? 'background:#DCEAEA' : 'background:transparent'),
+    }));
+    const foco = sol.find((x) => x.id === s.protocolo) || sol[0];
+
+    const campo = this.camposTitular.find((c) => c.chave === s.revelarCampo) || null;
+    const opcoes = campo ? campo.finalidades.map((f) => ({ valor: f, rotulo: this.rotuloFinalidade[f] })) : [];
+    const incompativeis = campo
+      ? Object.keys(this.rotuloFinalidade).filter((f) => !campo.finalidades.includes(f)).join(', ')
+      : '';
+    const obsRedigida = this.redigir(s.obs);
+    const obsTemPii = obsRedigida !== s.obs;
+
+    const restanteSeg = s.revelado ? Math.max(0, Math.ceil((s.revelado.expiraEm - Date.now()) / 1000)) : 0;
+    if (s.revelado && restanteSeg === 0) setTimeout(() => this.setState({ revelado: null }), 0);
+
+    const campos = this.camposTitular.map((c) => ({
+      ...c,
+      aberto: Boolean(s.revelado && s.revelado.chave === c.chave),
+      mostrado: s.revelado && s.revelado.chave === c.chave ? c.valor : c.mascara,
+      podeRevelar: !c.sens && this.pode('revelar_pii'),
+      abrir: () => this.setState({ revelarCampo: c.chave, finalidade: c.finalidades[0] || '', motivo: '', obs: '' }),
+    }));
+
+    const riscos = this.riscos.map((r) => ({
+      ...r,
+      score: r.p * r.i,
+      sel: s.riscoSel === r.cod,
+      selecionar: () => this.setState({ riscoSel: r.cod }),
+      estilo: 'display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;cursor:pointer;font:inherit;font-size:12.5px;font-weight:700;color:#FFFFFF;border:2px solid '
+        + (s.riscoSel === r.cod ? '#0E1719' : 'transparent') + ';background:' + this.cor[r.dano]
+        + (r.status === 'mitigado' ? ';opacity:.5' : ''),
+    }));
+    const rSel = riscos.find((r) => r.cod === s.riscoSel) || riscos[0];
+    const celulas = [];
+    for (let i = 5; i >= 1; i--) {
+      for (let p = 1; p <= 5; p++) {
+        const sc = p * i;
+        celulas.push({
+          chave: p + '-' + i, p, i,
+          itens: riscos.filter((r) => r.p === p && r.i === i),
+          estilo: 'min-height:58px;padding:6px;display:flex;flex-wrap:wrap;gap:4px;align-content:flex-start;border:1px solid #D2DCDD;background:'
+            + (sc >= 15 ? '#F5DEDF' : sc >= 8 ? '#F3E7CE' : '#DDEBE0'),
+        });
+      }
+    }
+
+    const mover = (dp, di) => {
+      const r = this.riscos.find((x) => x.cod === s.riscoSel);
+      if (!r) return;
+      const base = s.pendente || { p: r.p, i: r.i };
+      this.setState({ pendente: { p: Math.min(5, Math.max(1, base.p + dp)), i: Math.min(5, Math.max(1, base.i + di)) } });
+    };
+
+    const logs = [
+      { id: 1038, hora: '09:12:04', ator: 'Maria Souza', papel: 'engenharia', acao: 'RIPD_RENDERIZADO', rec: 'ripd/RIPD-2026-014', fim: '—', hash: '7c1a…9e42' },
+      { id: 1039, hora: '09:41:55', ator: 'Marcela Dias', papel: 'dpo', acao: 'CAMPO_REVELADO', rec: 'campo/T-4471/cpf', fim: 'atendimento', hash: 'b204…10ff' },
+      { id: 1040, hora: '10:02:31', ator: 'Pedro Lima', papel: 'produto', acao: 'CAMPO_REVELADO', rec: 'campo/T-4471/cpf', fim: 'negado', hash: '5fd8…77ac' },
+      { id: 1041, hora: '10:18:07', ator: 'Marcela Dias', papel: 'dpo', acao: 'RIPD_APROVADO', rec: 'ripd/RIPD-2026-014', fim: '—', hash: 'ee39…b501' },
+    ].filter((l) => !s.filtroLog || (l.ator + l.acao + l.rec).toLowerCase().includes(s.filtroLog.toLowerCase()));
+
+    return {
+      papel, tela: s.tela,
+      eT1: s.tela === 't1', eT2: s.tela === 't2', eT3: s.tela === 't3', eT4: s.tela === 't4',
+      eT5: s.tela === 't5', eT6: s.tela === 't6', eT7: s.tela === 't7', eT8: s.tela === 't8', eT9: s.tela === 't9',
+      anotar: this.props.mostrarAnotacoes ?? true,
+      apresentacao: s.apresentacao,
+      alternarApresentacao: () => this.setState({ apresentacao: !s.apresentacao }),
+      navEsteira: nav('Esteira de entrega'), navOperacao: nav('Operação e prova'),
+      papeisSeg: this.papeis.map((p) => ({
+        ...p,
+        trocar: () => this.setState({ papel: p.id, tela: (this.bloqueadas[p.id] || []).includes(s.tela) ? 't1' : s.tela }),
+        estilo: 'border:0;padding:5px 11px;border-radius:3px;cursor:pointer;font:inherit;font-size:12.5px;'
+          + (papel === p.id ? 'background:#FFFFFF;color:#0E1719;font-weight:600;box-shadow:0 1px 2px rgba(14,23,25,.14)' : 'background:none;color:#495A5D'),
+      })),
+      telasOcultas: bloq.length ? bloq.length + ' tela' + (bloq.length > 1 ? 's' : '') + ' fora do seu papel não aparece' + (bloq.length > 1 ? 'm' : '') + ' neste menu' : 'Todas as telas do produto estão neste menu',
+      aviso: s.aviso, fecharAviso: () => this.setState({ aviso: null }),
+
+      demo: s.demo,
+      alternarDemo: () => this.setState({ demo: !s.demo, aviso: null }),
+      riscos, riscoSel: rSel, celulas,
+      pendente: s.pendente,
+      pendenteTexto: s.pendente ? 'P ' + rSel.p + ' → ' + s.pendente.p + ' · I ' + rSel.i + ' → ' + s.pendente.i + ' · score ' + rSel.score + ' → ' + (s.pendente.p * s.pendente.i) : '',
+      abrirReclass: () => this.setState({ pendente: { p: rSel.p, i: rSel.i }, justRisco: '' }),
+      cancelarReclass: () => this.setState({ pendente: null }),
+      subP: () => mover(1, 0), descP: () => mover(-1, 0), subI: () => mover(0, 1), descI: () => mover(0, -1),
+      justRisco: s.justRisco,
+      setJustRisco: (e) => this.setState({ justRisco: e.target.value }),
+      justRiscoCurta: s.justRisco.trim().length < 20,
+      contadorRisco: s.justRisco.trim().length + '/20',
+      aplicarReclass: () => {
+        const r = this.riscos.find((x) => x.cod === s.riscoSel);
+        const antes = r ? { p: r.p, i: r.i } : { p: 0, i: 0 };
+        if (r && s.pendente) { r.p = s.pendente.p; r.i = s.pendente.i; }
+        const reg = {
+          cod: s.riscoSel,
+          texto: 'P' + antes.p + ' → ' + s.pendente.p + ' · I' + antes.i + ' → ' + s.pendente.i,
+          just: s.justRisco,
+          ator: (this.papeis.find((p) => p.id === papel) || {}).rotulo,
+        };
+        this.setState({ pendente: null, justRisco: '', reclass: [reg, ...s.reclass], aviso: 'Reclassificação registrada no audit trail com a justificativa anexada.' });
+      },
+      reclassificacoes: s.reclass,
+      semReclass: s.reclass.length === 0,
+      cenario: s.cenario,
+      setCenario: (e) => {
+        const v = e.target.value;
+        if (v === s.cenario) return;
+        if (s.reclass.length > 0) this.setState({ confirmandoCenario: v });
+        else this.setState({ cenario: v });
+      },
+      confirmandoCenario: s.confirmandoCenario,
+      textoConfirmacao: s.confirmandoCenario
+        ? 'Trocar para ' + s.confirmandoCenario + ' recria o banco desta demonstração e descarta ' + s.reclass.length + ' reclassificação' + (s.reclass.length > 1 ? 'ões' : '') + ' registrada' + (s.reclass.length > 1 ? 's' : '') + ' nesta sessão.'
+        : '',
+      confirmarTroca: () => this.setState({ cenario: s.confirmandoCenario, confirmandoCenario: null, reclass: [], aviso: 'Cenário trocado. Os registros da demonstração anterior foram descartados.' }),
+      cancelarTroca: () => this.setState({ confirmandoCenario: null }),
+
+      solicitacoes: sol, foco,
+      podeConcluir: this.pode('concluir_solicitacao') && !foco.concluido,
+      concluindo: s.concluindo,
+      abrirConclusao: () => this.setState({ concluindo: true }),
+      fecharConclusao: () => this.setState({ concluindo: false }),
+      desfecho: s.desfecho, setDesfecho: (e) => this.setState({ desfecho: e.target.value }),
+      evidencia: s.evidencia, setEvidencia: (e) => this.setState({ evidencia: e.target.value }),
+      concluir: () => this.setState({
+        concluindo: false,
+        concluidos: { ...s.concluidos, [s.protocolo]: s.desfecho },
+        aviso: 'Protocolo ' + s.protocolo + ' concluído como “' + s.desfecho + '”. Cronômetro parado e registro gravado.',
+      }),
+      focoConcluido: foco.concluido,
+
+      abas: ABAS.map(([id, rot], idx) => ({
+        id, rot, idTab: 'tab-' + id, idPainel: 'painel-' + id,
+        selecionada: s.aba === id,
+        foco: s.aba === id ? 0 : -1,
+        ir: () => this.setState({ aba: id }),
+        tecla: (e) => {
+          const n = e.key === 'ArrowRight' ? (idx + 1) % ABAS.length
+            : e.key === 'ArrowLeft' ? (idx - 1 + ABAS.length) % ABAS.length
+            : e.key === 'Home' ? 0
+            : e.key === 'End' ? ABAS.length - 1 : -1;
+          if (n < 0) return;
+          e.preventDefault();
+          const alvo = ABAS[n][0];
+          this.setState({ aba: alvo });
+          const el = document.getElementById('tab-' + alvo);
+          if (el) el.focus();
+        },
+        estilo: 'border:0;background:none;padding:9px 14px;cursor:pointer;font:inherit;font-size:13.5px;border-bottom:2px solid '
+          + (s.aba === id ? '#0B5F66;color:#0E1719;font-weight:600' : 'transparent;color:#495A5D'),
+      })),
+      abaDados: s.aba === 'dados', abaCompart: s.aba === 'compart', abaRevisao: s.aba === 'revisao', abaMensagens: s.aba === 'mensagens',
+      campos, temRevelado: Boolean(s.revelado), restanteSeg: restanteSeg + ' s',
+      registroAtual: '#' + (s.registro + 1),
+
+      modalAberto: Boolean(campo), campoAlvo: campo,
+      tituloModal: campo ? 'Revelar ' + campo.rotulo : '',
+      opcoesFinalidade: opcoes, incompativeis,
+      finalidade: s.finalidade, setFinalidade: (e) => this.setState({ finalidade: e.target.value }),
+      motivo: s.motivo, setMotivo: (e) => this.setState({ motivo: e.target.value }),
+      obs: s.obs, setObs: (e) => this.setState({ obs: e.target.value }),
+      obsTemPii, obsRedigida,
+      revelarInvalido: !s.finalidade || !s.motivo,
+      fecharModal: () => this.setState({ revelarCampo: null }),
+      confirmarRevelar: () => this.setState({
+        revelado: { chave: s.revelarCampo, expiraEm: Date.now() + 60000 },
+        registro: s.registro + 1, revelarCampo: null,
+        aviso: 'Registro #' + (s.registro + 1) + ' gravado antes da resposta · protocolo ' + s.protocolo + ' · finalidade ' + s.finalidade,
+      }),
+
+      podeRevisar: this.pode('revisar_decisao'),
+      naoPodeRevisar: !this.pode('revisar_decisao'),
+      podeBuscar: this.pode('buscar_titular'),
+      naoPodeBuscar: !this.pode('buscar_titular'),
+      decisaoRevisao: s.decisaoRevisao, setDecisaoRevisao: (e) => this.setState({ decisaoRevisao: e.target.value }),
+      justRevisao: s.justRevisao, setJustRevisao: (e) => this.setState({ justRevisao: e.target.value }),
+      revisaoInvalida: !s.decisaoRevisao || s.justRevisao.trim().length < 20,
+      revisaoRegistrada: s.revisaoRegistrada,
+      registrarRevisao: () => this.setState({
+        revisaoRegistrada: s.decisaoRevisao,
+        aviso: 'Revisão humana registrada e devolutiva enviada ao titular do protocolo P-2026-0729.',
+      }),
+
+      verificacao: s.verificacao,
+      verificar: () => this.setState({
+        verificacao: { quando: new Date().toLocaleTimeString('pt-BR'), ator: this.papeis.find((p) => p.id === papel).rotulo, blocos: 1041 },
+        aviso: '1041 blocos recalculados: cadeia íntegra. Verificação registrada no próprio trail.',
+      }),
+      podeExportar: this.pode('exportar_auditoria'),
+      exportado: s.exportado,
+      exportar: () => this.setState({
+        exportado: 'audit-trail-2026-07-28.csv · sha256 4f9c…20e1',
+        aviso: 'Exportação registrada antes de gerar o arquivo, com hash carimbado no rodapé.',
+      }),
+      filtroLog: s.filtroLog, setFiltroLog: (e) => this.setState({ filtroLog: e.target.value }),
+      logs, logsVazio: logs.length === 0,
+      podeDemoAtaque: this.pode('escrever'),
+
+      podeIncidente: this.pode('comunicar_incidente'),
+      comunicar: s.comunicar, setComunicar: (e) => this.setState({ comunicar: e.target.value }),
+      justIncidente: s.justIncidente, setJustIncidente: (e) => this.setState({ justIncidente: e.target.value }),
+      incidenteInvalido: !s.comunicar || s.justIncidente.trim().length < 20,
+      incidenteRegistrado: s.incidenteRegistrado,
+      registrarIncidente: () => this.setState({
+        incidenteRegistrado: s.comunicar,
+        aviso: 'Decisão registrada às ' + new Date().toLocaleTimeString('pt-BR') + ' com justificativa anexada e hash encadeado.',
+      }),
+    };
+  }
+}
+</script>
+</body>
+</html>

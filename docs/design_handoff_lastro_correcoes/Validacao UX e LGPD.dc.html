@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  body { margin: 0; background: #EDE8DE; }
+  a { color: #1F4E79; text-decoration: underline; text-underline-offset: 2px; }
+  a:hover { color: #A8291E; }
+  ::selection { background: #E4D9BE; }
+</style>
+</helmet>
+
+<div style="background:#EDE8DE;padding:40px 24px 80px;font-family:'IBM Plex Sans',sans-serif;-webkit-font-smoothing:antialiased">
+<div style="max-width:1080px;margin:0 auto;background:#FAF8F4;border:1px solid #DCD5C7;box-shadow:0 1px 2px rgba(26,25,22,.05),0 18px 40px -28px rgba(26,25,22,.35)">
+
+  <header style="background:#1A1916;color:#FAF8F4;padding:48px 56px 40px;display:flex;flex-direction:column;gap:28px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:24px;flex-wrap:wrap">
+      <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.18em;text-transform:uppercase;color:#A8A196">Validação de protótipos de tela</span>
+      <span style="font:400 11.5px/1 'IBM Plex Mono',monospace;color:#A8A196">28 jul 2026</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <h1 style="margin:0;font:400 46px/1.08 'Newsreader',serif;letter-spacing:-.01em;max-width:20ch;text-wrap:pretty">Lastro — as 8 telas, lidas contra UX e LGPD</h1>
+      <p style="margin:0;font:400 16px/1.6 'IBM Plex Sans',sans-serif;color:#CFC9BC;max-width:64ch;text-wrap:pretty">Auditoria de código e de fluxo do protótipo navegável (React&nbsp;+&nbsp;TS) e do protótipo estático de <span style="font-family:'IBM Plex Mono',monospace;font-size:14.5px">danzeroum/privacidade</span>. Cada achado aponta o arquivo que o produz, a heurística ou o princípio que ele fere e a correção.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#33322D;border:1px solid #33322D;margin-top:6px">
+      <div style="background:#1A1916;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+        <span style="font:600 30px/1 'IBM Plex Sans',sans-serif;color:#E8695C">3</span>
+        <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#A8A196">Críticos</span>
+      </div>
+      <div style="background:#1A1916;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+        <span style="font:600 30px/1 'IBM Plex Sans',sans-serif;color:#E0A15A">6</span>
+        <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#A8A196">Altos</span>
+      </div>
+      <div style="background:#1A1916;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+        <span style="font:600 30px/1 'IBM Plex Sans',sans-serif;color:#9FB4CC">23</span>
+        <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#A8A196">Médios</span>
+      </div>
+      <div style="background:#1A1916;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+        <span style="font:600 30px/1 'IBM Plex Sans',sans-serif;color:#A8A196">9</span>
+        <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#A8A196">Baixos</span>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#A8A196;border-top:1px solid #33322D;padding-top:20px">
+      <span>escopo: 8 telas × 5 papéis × 3 cenários</span>
+      <span>base: main @ 0cc6bcd</span>
+      <span>método: leitura de código + fluxo</span>
+    </div>
+  </header>
+
+  <section style="padding:48px 56px;border-bottom:1px solid #E0DACE">
+    <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8C8579">Veredito</span>
+    <h2 style="margin:14px 0 20px;font:400 32px/1.2 'Newsreader',serif;color:#1A1916;max-width:26ch;text-wrap:pretty">A arquitetura de privacidade se sustenta. O balcão de atendimento, não.</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <p style="margin:0;font:400 15px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">A decisão de tirar as regras da tela e colocá-las na camada de API é correta e rara — e é ela que faz o protótipo resistir à leitura. Mascaramento por padrão para todos, gravar antes de responder, ausência em vez de botão desabilitado, 404 no lugar de 403: são controles, não texto explicativo.</p>
+        <p style="margin:0;font:400 15px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">O que não se sustenta é o entorno. Três achados críticos abrem brechas que a própria doutrina do projeto proíbe, e a T4 — a tela onde o titular efetivamente é atendido — tem um fluxo quebrado no meio.</p>
+      </div>
+      <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:22px 24px;display:flex;flex-direction:column;gap:14px">
+        <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8C8579">Bloqueia entrega</span>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <p style="margin:0;font:400 14px/1.55 'IBM Plex Sans',sans-serif;color:#3E3B34"><a href="#C-01" style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">C-01</a> · A busca por CPF não checa papel nem registra — Produto e Auditor confirmam a existência de um titular sem deixar rastro.</p>
+          <p style="margin:0;font:400 14px/1.55 'IBM Plex Sans',sans-serif;color:#3E3B34"><a href="#C-02" style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">C-02</a> · A guarda de escrita exclui as rotas de auditoria, contrariando o comentário que está uma linha acima dela.</p>
+          <p style="margin:0;font:400 14px/1.55 'IBM Plex Sans',sans-serif;color:#3E3B34"><a href="#T4-01" style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">T4-01</a> · A fila de atendimento não é selecionável: o protocolo exibido e o titular carregado podem ser pessoas diferentes.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <sc-if value="{{ mostrarMetodo }}" hint-placeholder-val="{{ true }}">
+  <section style="padding:44px 56px;border-bottom:1px solid #E0DACE;background:#F6F3EC">
+    <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8C8579">Rubricas aplicadas</span>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:36px;margin-top:20px">
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h3 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Experiência de uso</h3>
+        <p style="margin:0;font:400 13.5px/1.6 'IBM Plex Sans',sans-serif;color:#6B655A">Usabilidade heurística · design centrado no usuário · prototipação rápida · arquitetura de informação. Base: <em>UX no Desenvolvimento de Software</em>, Paula Azevedo Macedo.</p>
+        <ul style="margin:6px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:7px;font:400 13.5px/1.55 'IBM Plex Sans',sans-serif;color:#3E3B34">
+          <li>Visibilidade do estado, correspondência com o mundo real, controle e liberdade do usuário</li>
+          <li>Consistência entre telas e entre o que o rótulo promete e o que o clique faz</li>
+          <li>Prevenção, diagnóstico e recuperação de erro</li>
+          <li>Fidelidade do protótipo: o que é real, o que é simulado, o que ainda não existe</li>
+        </ul>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h3 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Privacidade e LGPD</h3>
+        <p style="margin:0;font:400 13.5px/1.6 'IBM Plex Sans',sans-serif;color:#6B655A">7 princípios de Privacy by Design · bases legais · dado pessoal × sensível · incidentes de segurança. Base: <em>Privacy by Design / LGPD</em>, Samara Schuch.</p>
+        <ul style="margin:6px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:7px;font:400 13.5px/1.55 'IBM Plex Sans',sans-serif;color:#3E3B34">
+          <li>Proativo e preventivo; privacidade como configuração padrão</li>
+          <li>Privacidade embutida no projeto, não acoplada depois</li>
+          <li>Funcionalidade total — soma positiva, sem falso dilema segurança × uso</li>
+          <li>Segurança fim a fim, visibilidade e transparência, respeito pelo titular</li>
+        </ul>
+      </div>
+    </div>
+    <p style="margin:24px 0 0;font:400 13px/1.6 'IBM Plex Mono',monospace;color:#8C8579;border-top:1px solid #E4DED2;padding-top:16px">A validação leu o código-fonte das 8 telas, da camada de API mock, das permissões e do CSS. Não houve execução em navegador nem teste com usuário — ver <a href="#limites">limites</a>.</p>
+  </section>
+  </sc-if>
+
+  <section style="padding:48px 56px;border-bottom:1px solid #E0DACE">
+    <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8C8579">Placar por tela</span>
+    <h2 style="margin:14px 0 24px;font:400 30px/1.2 'Newsreader',serif;color:#1A1916">Onde cada tela está</h2>
+    <table style="width:100%;border-collapse:collapse;font-family:'IBM Plex Sans',sans-serif">
+      <thead>
+        <tr>
+          <th style="text-align:left;font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#8C8579;padding:0 12px 10px 0;border-bottom:1px solid #DCD5C7">Tela</th>
+          <th style="text-align:left;font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#8C8579;padding:0 12px 10px;border-bottom:1px solid #DCD5C7;width:96px">UX</th>
+          <th style="text-align:left;font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#8C8579;padding:0 12px 10px;border-bottom:1px solid #DCD5C7;width:96px">Privac.</th>
+          <th style="text-align:left;font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#8C8579;padding:0 0 10px 12px;border-bottom:1px solid #DCD5C7">Leitura curta</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="padding:14px 12px 14px 0;border-bottom:1px solid #ECE6DA;vertical-align:top"><a href="#T1" style="font:600 14px/1.4 'IBM Plex Sans',sans-serif">T1 Painel de governança</a></td>
+          <td style="padding:14px 12px;border-bottom:1px solid #ECE6DA;vertical-align:top"><span style="display:inline-flex;gap:3px"><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#DCD5C7"></i></span></td>
+          <td style="padding:14px 12px;border-bottom:1px solid #ECE6DA;vertical-align:top"><span style="display:inline-flex;gap:3px"><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#DCD5C7"></i></span></td>
+          <td style="padding:14px 0 14px 12px;border-bottom:1px solid #ECE6DA;font:400 13.5px/1.55 'IBM Plex Sans',sans-serif;color:#3E3B34">Boa densidade e evidência atrás de cada número. A simulação de violação convive com o gráfico do comitê sem estado próprio.</td>
+        </tr>
+        <tr>
+          <td style="padding:14px 12px 14px 0;border-bottom:1px solid #ECE6DA;vertical-align:top"><a href="#T2" style="font:600 14px/1.4 'IBM Plex Sans',sans-serif">T2 Catálogo de dados</a></td>
+          <td style="padding:14px 12px;border-bottom:1px solid #ECE6DA;vertical-align:top"><span style="display:inline-flex;gap:3px"><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#DCD5C7"></i></span></td>
+          <td style="padding:14px 12px;border-bottom:1px solid #ECE6DA;vertical-align:top"><span style="display:inline-flex;gap:3px"><i style="width:14px;height:7px;background:#A8291E"></i><i style="width:14px;height:7px;background:#A8291E"></i><i style="width:14px;height:7px;background:#DCD5C7"></i><i style="width:14px;height:7px;background:#DCD5C7"></i><i style="width:14px;height:7px;background:#DCD5C7"></i></span></td>
+          <td style="padding:14px 0 14px 12px;border-bottom:1px solid #ECE6DA;font:400 13.5px/1.55 'IBM Plex Sans',sans-serif;color:#3E3B34">O ROPA lido do repositório é o melhor artefato do conjunto. A busca por CPF aberta a todos os papéis derruba a nota de privacidade.</td>
+        </tr>
+        <tr>
+          <td style="padding:14px 12px 14px 0;border-bottom:1px solid #ECE6DA;vertical-align:top"><a href="#T3" style="font:600 14px/1.4 'IBM Plex Sans',sans-serif">T3 RIPD e LINDDUN</a></td>
+          <td style="padding:14px 12px;border-bottom:1px solid #ECE6DA;vertical-align:top"><span style="display:inline-flex;gap:3px"><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#DCD5C7"></i></span></td>
+          <td style="padding:14px 12px;border-bottom:1px solid #ECE6DA;vertical-align:top"><span style="display:inline-flex;gap:3px"><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i></span></td>
+          <td style="padding:14px 0 14px 12px;border-bottom:1px solid #ECE6DA;font:400 13.5px/1.55 'IBM Plex Sans',sans-serif;color:#3E3B34">O gate como comportamento, não como documento, é o acerto conceitual do projeto. O stepper promete progresso que não calcula.</td>
+        </tr>
+        <tr>
+          <td style="padding:14px 12px 14px 0;border-bottom:1px solid #ECE6DA;vertical-align:top"><a href="#T4" style="font:600 14px/1.4 'IBM Plex Sans',sans-serif">T4 Direitos do titular</a></td>
+          <td style="padding:14px 12px;border-bottom:1px solid #ECE6DA;vertical-align:top"><span style="display:inline-flex;gap:3px"><i style="width:14px;height:7px;background:#A8291E"></i><i style="width:14px;height:7px;background:#A8291E"></i><i style="width:14px;height:7px;background:#DCD5C7"></i><i style="width:14px;height:7px;background:#DCD5C7"></i><i style="width:14px;height:7px;background:#DCD5C7"></i></span></td>
+          <td style="padding:14px 12px;border-bottom:1px solid #ECE6DA;vertical-align:top"><span style="display:inline-flex;gap:3px"><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#DCD5C7"></i><i style="width:14px;height:7px;background:#DCD5C7"></i></span></td>
+          <td style="padding:14px 0 14px 12px;border-bottom:1px solid #ECE6DA;font:400 13.5px/1.55 'IBM Plex Sans',sans-serif;color:#3E3B34">O rito de revelação é exemplar. O fluxo em volta dele não fecha: não se escolhe o protocolo e não se conclui a solicitação.</td>
+        </tr>
+        <tr>
+          <td style="padding:14px 12px 14px 0;border-bottom:1px solid #ECE6DA;vertical-align:top"><a href="#T5" style="font:600 14px/1.4 'IBM Plex Sans',sans-serif">T5 Riscos e RACI</a></td>
+          <td style="padding:14px 12px;border-bottom:1px solid #ECE6DA;vertical-align:top"><span style="display:inline-flex;gap:3px"><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#DCD5C7"></i><i style="width:14px;height:7px;background:#DCD5C7"></i></span></td>
+          <td style="padding:14px 12px;border-bottom:1px solid #ECE6DA;vertical-align:top"><span style="display:inline-flex;gap:3px"><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#DCD5C7"></i></span></td>
+          <td style="padding:14px 0 14px 12px;border-bottom:1px solid #ECE6DA;font:400 13.5px/1.55 'IBM Plex Sans',sans-serif;color:#3E3B34">Justificativa obrigatória e histórico imutável estão certos. A ação que os dispara só existe no arrasto do mouse.</td>
+        </tr>
+        <tr>
+          <td style="padding:14px 12px 14px 0;border-bottom:1px solid #ECE6DA;vertical-align:top"><a href="#T6" style="font:600 14px/1.4 'IBM Plex Sans',sans-serif">T6 Expurgo e auditoria</a></td>
+          <td style="padding:14px 12px;border-bottom:1px solid #ECE6DA;vertical-align:top"><span style="display:inline-flex;gap:3px"><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#DCD5C7"></i><i style="width:14px;height:7px;background:#DCD5C7"></i></span></td>
+          <td style="padding:14px 12px;border-bottom:1px solid #ECE6DA;vertical-align:top"><span style="display:inline-flex;gap:3px"><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#DCD5C7"></i><i style="width:14px;height:7px;background:#DCD5C7"></i></span></td>
+          <td style="padding:14px 0 14px 12px;border-bottom:1px solid #ECE6DA;font:400 13.5px/1.55 'IBM Plex Sans',sans-serif;color:#3E3B34">A cadeia encadeada e a demonstração de adulteração convencem. Verificar e exportar o log não deixam rastro nenhum.</td>
+        </tr>
+        <tr>
+          <td style="padding:14px 12px 14px 0;border-bottom:1px solid #ECE6DA;vertical-align:top"><a href="#T7" style="font:600 14px/1.4 'IBM Plex Sans',sans-serif">T7 Chaves e criptografia</a></td>
+          <td style="padding:14px 12px;border-bottom:1px solid #ECE6DA;vertical-align:top"><span style="display:inline-flex;gap:3px"><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#DCD5C7"></i><i style="width:14px;height:7px;background:#DCD5C7"></i></span></td>
+          <td style="padding:14px 12px;border-bottom:1px solid #ECE6DA;vertical-align:top"><span style="display:inline-flex;gap:3px"><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#DCD5C7"></i></span></td>
+          <td style="padding:14px 0 14px 12px;border-bottom:1px solid #ECE6DA;font:400 13.5px/1.55 'IBM Plex Sans',sans-serif;color:#3E3B34">Liga cripto-shredding a eliminação com clareza. É a única tela sem nenhuma ação: informa e não deixa agir.</td>
+        </tr>
+        <tr>
+          <td style="padding:14px 12px 14px 0;vertical-align:top"><a href="#T8" style="font:600 14px/1.4 'IBM Plex Sans',sans-serif">T8 Editor de LIA</a></td>
+          <td style="padding:14px 12px;vertical-align:top"><span style="display:inline-flex;gap:3px"><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#DCD5C7"></i><i style="width:14px;height:7px;background:#DCD5C7"></i></span></td>
+          <td style="padding:14px 12px;vertical-align:top"><span style="display:inline-flex;gap:3px"><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#1A1916"></i><i style="width:14px;height:7px;background:#DCD5C7"></i><i style="width:14px;height:7px;background:#DCD5C7"></i></span></td>
+          <td style="padding:14px 0 14px 12px;font:400 13.5px/1.55 'IBM Plex Sans',sans-serif;color:#3E3B34">O vínculo LIA → catálogo → gate é a melhor ideia da tela. O editor quase não edita e o balanceamento não registra o raciocínio.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <sc-if value="{{ mostrarAcertos }}" hint-placeholder-val="{{ true }}">
+  <section style="padding:44px 56px;border-bottom:1px solid #E0DACE;background:#F6F3EC">
+    <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8C8579">O que sustentar</span>
+    <h2 style="margin:14px 0 8px;font:400 30px/1.2 'Newsreader',serif;color:#1A1916">Nove decisões que devem sobreviver a qualquer redesenho</h2>
+    <p style="margin:0 0 24px;font:400 14.5px/1.6 'IBM Plex Sans',sans-serif;color:#6B655A;max-width:70ch">Nenhum dos achados abaixo pede que estas mudem. Vale listá-las porque, num redesenho, é exatamente esse tipo de restrição que costuma sair primeiro.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 36px">
+      <p style="margin:0;font:400 14px/1.6 'IBM Plex Sans',sans-serif;color:#3E3B34"><span style="color:#2E6B4B;font-weight:600">✓</span> <b style="font-weight:600">Regra na API, não na tela.</b> Reescrever a interface não afrouxa controle nenhum — e os testes provam sem montar componente.</p>
+      <p style="margin:0;font:400 14px/1.6 'IBM Plex Sans',sans-serif;color:#3E3B34"><span style="color:#2E6B4B;font-weight:600">✓</span> <b style="font-weight:600">Mascarado é o padrão, inclusive para o DPO.</b> Não existe interruptor de sessão que desligue. PbD: privacidade como configuração padrão.</p>
+      <p style="margin:0;font:400 14px/1.6 'IBM Plex Sans',sans-serif;color:#3E3B34"><span style="color:#2E6B4B;font-weight:600">✓</span> <b style="font-weight:600">Ausência em vez de desabilitado.</b> <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">Permitido</span> devolve <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">null</span>: o controle não fica no DOM esperando ser reativado pelo inspetor.</p>
+      <p style="margin:0;font:400 14px/1.6 'IBM Plex Sans',sans-serif;color:#3E3B34"><span style="color:#2E6B4B;font-weight:600">✓</span> <b style="font-weight:600">Gravar antes de responder.</b> Falha de log vira 503 e nenhum valor sai. É a diferença entre observabilidade e acesso sem rastro.</p>
+      <p style="margin:0;font:400 14px/1.6 'IBM Plex Sans',sans-serif;color:#3E3B34"><span style="color:#2E6B4B;font-weight:600">✓</span> <b style="font-weight:600">Sensível sem caminho de revelação.</b> Nem com justificativa, em tela alguma. O Art. 11 vira arquitetura, não aviso.</p>
+      <p style="margin:0;font:400 14px/1.6 'IBM Plex Sans',sans-serif;color:#3E3B34"><span style="color:#2E6B4B;font-weight:600">✓</span> <b style="font-weight:600">404 no lugar de 403 e sem contagem total.</b> Duas defesas discretas contra enumeração que quase nenhum produto implementa.</p>
+      <p style="margin:0;font:400 14px/1.6 'IBM Plex Sans',sans-serif;color:#3E3B34"><span style="color:#2E6B4B;font-weight:600">✓</span> <b style="font-weight:600">Erro que ensina.</b> A recusa cita o artigo e o motivo, no ponto do erro. É recuperação de erro feita como conteúdo, não como código HTTP.</p>
+      <p style="margin:0;font:400 14px/1.6 'IBM Plex Sans',sans-serif;color:#3E3B34"><span style="color:#2E6B4B;font-weight:600">✓</span> <b style="font-weight:600">Vocabulário controlado espelhando o schema.</b> Os mesmos enums no banco, na API e no rótulo: consistência sem glossário paralelo.</p>
+      <p style="margin:0;font:400 14px/1.6 'IBM Plex Sans',sans-serif;color:#3E3B34"><span style="color:#2E6B4B;font-weight:600">✓</span> <b style="font-weight:600">Acessibilidade de base.</b> <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">:focus-visible</span> global e <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">prefers-reduced-motion</span> respeitado antes de alguém pedir.</p>
+    </div>
+  </section>
+  </sc-if>
+
+  <section style="padding:48px 56px 8px">
+    <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8C8579">Achados transversais</span>
+    <h2 style="margin:14px 0 6px;font:400 30px/1.2 'Newsreader',serif;color:#1A1916">Valem para mais de uma tela</h2>
+    <p style="margin:0 0 8px;font:400 14.5px/1.6 'IBM Plex Sans',sans-serif;color:#6B655A;max-width:70ch">Estes nascem na camada compartilhada — API, permissões, primitivos, CSS. Corrigi-los em um lugar corrige em oito.</p>
+
+    <article id="C-01" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">C-01</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#A8291E;color:#FAF8F4">Crítico</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">Privacidade<br />T2 · T4 · API</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">A busca por CPF não checa papel nem registra a consulta</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">O cuidado de enviar só o hash é correto e bem comunicado — mas a rota que recebe esse hash não pergunta quem está chamando e não escreve nada no audit trail. O cartão “Buscar titular por CPF” da T2 é renderizado para todos os papéis, então Produto e Auditor externo conseguem confirmar que um CPF existe na base e obter o pseudônimo. É o mesmo oráculo de existência que a Regra 5 evita no <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">GET /titulares/{id}</span>, entrando pela porta do POST — e sem deixar rastro, o que contraria a própria doutrina de “a tentativa é gravada antes da resposta”.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">api.ts · case 'POST titulares' → sem pode(papel, …), sem banco.auditAppend · T2.tsx · &lt;Cartao titulo="Buscar titular por CPF"&gt; fora de &lt;Permitido&gt;</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> exigir <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">ver_portal_titular</span> na rota e envolver o cartão em <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">Permitido</span>; registrar a tentativa antes de responder, com finalidade; responder 404 genérico também quando o papel não tem escopo; limitar taxa por ator (uma busca por CPF em rajada é enumeração).</p>
+      </div>
+    </article>
+
+    <article id="C-02" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">C-02</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#A8291E;color:#FAF8F4">Crítico</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">Privacidade<br />T6 · API</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">A guarda de escrita abre exceção justamente para as rotas de auditoria</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">O comentário diz “Auditor externo nunca escreve. Nem em rota de demonstração”. A linha seguinte exclui <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">raiz !== 'audit'</span> da checagem, o que deixa <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">PATCH /v1/audit/1</span> e <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">POST /v1/audit/forjar</span> alcançáveis por um papel sem a ação <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">escrever</span>. Hoje o dano é contido — o append-only devolve 409 e o botão de forjar está atrás de <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">Permitido</span> —, ou seja, quem protege é a interface. É a inversão exata do princípio que o projeto defende.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">api.ts · if (metodo !== 'GET' &amp;&amp; !pode(papel,'escrever') &amp;&amp; raiz !== 'audit')</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> remover a exceção e mover <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">forjar</span> para uma flag explícita de cenário de demonstração (<span style="font-family:'IBM Plex Mono',monospace;font-size:13px">banco.modoDemo</span>), fora do roteador de produção. Manter <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">verificar</span> aberto à leitura.</p>
+      </div>
+    </article>
+
+    <article id="C-03" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">C-03</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#B5651A;color:#FAF8F4">Alto</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">Privacidade<br />T4 · primitivos</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">A finalidade é exigida, mas não é confrontada com o catálogo</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">A revelação pede uma finalidade entre três opções fixas e recusa quem não declara — o Art. 37 está atendido. O que falta é o passo seguinte: a API só verifica que <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">purpose</span> existe, nunca se ela é compatível com a finalidade e a base legal que o próprio catálogo registra para aquele campo. Dá para revelar em “cobrança” um dado coletado para outra coisa, e o audit trail vai guardar essa incompatibilidade como se fosse conformidade. Limitação de finalidade (Art. 6º, I e II) fica nominal.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">primitivos.tsx · const FINALIDADES = [atendimento, cobranca, auditoria] · api.ts · if (!req.purpose) → 403, e nada além disso</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> derivar as opções da finalidade catalogada do campo; recusar com 422 quando a finalidade pedida não estiver na lista compatível, citando o campo e a finalidade registrada. A tela deixa de oferecer o caminho, e a API deixa de aceitá-lo.</p>
+      </div>
+    </article>
+
+    <article id="C-04" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">C-04</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#B5651A;color:#FAF8F4">Alto</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">Privacidade<br />T4 · T5 · T1</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">A justificativa é texto livre e entra crua no log imutável</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">O redator de PII protege o canal com o titular — a mensagem com CPF é recusada com 422. Ele não roda na justificativa da revelação nem na da reclassificação de risco, que são gravadas literalmente em uma tabela append-only. Basta o operador colar o CPF “para contextualizar” e o dado fica lá para sempre, num log que por projeto não aceita <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">UPDATE</span> nem <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">DELETE</span>. O mínimo de 20 caracteres também mede tamanho, não conteúdo: <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">aaaaaaaaaaaaaaaaaaaaa</span> passa.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">api.ts · auditAppend({ …, justificativa }) sem redação · regex de CPF só em 'POST requests/{id}/mensagens'</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> passar toda justificativa pelo mesmo redator antes do append e trocar parte do campo livre por estrutura: protocolo (lista), motivo (enum) e observação curta. Estrutura audita melhor que prosa e não convida a colar documento.</p>
+      </div>
+    </article>
+
+    <article id="C-05" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">C-05</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">Privacidade<br />primitivos</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">O re-mascaramento em 60 s é promessa de tela, não do servidor</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">A API entrega o valor inteiro de uma vez e a contagem regressiva é um <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">setInterval</span> no cliente. Em aba inativa o navegador estrangula o timer, e a janela de exposição passa dos 60 s anunciados; o valor também permanece na memória do JS depois de sumir da tela. Para um protótipo é aceitável — desde que o texto não afirme mais do que o mecanismo entrega.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">primitivos.tsx · CampoPII → timer.current = setInterval(…, 1000)</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> expirar por carimbo de tempo (<span style="font-family:'IBM Plex Mono',monospace;font-size:13px">expiraEm = Date.now() + 60_000</span>) e, no desenho de produção, entregar um token de exibição de curta duração em vez do valor.</p>
+      </div>
+    </article>
+
+    <article id="C-06" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">C-06</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">Privacidade<br />T6</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Exportar o audit trail é um acesso — e não é registrado</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">“Exportar CSV” monta o arquivo localmente com atores, ações, recursos e finalidades e baixa sem passar pela API. Não há gate de papel nem linha no próprio trail dizendo quem levou uma cópia do registro de acessos para fora da plataforma. É o único ponto da T6 que sai do modelo “toda leitura sensível deixa rastro”.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T6.tsx · exportarCsv(logs) — sem chamar(), sem &lt;Permitido&gt;</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> rota <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">POST /v1/audit/exportar</span> que registra antes de gerar, carimba o hash do arquivo no rodapé do CSV e exige ação própria de exportação.</p>
+      </div>
+    </article>
+
+    <article id="C-07" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">C-07</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#B5651A;color:#FAF8F4">Alto</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">LGPD · cobertura<br />programa</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Falta a tela de incidente de segurança (Art. 48)</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">O programa cobre catálogo, RIPD, direitos, risco, expurgo, chaves e LIA — e para exatamente onde o dia ruim começa. Não há registro de incidente, avaliação de risco relevante ao titular, cronômetro de comunicação à ANPD e ao titular, nem trilha das decisões tomadas sob pressão. A T1 tem um botão “Simular violação” que injeta um risco no gráfico: a violação existe como ponto de dispersão, não como processo. É a maior lacuna de cobertura do conjunto, e é a que uma fiscalização examina primeiro.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">App.tsx · TELAS = [T1…T8] — nenhuma rota de incidente</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> T9 “Incidentes”: abertura com carimbo de tempo, escopo (campos e titulares atingidos, vindos do catálogo), decisão de comunicar com justificativa registrada, prazos correndo à vista, evidências com hash e vínculo ao risco e ao RIPD que o previram.</p>
+      </div>
+    </article>
+
+    <article id="C-08" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">C-08</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">LGPD · bases legais<br />T2 · T4 · T8</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Legítimo interesse tem LIA; consentimento não tem prova nem revogação</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">O rigor aplicado ao legítimo interesse — LIA vigente, assinatura, vencimento que derruba o gate — não tem par nas outras bases. <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">consentimento</span> é opção no catálogo e “revogação” é um direito listado na T4, mas nenhuma tela mostra o texto consentido, a versão, o momento, o canal, nem executa a revogação e sua propagação. Sem isso a base legal não é demonstrável (Art. 8º, §2º) e o direito do Art. 18, VIII fica sem rota — o mesmo argumento que o projeto usa para o RIPD: direito sem endpoint é direito que não existe.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T2.tsx · baseLegal inclui 'consentimento' · T4.tsx · ROTULO_DIREITO.revogacao sem fluxo correspondente</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> registro de consentimento versionado, ligado ao campo no catálogo, com estado (ativo, revogado, expirado) e efeito visível: revogar bloqueia o tratamento e aciona o gate, como já acontece com a LIA vencida.</p>
+      </div>
+    </article>
+
+    <article id="C-09" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">C-09</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · arquitetura<br />casca</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">O menu não reflete o papel — e o item “desabilitado” navega</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">Para Segurança, a T4 aparece no trilho com <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">aria-disabled="true"</span> e um <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">title</span> explicativo, mas continua clicável e leva a uma página de bloqueio. Um link que se anuncia desabilitado e mesmo assim navega quebra a expectativa e contradiz a doutrina do próprio projeto — que é não renderizar o que o papel não opera. Também não há indicação, ao trocar de papel, do que mudou na navegação.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">App.tsx · &lt;NavLink aria-disabled={…}&gt; sem preventDefault; TELAS_BLOQUEADAS trata só o destino</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> omitir o item do trilho para o papel que não o opera (mantendo a página de bloqueio para link direto) e, ao trocar de papel, avisar em uma linha o que entrou e o que saiu.</p>
+      </div>
+    </article>
+
+    <article id="C-10" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">C-10</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · erro<br />casca</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Recusa e confirmação dividem o mesmo canal, longe de onde a ação aconteceu</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">403, 409 e 422 chegam como aviso no canto, em <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">role="status"</span> com <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">aria-live="polite"</span>, na mesma pilha das confirmações, e só os quatro últimos ficam. Quem clicou em “Aprovar como DPO” do outro lado da tela pode não perceber a recusa — e o conteúdo dessas mensagens é a melhor parte do produto. Onde o erro aparece junto do controle (validador de inventário, “Testar combinação”) o resultado é nitidamente melhor.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">App.tsx · &lt;div className="avisos" role="status" aria-live="polite"&gt; · avisos.slice(-4)</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> recusa ancorada no controle que falhou, com <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">role="alert"</span>; reservar o canal do canto para confirmação e informação; no máximo três simultâneos, com dispensa automática só para o que não é erro.</p>
+      </div>
+    </article>
+
+    <article id="C-11" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">C-11</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · acessibilidade<br />CSS</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Informação essencial vive em 10,5–11,5 px</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">Hashes, prazos, notas por papel, rodapés de KPI e rótulos de coluna estão todos abaixo de 12 px, e os textos dentro dos SVG chegam a 9 px. Não é texto decorativo: é a evidência que sustenta o número ao lado. Numa tela usada por auditor e comitê — público que não é necessariamente jovem nem está em monitor grande — a hierarquia por tamanho está sendo paga com legibilidade.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">estilos.css · .hash, .hint, .kpi-foot, th, .bub-label = 10.5–11.5px · T1/T5/T7 · fontSize={9} … {10}</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> piso de 12,5 px para texto de interface e 11 px para rótulo de gráfico; hierarquia por peso, cor e espaço, não por corpo. Ganha-se também em impressão, que é como o comitê consome esse material.</p>
+      </div>
+    </article>
+
+    <article id="C-12" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">C-12</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · acessibilidade<br />T1 · T2 · T5 · T6</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Conteúdo indispensável só existe no tooltip nativo</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">A explicação de <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">tipo_armazenado</span> (“hash não é anonimização”), o mecanismo do Art. 33 do destino internacional, a descrição do risco na bolha e o nome da tabela na barra de expurgo estão em <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">title</span>. Tooltip nativo não abre por teclado, não abre no toque, tem atraso e leitura inconsistente por leitor de tela. É justamente o conteúdo que ensina a regra que fica inacessível.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T2.tsx · &lt;td title={EXPLICA[c.tipoArmazenado]}&gt; · T1/T5 · &lt;title&gt; dentro do &lt;g&gt; · T6.tsx · barra com title</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> popover acionável por foco e por clique (padrão único no sistema) para o que explica regra; coluna ou legenda visível para o que é dado. Manter <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">title</span> só como redundância.</p>
+      </div>
+    </article>
+
+    <article id="C-13" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">C-13</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · prototipação<br />todas</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Nenhum estado de carregamento, erro de rede ou lista vazia foi desenhado</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">A API mock é síncrona, então a tela nunca espera e nunca cai. Isso é ótimo para demonstrar regra e péssimo como especificação: quando entrar um backend, todas as tabelas, gráficos e o rito de revelação precisam de um estado intermediário que hoje não existe — e é justamente na revelação que a espera importa, porque o registro acontece antes da resposta. Há bons vazios pontuais (“Nenhum achado em aberto”), mas não um padrão.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">sessao.ts · chamar() devolve Res&lt;T&gt; síncrono — sem pendente, sem erro de transporte</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> definir os quatro estados (vazio, carregando, erro recuperável, sem permissão) para tabela, gráfico e ação de escrita antes do backend. É decisão de desenho, não de implementação.</p>
+      </div>
+    </article>
+
+    <article id="C-14" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">C-14</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · layout<br />CSS</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Não existe nenhum ponto de quebra de largura</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">As duas únicas consultas de mídia do CSS são <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">prefers-color-scheme</span> e <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">prefers-reduced-motion</span>. O trilho fica fixo em 252 px e tabelas de sete colunas densas rolam horizontalmente em notebook — que é o equipamento do auditor externo e do comitê, os dois papéis que mais consomem T5 e T6.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">estilos.css · .app { grid-template-columns: 252px minmax(0,1fr) } — nenhum @media de largura</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> colapsar o trilho abaixo de ~1200 px e definir, por papel, quais colunas são essenciais — a tabela do catálogo não precisa das sete para o DPO.</p>
+      </div>
+    </article>
+
+    <article id="C-15" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">C-15</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#8C8579;color:#FAF8F4">Baixo</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · prototipação<br />T2 · T4 · T6 · T8</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Controles inertes convivem com controles reais, sem distinção visual</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">Portabilidade JSON/CSV/PDF (T4) não tem handler; “Gerar relatório de expurgo (PDF)” (T6) só emite um aviso; a área de arrastar YAML da T2 não recebe arquivo, enquanto a da T8 recebe; os selects do Passo 1 da LIA são <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">defaultValue</span> sem efeito. Em teste com usuário isso gera falso positivo de tarefa concluída, e em demonstração para diretoria gera promessa que alguém vai cobrar.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T4.tsx · &lt;button className="btn"&gt;JSON&lt;/button&gt; sem onClick · T2.tsx · div.drop sem onDrop · T8.tsx · select defaultValue</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> marca discreta e consistente de “não implementado no protótipo” (o projeto já é honesto sobre limites no README; a tela deveria ser também), ou remoção até existir.</p>
+      </div>
+    </article>
+
+    <article id="C-16" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">C-16</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#8C8579;color:#FAF8F4">Baixo</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · conteúdo<br />todas</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">A voz de ensaio está no cromo do produto</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">“Nota sem lastro é slide.”, “Um dia em vermelho não é ruído”, “Chave sem rotação é senha eterna”. São boas frases e fazem a demonstração render — mas ficam permanentemente na interface de quem usa a ferramenta oito horas por dia, competem com a informação operacional e envelhecem mal em tradução e manutenção.</p>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> separar duas camadas de texto: operacional (permanente, neutro) e didático (visível em modo apresentação ou na primeira visita, dispensável depois).</p>
+      </div>
+    </article>
+  </section>
+
+  <section style="padding:44px 56px 8px">
+    <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8C8579">Achados por tela</span>
+    <h2 style="margin:14px 0 0;font:400 30px/1.2 'Newsreader',serif;color:#1A1916">Tela a tela</h2>
+
+    <div id="T1" style="margin-top:34px;background:#1A1916;color:#FAF8F4;padding:20px 24px;display:flex;justify-content:space-between;align-items:baseline;gap:20px;flex-wrap:wrap">
+      <h3 style="margin:0;font:500 22px/1.2 'Newsreader',serif"><span style="font:500 13px/1 'IBM Plex Mono',monospace;color:#A8A196;margin-right:10px">T1</span>Painel de governança</h3>
+      <span style="font:400 13px/1.4 'IBM Plex Sans',sans-serif;color:#CFC9BC">Tarefa: entender em 30 s o que a esteira barrou e onde o risco está concentrado</span>
+    </div>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T1-01</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#B5651A;color:#FAF8F4">Alto</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · modelo mental</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Dois mapas de risco com eixos diferentes abrem o mesmo modal</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">Na T1 a bolha está posicionada por <em>esforço × score</em>; clicar nela abre o modal que reclassifica <em>P × I</em>. A decisão de manter o arrasto só na matriz da T5 é boa e está justificada no README — mas o usuário não lê o README: ele clica em um ponto colocado pelo esforço e é convidado a mudar probabilidade e impacto, sem que nada na tela ligue as duas coisas.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T1.tsx · Dispersao → aoSelecionar(r) → ModalReclassificar(p, i)</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> no modal, mostrar a posição atual na grade 5×5 e dizer explicitamente que a reclassificação incide sobre P e I, não sobre o esforço; na dispersão, rotular a ação como “reclassificar P × I”.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T1-02</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · confiança</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">A violação simulada entra no gráfico do comitê sem estado próprio</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">“Simular violação” injeta R11 em P5 × I5 no mesmo mapa que o texto de apoio chama de material do comitê. O único sinal de que aquilo é ficção é um aviso passageiro no canto — depois disso, a captura de tela é indistinguível de um risco real.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T1.tsx · const [incidente, setIncidente] = useState(false) → riscosVisiveis</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> faixa fixa de “modo demonstração” enquanto a simulação estiver ativa, marca d'água no gráfico e a bolha em traço tracejado.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T1-03</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">Acessibilidade</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">A bolha é um botão pela metade</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">O <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">&lt;g&gt;</span> recebe <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">role="button"</span> e <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">tabIndex={0}</span>, mas só responde a Enter — Espaço, que é obrigatório para o papel de botão, não faz nada — e o nome acessível vem de um <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">&lt;title&gt;</span> longo com código, descrição, score e status numa frase só.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T1.tsx · onKeyDown={(e) =&gt; { if (e.key === 'Enter') … }}</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> aceitar Espaço, dar <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">aria-label</span> curto (“R04, score 20, aberto — reclassificar”) e listar os riscos também em tabela navegável, que serve a leitor de tela e à impressão.</p>
+      </div>
+    </article>
+
+    <div id="T2" style="margin-top:34px;background:#1A1916;color:#FAF8F4;padding:20px 24px;display:flex;justify-content:space-between;align-items:baseline;gap:20px;flex-wrap:wrap">
+      <h3 style="margin:0;font:500 22px/1.2 'Newsreader',serif"><span style="font:500 13px/1 'IBM Plex Mono',monospace;color:#A8A196;margin-right:10px">T2</span>Catálogo de dados</h3>
+      <span style="font:400 13px/1.4 'IBM Plex Sans',sans-serif;color:#CFC9BC">Tarefa: responder o que existe, para quê, sob qual base e por quanto tempo</span>
+    </div>
+
+    <p style="margin:18px 0 0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34">O achado crítico desta tela é o <a href="#C-01">C-01</a> (busca por CPF sem papel e sem registro).</p>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE;margin-top:18px">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T2-01</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">Privacidade · UX</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">O CPF digitado fica na sessão depois da busca</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">O gesto principal está certo: o documento não entra na requisição. Mas o campo é <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">type="text"</span> sem <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">autocomplete="off"</span>, o valor permanece no estado e no DOM depois da consulta, e o hash calculado fica exibido em tela — pronto para ser copiado para outro sistema. Minimização vale também para o rascunho.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T2.tsx · &lt;input id="cat-cpf" type="text" value={cpf} …&gt; · curto(hashCpf(cpf), 24) exibido</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">autocomplete="off"</span>, <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">inputmode="numeric"</span>, limpar o campo assim que o hash é calculado e mostrar só os primeiros caracteres do hash, como prova de que ele existe.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T2-02</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · resposta</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Clicar na linha abre a linhagem fora do campo de visão</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">A linha inteira é clicável (sem indicação além do cursor) e o diagrama de linhagem aparece <em>abaixo</em> da tabela, sem mover o foco e sem rolagem. Com a lista longa, o usuário clica e a tela não muda visivelmente — a interpretação natural é que o clique não funcionou.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T2.tsx · {selecionado &amp;&amp; &lt;Linhagem …&gt;} renderizado ao fim da coluna</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> painel lateral fixo com o foco movido para o título e a linha selecionada marcada; botão explícito de detalhe na linha, para quem navega por teclado.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T2-03</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#8C8579;color:#FAF8F4">Baixo</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · filtros</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Quatro filtros sem resultado zero e sem limpar</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">A combinação “somente sensíveis + até 90 dias + internacional” devolve uma tabela em branco sem explicar por quê nem oferecer volta. Não há resumo dos filtros ativos.</p>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> estado vazio nomeando os filtros ativos, com ação de limpar; contagem viva ao lado de cada seletor.</p>
+      </div>
+    </article>
+
+    <div id="T3" style="margin-top:34px;background:#1A1916;color:#FAF8F4;padding:20px 24px;display:flex;justify-content:space-between;align-items:baseline;gap:20px;flex-wrap:wrap">
+      <h3 style="margin:0;font:500 22px/1.2 'Newsreader',serif"><span style="font:500 13px/1 'IBM Plex Mono',monospace;color:#A8A196;margin-right:10px">T3</span>RIPD e LINDDUN</h3>
+      <span style="font:400 13px/1.4 'IBM Plex Sans',sans-serif;color:#CFC9BC">Tarefa: transformar o bloqueio do PR em parecer aprovado</span>
+    </div>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE;margin-top:18px">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T3-01</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · visibilidade</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">O stepper mostra progresso que ninguém calcula</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">As seções 1 a 4 estão marcadas como concluídas no código e a 5 como pendente, independentemente do que foi preenchido. O componente promete a informação mais útil da tela — o que falta para o RIPD fechar — e entrega decoração. Para o DPO, que chega para aprovar, essa é a leitura primária.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T3.tsx · &lt;Secao n={1} … feito&gt; … &lt;Secao n={5} … feito={false}&gt;</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> derivar <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">feito</span> do conteúdo (campos importados, fluxo com nós reconhecidos, todas as operações com base legal válida, P0 resolvidos) e mostrar no topo quantos requisitos faltam.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T3-02</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · rótulo</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">“Gerar RIPD.md e anexar ao PR” só baixa um arquivo</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">O documento é montado de verdade a partir do catálogo — excelente. O anexo ao PR, que é a metade importante da promessa, não acontece e nada na tela diz isso. O engenheiro sai achando que o commit está no pull request.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T3.tsx · gerar() → baixar(`${ripd.codigo}.md`, markdown)</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> separar em duas ações — “Pré-visualizar / baixar” e “Anexar ao PR #123” — e mostrar o resultado da segunda (commit, autor, hora) quando existir.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T3-03</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#8C8579;color:#FAF8F4">Baixo</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · feedback</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">“Testar combinação” só fala quando recusa</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">A recusa do Art. 11 é inline, clara e citando o artigo. A combinação válida não devolve nada — o usuário não sabe se acertou ou se o controle parou de funcionar. Feedback assimétrico ensina metade da regra.</p>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> confirmar o caso válido com a mesma densidade: qual base sustenta aquele campo e por quê.</p>
+      </div>
+    </article>
+
+    <div id="T4" style="margin-top:34px;background:#1A1916;color:#FAF8F4;padding:20px 24px;display:flex;justify-content:space-between;align-items:baseline;gap:20px;flex-wrap:wrap">
+      <h3 style="margin:0;font:500 22px/1.2 'Newsreader',serif"><span style="font:500 13px/1 'IBM Plex Mono',monospace;color:#A8A196;margin-right:10px">T4</span>Direitos do titular</h3>
+      <span style="font:400 13px/1.4 'IBM Plex Sans',sans-serif;color:#CFC9BC">Tarefa: atender uma solicitação do Art. 18 dentro do prazo, com prova</span>
+    </div>
+
+    <article id="T4-01" style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE;margin-top:18px">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T4-01</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#A8291E;color:#FAF8F4">Crítico</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · Privacidade</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">A fila não é selecionável, e o contexto pode apontar para outra pessoa</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">A “Fila de atendimento” lista as solicitações, mas nenhuma linha é clicável: o protocolo em foco é sempre <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">solicitacoes[0]</span>. Buscar um titular pelo CPF na lateral troca os dados exibidos, enquanto o cabeçalho de contexto continua anunciando o protocolo da primeira solicitação. O operador pode então revelar um campo — com finalidade e justificativa gravadas — sob um protocolo que não é o daquela pessoa. O rito de revelação, que é o melhor controle do produto, passa a produzir um registro que descreve mal o que aconteceu; e “Enviar” escreve na conversa do protocolo em foco, não na do titular carregado.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T4.tsx · const foco = solicitacoes[0] · titular = titulares.find(t =&gt; t.id === (identificado ?? foco.titularId))</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> a linha da fila passa a ser o objeto de trabalho: selecionar define protocolo <em>e</em> titular. A busca por CPF localiza a solicitação, não substitui o titular por baixo do contexto. Cabeçalho mostrando os dois identificadores juntos, e o modal de revelação repetindo o protocolo antes de confirmar.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T4-02</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#B5651A;color:#FAF8F4">Alto</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · fluxo</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Não existe o ato de concluir a solicitação</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">A tela mede o SLA, mostra o cronômetro e avisa a menos de 24 h do prazo — mas não oferece nenhuma ação que faça o prazo parar: não há responder, anexar a resposta, marcar atendido, recusar com fundamento, nem pedir verificação adicional. O balcão exibe a fila e não atende. É a diferença entre uma tela que mostra o direito e uma que o executa.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T4.tsx · nenhuma ação altera solicitacao.status; api.ts · não há POST /requests/{id}/concluir</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> ação de conclusão com tipo de desfecho (atendido, atendido parcialmente, recusado com fundamento legal), evidência anexada e registro no trail — é ela que fecha o cronômetro e alimenta o indicador de SLA.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T4-03</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">Privacidade · Art. 20</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">A revisão de decisão automatizada não deixa prova</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">A aba mostra os fatores que pesaram e afirma que o analista “pode reverter de fato, não apenas homologar” — mas o seletor de decisão não tem handler, não pede justificativa e não grava nada. A revisão humana do Art. 20 precisa do mesmo rito da revelação: quem decidiu, com base em quê, registrado antes de valer. Além disso, o controle está atrás da ação <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">revelar_pii</span>, que é outra coisa.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T4.tsx · &lt;Permitido acao="revelar_pii"&gt;&lt;select id="rev-dec"&gt; sem onChange</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> ação própria (<span style="font-family:'IBM Plex Mono',monospace;font-size:13px">revisar_decisao</span>), justificativa obrigatória, registro no trail e devolutiva ao titular a partir do mesmo ato.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T4-04</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">Acessibilidade</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">As abas usam o papel ARIA sem o padrão ARIA</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">Há <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">role="tablist"</span>, <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">role="tab"</span> e <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">aria-selected</span>, mas não há <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">tabpanel</span>, <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">aria-controls</span> nem navegação por setas. Anunciar um padrão e não cumpri-lo é pior para o leitor de tela do que usar botões simples.</p>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> completar o padrão (painel com <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">role="tabpanel"</span>, <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">aria-controls</span>, setas, <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">tabIndex</span> gerenciado) — vale para as abas da T4 e para o mesmo componente no protótipo estático.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T4-05</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#8C8579;color:#FAF8F4">Baixo</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">Dados · rótulo</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">“Atendidas no SLA” não mede SLA</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">O cálculo conta as concluídas cujo prazo-limite caiu nos últimos 30 dias — é uma janela temporal, não cumprimento de prazo. Uma solicitação atendida com atraso entra como sucesso. Num painel que também vai para o comitê, indicador com nome errado é pior que indicador ausente.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T4.tsx · noSla = concluidas.filter(s =&gt; s.prazoLimiteMs &gt; Date.now() - 30 * DIA).length</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> comparar conclusão com prazo-limite e exibir a janela considerada no rodapé do indicador.</p>
+      </div>
+    </article>
+
+    <div id="T5" style="margin-top:34px;background:#1A1916;color:#FAF8F4;padding:20px 24px;display:flex;justify-content:space-between;align-items:baseline;gap:20px;flex-wrap:wrap">
+      <h3 style="margin:0;font:500 22px/1.2 'Newsreader',serif"><span style="font:500 13px/1 'IBM Plex Mono',monospace;color:#A8A196;margin-right:10px">T5</span>Riscos e RACI</h3>
+      <span style="font:400 13px/1.4 'IBM Plex Sans',sans-serif;color:#CFC9BC">Tarefa: repriorizar risco com justificativa e saber quem responde</span>
+    </div>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE;margin-top:18px">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T5-01</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#B5651A;color:#FAF8F4">Alto</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">Acessibilidade · UX</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">A ação que muda a prioridade do programa só existe no arrasto</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">Reclassificar exige <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">pointerdown → move → up</span> sobre a bolha. Ela não é focável, não responde a teclado e não há <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">touch-action: none</span>, então no toque o gesto disputa com a rolagem da página. Quem navega por teclado — inclusive por lesão temporária — simplesmente não tem acesso à ação mais consequente da tela. A ficha lateral já mostra o risco selecionado e o modal já existe: falta um botão.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T5.tsx · &lt;g className="bub" onPointerDown={…}&gt; sem tabIndex, sem onKeyDown</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> “Reclassificar” na ficha lateral abrindo o mesmo modal; bolhas focáveis com setas ajustando P e I (o modal continua exigindo justificativa); <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">touch-action: none</span> no SVG.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T5-02</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · confiança</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">O histórico “imutável” desaparece ao trocar de cenário</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">O cartão de reclassificações é apresentado como imutável, e a troca de cenário no topo recria o banco em memória e apaga tudo, sem aviso. É limitação conhecida do protótipo, mas atinge exatamente a promessa que a tela faz — e quem estiver demonstrando vai perder o registro que acabou de criar.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">sessao.ts · setCenario → new BancoMock(cenarioId), versao: 0, avisos: []</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> confirmar a troca quando houver escrita na sessão (“você vai descartar 3 registros desta demonstração”) ou manter um banco por cenário.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T5-03</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#8C8579;color:#FAF8F4">Baixo</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · affordance</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">A célula RACI é um botão que só serve para recusar</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">Todas as 36 letras são clicáveis e a única resposta possível é a negativa “já existe um accountable”. A lição é ótima na primeira vez e vira ruído na segunda — e o usuário fica sem a ação legítima: trocar quem responde pelo processo.</p>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> “Transferir accountable” com justificativa (a regra continua sendo do banco), e a explicação da unicidade como texto ao pé da tabela.</p>
+      </div>
+    </article>
+
+    <div id="T6" style="margin-top:34px;background:#1A1916;color:#FAF8F4;padding:20px 24px;display:flex;justify-content:space-between;align-items:baseline;gap:20px;flex-wrap:wrap">
+      <h3 style="margin:0;font:500 22px/1.2 'Newsreader',serif"><span style="font:500 13px/1 'IBM Plex Mono',monospace;color:#A8A196;margin-right:10px">T6</span>Expurgo e auditoria</h3>
+      <span style="font:400 13px/1.4 'IBM Plex Sans',sans-serif;color:#CFC9BC">Tarefa: provar que o prazo foi cumprido e que o registro não foi tocado</span>
+    </div>
+
+    <p style="margin:18px 0 0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34">Ver também <a href="#C-02">C-02</a> (rotas de auditoria fora da guarda de escrita) e <a href="#C-06">C-06</a> (exportação sem registro).</p>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE;margin-top:18px">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T6-01</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">Privacidade · rastro</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Verificar a integridade não deixa registro de quem verificou</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">A rota de verificação recomputa a cadeia e responde, sem <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">auditAppend</span> — enquanto a verificação de expurgo, ao lado, registra. Para a auditoria, “quando foi a última conferência e quem a fez” é metade do valor do controle. A inconsistência entre duas rotas irmãs também confunde quem for implementar.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">api.ts · 'POST audit/verificar' → ok(banco.auditVerificar()) · 'POST purge/{id}/verificar' → auditAppend(…)</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> registrar a verificação (ator, resultado, número de blocos) e exibir “última verificação: X, por Y” no cartão de integridade.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T6-02</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · coerência</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">Um botão de escrita é renderizado para o papel de leitura</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">“Tentar editar uma linha” aparece para todos os papéis, inclusive o Auditor externo, e dispara um <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">PATCH</span> de verdade — que, por causa do <a href="#C-02">C-02</a>, nem passa pela guarda de escrita. O 409 chega, mas a doutrina da casa é que o papel que não faz não vê o botão.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T6.tsx · &lt;button className="btn danger" onClick={tentarEditar}&gt; fora de &lt;Permitido&gt;</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> tratar os dois botões vermelhos como o que são — instrumentos de demonstração — e agrupá-los num bloco “demonstração de ataque”, visível só nos papéis que escrevem e no modo demo.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T6-03</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#8C8579;color:#FAF8F4">Baixo</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · detalhe</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">O filtro pode esconder o bloco divergente, e um gate de papel não faz nada</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">A marcação de cadeia quebrada é aplicada sobre a lista filtrada: com um filtro ativo, a primeira divergência pode ficar fora da tela sem qualquer aviso. E o <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">Permitido</span> do cartão “Lotes de hoje” tem o mesmo botão nos dois ramos — gate sem efeito, sinal de intenção não concluída.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T6.tsx · &lt;Permitido acao="rodar_expurgo" alternativa={&lt;button…Verificar/&gt;}&gt;&lt;button…Verificar/&gt;&lt;/Permitido&gt;</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> avisar quando a divergência está fora do filtro (com atalho para limpá-lo) e remover o gate sem efeito.</p>
+      </div>
+    </article>
+
+    <div id="T7" style="margin-top:34px;background:#1A1916;color:#FAF8F4;padding:20px 24px;display:flex;justify-content:space-between;align-items:baseline;gap:20px;flex-wrap:wrap">
+      <h3 style="margin:0;font:500 22px/1.2 'Newsreader',serif"><span style="font:500 13px/1 'IBM Plex Mono',monospace;color:#A8A196;margin-right:10px">T7</span>Chaves e criptografia</h3>
+      <span style="font:400 13px/1.4 'IBM Plex Sans',sans-serif;color:#CFC9BC">Tarefa: saber o estado da rotação e onde destruir a chave elimina o dado</span>
+    </div>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE;margin-top:18px">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T7-01</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · propósito</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">A tela informa muito bem e não deixa fazer nada</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">Não há nenhuma ação em toda a T7 — nem iniciar rotação, nem promover o canary, nem revogar, nem abrir um chamado a partir da negativa registrada no KMS. Ela avisa que uma chave vence em dez dias e que “chave vencida para de proteger em silêncio”, e o usuário só pode concordar. Para engenharia e segurança, que são o público declarado, é a tela com menor razão de retorno.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T7.tsx · nenhum onClick / chamar() em toda a tela</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> dar a ação que a tela já justifica (agendar rotação, promover canary, abrir incidente a partir da negativa) ou renomear para “Estado das chaves” e mover o pipeline para onde a ação existe.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T7-02</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#8C8579;color:#FAF8F4">Baixo</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">Dados · leitura</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">A lista de cripto-shredding mistura campos e chaves na mesma coluna</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">O mesmo <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">&lt;dl&gt;</span> traz <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">dataset.campo</span> em algumas linhas e a finalidade da chave em outras — duas entidades diferentes sob o mesmo rótulo. A árvore de dependências ao lado corta em três chaves sem dizer que há mais.</p>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> duas seções separadas (“campos com shredding suportado” e “chaves sem suporte”) e contagem do que ficou de fora da árvore.</p>
+      </div>
+    </article>
+
+    <div id="T8" style="margin-top:34px;background:#1A1916;color:#FAF8F4;padding:20px 24px;display:flex;justify-content:space-between;align-items:baseline;gap:20px;flex-wrap:wrap">
+      <h3 style="margin:0;font:500 22px/1.2 'Newsreader',serif"><span style="font:500 13px/1 'IBM Plex Mono',monospace;color:#A8A196;margin-right:10px">T8</span>Editor de LIA</h3>
+      <span style="font:400 13px/1.4 'IBM Plex Sans',sans-serif;color:#CFC9BC">Tarefa: demonstrar legítimo interesse a ponto de assinar</span>
+    </div>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-top:1px solid #E0DACE;margin-top:18px">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T8-01</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · promessa</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">O editor quase não edita</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">Categoria e expectativa do titular são <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">defaultValue</span> sem handler; a descrição da finalidade é <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">readOnly</span>; as alternativas do Passo 2 não são editáveis. Só o balanceamento e os anexos mudam estado — e a assinatura recusa quando uma alternativa tem justificativa curta, sem oferecer o campo para corrigi-la. O usuário fica preso a um 409 que não tem como resolver na tela.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">T8.tsx · &lt;select id="lia-cat" defaultValue={…}&gt; · &lt;textarea id="lia-fin" readOnly&gt; · api.ts · 'assinar' → 409 se justificativa &lt; 20</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> tornar editável o que o rótulo promete (ou marcar como leitura) e, no 409, levar o foco para a alternativa que bloqueia a assinatura.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T8-02</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#4C5A6E;color:#FAF8F4">Médio</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">LGPD · demonstração</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">O balanceamento entrega o veredito sem guardar o raciocínio</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">Benefício e dano são escolhidos numa grade 3×3 e o veredito sai de uma subtração. Não há registro de <em>por que</em> o benefício é 3, nem vínculo com as alternativas respondidas no Passo 2, nem com as medidas de mitigação que o próprio veredito condiciona (“só enquanto pseudonimização e retenção curta continuarem ativas”). O documento assinado carrega os números, não a demonstração — e é a demonstração que a ANPD pede.</p>
+        <div style="background:#F1EDE5;border:1px solid #E4DED2;padding:11px 13px;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#6B655A">api.ts · vereditoBalanceamento(b, d) = b - d</div>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> justificativa curta obrigatória em cada eixo e vínculo explícito às mitigações que sustentam o veredito — se uma delas cair, a LIA volta para revisão, como já acontece no vencimento.</p>
+      </div>
+    </article>
+
+    <article style="display:grid;grid-template-columns:150px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #E0DACE">
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span style="font:500 12.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#1A1916">T8-03</span>
+        <span style="align-self:start;font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;background:#8C8579;color:#FAF8F4">Baixo</span>
+        <span style="font:400 12.5px/1.45 'IBM Plex Sans',sans-serif;color:#8C8579">UX · prevenção de erro</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h4 style="margin:0;font:500 20px/1.3 'Newsreader',serif;color:#1A1916">A tela pré-seleciona o campo que ela mesma vai recusar</h4>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34;text-wrap:pretty">“Vincular outro campo” abre com o primeiro campo <em>sensível</em> selecionado — ótimo para demonstrar o 422 do Art. 11, ruim como comportamento padrão: em uso real, prevenção de erro é não oferecer o caminho impossível. Vale o mesmo para o campo de teste da T3.</p>
+        <p style="margin:0;font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><b style="font-weight:600">Correção —</b> ordenar por elegibilidade, marcar os inelegíveis com o motivo no próprio item e deixar a demonstração do 422 para o modo apresentação.</p>
+      </div>
+    </article>
+  </section>
+
+  <sc-if value="{{ mostrarPlano }}" hint-placeholder-val="{{ true }}">
+  <section style="padding:44px 56px;background:#1A1916;color:#FAF8F4">
+    <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#A8A196">Ordem sugerida</span>
+    <h2 style="margin:14px 0 26px;font:400 30px/1.2 'Newsreader',serif">Por onde começar</h2>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#33322D;border:1px solid #33322D">
+      <div style="background:#1A1916;padding:22px 24px;display:flex;flex-direction:column;gap:12px">
+        <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#E8695C">1 · Antes de mostrar a alguém de fora</span>
+        <p style="margin:0;font:400 13.5px/1.6 'IBM Plex Sans',sans-serif;color:#CFC9BC">Fechar <a href="#C-01" style="color:#9FB4CC">C-01</a> e <a href="#C-02" style="color:#9FB4CC">C-02</a> — são contradições diretas com a tese do projeto, e é a primeira coisa que um leitor técnico vai procurar. Corrigir <a href="#T4-01" style="color:#9FB4CC">T4-01</a>, que compromete o significado do registro de revelação.</p>
+      </div>
+      <div style="background:#1A1916;padding:22px 24px;display:flex;flex-direction:column;gap:12px">
+        <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#E0A15A">2 · Próxima iteração</span>
+        <p style="margin:0;font:400 13.5px/1.6 'IBM Plex Sans',sans-serif;color:#CFC9BC">Fechar o fluxo da T4 (conclusão da solicitação), dar alternativa de teclado à reclassificação da T5, amarrar finalidade ao catálogo (<a href="#C-03" style="color:#9FB4CC">C-03</a>) e redigir a justificativa antes do append (<a href="#C-04" style="color:#9FB4CC">C-04</a>).</p>
+      </div>
+      <div style="background:#1A1916;padding:22px 24px;display:flex;flex-direction:column;gap:12px">
+        <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#9FB4CC">3 · Escopo novo</span>
+        <p style="margin:0;font:400 13.5px/1.6 'IBM Plex Sans',sans-serif;color:#CFC9BC">Tela de incidentes (<a href="#C-07" style="color:#9FB4CC">C-07</a>) e registro de consentimento (<a href="#C-08" style="color:#9FB4CC">C-08</a>) — as duas lacunas de cobertura. Depois, o passe de legibilidade e responsividade (<a href="#C-11" style="color:#9FB4CC">C-11</a>, <a href="#C-14" style="color:#9FB4CC">C-14</a>).</p>
+      </div>
+    </div>
+  </section>
+  </sc-if>
+
+  <footer id="limites" style="padding:40px 56px 48px;background:#F6F3EC;display:grid;grid-template-columns:1.2fr 1fr;gap:36px">
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8C8579">Limites desta validação</span>
+      <p style="margin:0;font:400 13.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34">Leitura de código-fonte das 8 telas, da API mock, das permissões e do CSS em <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">main @ 0cc6bcd</span>. Não houve execução em navegador, medição de contraste, teste com leitor de tela nem teste com usuário — os achados de acessibilidade apontam defeitos estruturais, não substituem auditoria WCAG. O protótipo estático de <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">prototipo/index.html</span> foi tratado como a mesma especificação visual: os achados de layout, tipografia e ARIA valem para ele; os de comportamento referem-se ao app.</p>
+      <p style="margin:0;font:400 13.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34">Limitações que o próprio projeto declara — sem backend, sem autenticação, estado zerado ao recarregar — não foram contadas como achado, exceto quando a interface afirma algo mais forte do que o mecanismo entrega.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <span style="font:500 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8C8579">Fontes das rubricas</span>
+      <p style="margin:0;font:400 13.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><em>UX no Desenvolvimento de Software</em> — Paula Azevedo Macedo: usabilidade heurística, design centrado no usuário, prototipação rápida, arquitetura de informação.</p>
+      <p style="margin:0;font:400 13.5px/1.65 'IBM Plex Sans',sans-serif;color:#3E3B34"><em>Privacy by Design / LGPD</em> — Samara Schuch: sete princípios de PbD, bases legais, dado pessoal × sensível, incidentes de segurança.</p>
+      <p style="margin:0;font:400 12.5px/1.6 'IBM Plex Mono',monospace;color:#8C8579">danzeroum/privacidade · main @ 0cc6bcd · 41 achados</p>
+    </div>
+  </footer>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;mostrarMetodo&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Seções do relatório&quot;},&quot;mostrarAcertos&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Seções do relatório&quot;},&quot;mostrarPlano&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Seções do relatório&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      mostrarMetodo: this.props.mostrarMetodo ?? true,
+      mostrarAcertos: this.props.mostrarAcertos ?? true,
+      mostrarPlano: this.props.mostrarPlano ?? true,
+    };
+  }
+}
+</script>
+</body>
+</html>
