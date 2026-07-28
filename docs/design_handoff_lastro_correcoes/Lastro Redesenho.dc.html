@@ -24,6 +24,11 @@
       <span style="font-size:12.5px;color:#6E8184;letter-spacing:.07em;text-transform:uppercase">Governança · LGPD</span>
     </div>
 
+    <div style="font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;color:#6E8184;padding:12px 10px 6px">Trabalho</div>
+    <sc-for list="{{ navTrabalho }}" as="item" hint-placeholder-count="1">
+      <button type="button" style="{{ item.estilo }}" onClick="{{ item.ir }}"><span style="{{ item.estiloId }}">{{ item.id }}</span> {{ item.nome }}</button>
+    </sc-for>
+
     <div style="font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;color:#6E8184;padding:12px 10px 6px">Esteira de entrega</div>
     <sc-for list="{{ navEsteira }}" as="item" hint-placeholder-count="3">
       <button type="button" style="{{ item.estilo }}" onClick="{{ item.ir }}"><span style="{{ item.estiloId }}">{{ item.id }}</span> {{ item.nome }}</button>
@@ -68,7 +73,226 @@
 
     <main style="padding:24px;max-width:1420px">
 
-      <sc-if value="{{ eT1 }}" hint-placeholder-val="{{ true }}">
+      <sc-if value="{{ eT0 }}" hint-placeholder-val="{{ true }}">
+        <div>
+          <h1 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:30px;line-height:1.15">Minha fila</h1>
+          <p style="margin:8px 0 0;color:#495A5D;max-width:68ch;font-size:14.5px;text-wrap:pretty">Tudo que depende de você, na ordem da consequência — não na ordem de chegada. O sistema já decidiu o rito de cada item; você decide o que fazer.</p>
+          <sc-if value="{{ anotar }}">
+            <p style="margin:14px 0 0;font-size:12.5px;color:#6E8184;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">tela nova · entrada centrada em trabalho, derivada da máquina de estados (ver MAPA-PROCESSOS.md)</p>
+          </sc-if>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-top:20px">
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12.5px;color:#495A5D">Prazo vencido</span>
+              <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:32px;line-height:1;color:#9E1F26">{{ nVencido }}</span>
+              <span style="font-size:12.5px;color:#6E8184">alguém precisa decidir hoje, mesmo que a decisão seja aceitar</span>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12.5px;color:#495A5D">Para hoje</span>
+              <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:32px;line-height:1;color:#8E5C08">{{ nAgora }}</span>
+              <span style="font-size:12.5px;color:#6E8184">prazo legal ou de comunicação correndo</span>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12.5px;color:#495A5D">Próximos 30 dias</span>
+              <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:32px;line-height:1">{{ n30 }}</span>
+              <span style="font-size:12.5px;color:#6E8184">cabe planejar; não cabe esquecer</span>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12.5px;color:#495A5D">De outros papéis</span>
+              <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:32px;line-height:1;color:#6E8184">{{ fora }}</span>
+              <span style="font-size:12.5px;color:#6E8184">itens que existem no programa e não são seus</span>
+            </div>
+          </div>
+
+          <sc-if value="{{ filaVazia }}">
+            <p style="margin:16px 0 0;padding:12px 14px;background:#DDEBE0;border:1px solid #2F6E4552;border-radius:6px;font-size:13.5px">Nada pendente para o seu papel. Os itens dos outros papéis continuam correndo — veja o painel para o estado do programa.</p>
+          </sc-if>
+
+          <div style="display:flex;flex-direction:column;gap:14px;margin-top:14px">
+            <sc-for list="{{ fila }}" as="f" hint-placeholder-count="4">
+              <article style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:12px">
+                <div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap">
+                  <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;font-weight:600">{{ f.id }}</span>
+                  <span style="font-size:12.5px;color:#6E8184">{{ f.tipo }}</span>
+                  <span style="flex:1"></span>
+                  <span style="{{ f.estiloUrgencia }}">{{ f.rotuloUrgencia }} · {{ f.prazo }}</span>
+                </div>
+                <h3 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:19px;line-height:1.3">{{ f.titulo }}</h3>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px">
+                  <div style="display:flex;flex-direction:column;gap:4px">
+                    <span style="font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184">O que está travado</span>
+                    <span style="font-size:13.5px;color:#495A5D">{{ f.consequencia }}</span>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:4px">
+                    <span style="font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184">Sua próxima ação</span>
+                    <span style="font-size:13.5px;color:#0E1719;font-weight:600">{{ f.acao }}</span>
+                    <span style="font-size:12.5px;color:#6E8184">{{ f.proximo }}</span>
+                  </div>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+                  <sc-for list="{{ f.passos }}" as="p" hint-placeholder-count="4">
+                    <span style="{{ p.estilo }}">{{ p.rot }}</span>
+                  </sc-for>
+                </div>
+                <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid #D2DCDD;padding-top:12px">
+                  <span style="font-size:12.5px;color:#495A5D;flex:1;min-width:240px">{{ f.rito }}</span>
+                  <button type="button" onClick="{{ f.abrir }}" style="border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Abrir</button>
+                </div>
+              </article>
+            </sc-for>
+          </div>
+
+          <div style="margin-top:26px;background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+            <h3 style="margin:0 0 4px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Obrigações do calendário</h3>
+            <p style="margin:0 0 12px;font-size:13px;color:#495A5D">Outra natureza de trabalho: não são itens em andamento, são compromissos que <b>viram item</b> na fila quando chega a hora. Ficam separados de propósito — misturar as duas coisas é o que transforma painel de governança em decoração.</p>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <sc-for list="{{ calendario }}" as="c" hint-placeholder-count="3">
+                <div style="display:grid;grid-template-columns:110px minmax(0,1fr);gap:14px;padding-bottom:10px;border-bottom:1px solid #D2DCDD">
+                  <span style="font-size:13px;color:#8E5C08;font-weight:600">{{ c.quando }}</span>
+                  <div>
+                    <div style="font-size:13.5px">{{ c.titulo }}</div>
+                    <div style="font-size:12.5px;color:#6E8184">{{ c.detalhe }}</div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ eT10 }}">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;padding:2px 7px;border-radius:3px;background:#F2F6F6;border:1px solid #D2DCDD;color:#495A5D">tela nova</span>
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;padding:2px 7px;border-radius:3px;background:#F2F6F6;border:1px solid #D2DCDD;color:#495A5D">2026</span>
+          </div>
+          <h1 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:30px;line-height:1.15">Calendário do ano</h1>
+          <p style="margin:8px 0 0;color:#495A5D;max-width:70ch;font-size:14.5px;text-wrap:pretty">Tudo que o programa já sabe que vai acontecer, provisionado no início do ano. O que chega por demanda — incidente, pedido de titular, achado — não entra aqui como data: entra como <b>capacidade reservada</b>, porque disputa as mesmas pessoas.</p>
+          <sc-if value="{{ anotar }}">
+            <p style="margin:14px 0 0;font-size:12.5px;color:#6E8184;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">tela nova · fonte das obrigações que a fila (T0) promove a item quando chega a hora</p>
+          </sc-if>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-top:20px">
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12.5px;color:#495A5D">Provisionado no ano</span>
+              <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:32px;line-height:1">{{ nProvisionado }}</span>
+              <span style="font-size:12.5px;color:#6E8184">obrigações conhecidas em 1º de janeiro</span>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12.5px;color:#495A5D">Prazos com consequência</span>
+              <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:32px;line-height:1;color:#9E1F26">{{ nPrazos }}</span>
+              <span style="font-size:12.5px;color:#6E8184">passar da data bloqueia repositório, gate ou base legal</span>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12.5px;color:#495A5D">Sob sua responsabilidade</span>
+              <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:32px;line-height:1">{{ nMeus }}</span>
+              <span style="font-size:12.5px;color:#6E8184">o resto tem dono nomeado em outra área</span>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12.5px;color:#495A5D">Reserva para demanda</span>
+              <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:32px;line-height:1;color:#8E5C08">30<small style="font-size:15px;color:#6E8184">%</small></span>
+              <span style="font-size:12.5px;color:#6E8184">média histórica de incidentes, direitos e achados</span>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:20px">
+            <sc-for list="{{ chipsTrilha }}" as="c" hint-placeholder-count="6">
+              <button type="button" style="{{ c.estilo }}" onClick="{{ c.marcar }}"><i style="{{ c.estiloPonto }}"></i> {{ c.rot }}</button>
+            </sc-for>
+            <span style="flex:1"></span>
+            <button type="button" onClick="{{ alternarSoMeus }}" style="border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;padding:6px 13px;cursor:pointer;font:inherit;font-size:12.5px">{{ rotuloSoMeus }}</button>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:10px;margin-top:14px">
+            <sc-for list="{{ mesesGrade }}" as="m" hint-placeholder-count="12">
+              <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:8px;min-height:150px">
+                <div style="display:flex;justify-content:space-between;align-items:baseline">
+                  <span style="font-size:13.5px;font-weight:600;text-transform:uppercase;letter-spacing:.08em">{{ m.rot }}</span>
+                  <span style="font-size:12.5px;color:#6E8184">{{ m.carga }}</span>
+                </div>
+                <div style="height:4px;border-radius:2px;background:#E4EAEB;overflow:hidden"><i style="{{ m.estiloCarga }}"></i></div>
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <sc-for list="{{ m.itens }}" as="i" hint-placeholder-count="0">
+                    <span style="{{ i.estilo }}">{{ i.curto }}</span>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+          <p style="margin:10px 0 0;font-size:12.5px;color:#6E8184">A barra de cada mês é <b>carga provisionada</b>, não progresso: julho e agosto já estão comprometidos com o diagnóstico e o roadmap, então incidente em agosto custa mais caro que em fevereiro. É essa leitura que um calendário comum não dá.</p>
+
+          <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;margin-top:20px">
+            <h3 style="margin:0 0 12px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Provisionado — e o que acontece se passar</h3>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:860px">
+                <thead><tr>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Mês</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Obrigação</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Tipo</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Preparar</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Se passar</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Dono</th>
+                </tr></thead>
+                <tbody>
+                  <sc-for list="{{ agendaLista }}" as="a" hint-placeholder-count="8">
+                    <tr>
+                      <td style="padding:10px;border-bottom:1px solid #D2DCDD;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;text-transform:uppercase">{{ a.mes }}</td>
+                      <td style="padding:10px;border-bottom:1px solid #D2DCDD;font-size:13px"><span style="display:inline-flex;align-items:center;gap:7px"><i style="{{ a.estiloPonto }}"></i> {{ a.titulo }}</span><div style="font-size:12.5px;color:#6E8184">{{ a.trilhaRot }} · {{ a.rotuloSync }}</div></td>
+                      <td style="padding:10px;border-bottom:1px solid #D2DCDD"><span style="{{ a.estiloTipo }}">{{ a.tipo }}</span></td>
+                      <td style="padding:10px;border-bottom:1px solid #D2DCDD;font-size:13px;color:#495A5D">{{ a.antecedencia }}</td>
+                      <td style="padding:10px;border-bottom:1px solid #D2DCDD;font-size:13px;color:#495A5D">{{ a.seFalhar }}</td>
+                      <td style="padding:10px;border-bottom:1px solid #D2DCDD;font-size:13px">{{ a.dono }}</td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px;margin-top:14px;align-items:start">
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h3 style="margin:0 0 6px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Por demanda — não tem data, tem reserva</h3>
+              <p style="margin:0 0 12px;font-size:13px;color:#495A5D">Estas quatro naturezas não são agendáveis. Provisioná-las como capacidade é o que evita que o ciclo do programa seja atropelado por elas todo mês.</p>
+              <dl style="display:grid;grid-template-columns:minmax(150px,180px) minmax(0,1fr);gap:9px;margin:0;font-size:13px">
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Incidente</dt>
+                <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD">3 no último ano · consome de 3 a 10 dias-pessoa cada, com prazo regulatório correndo</dd>
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Direito do titular</dt>
+                <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD">média de 34/mês · prazo legal de 15 dias, 5 para revisão de decisão</dd>
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Achado de auditoria</dt>
+                <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD">chega em bloco, na janela de auditoria — por isso novembro já está em 70%</dd>
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0">Parecer e PR bloqueado</dt>
+                <dd style="margin:0;padding:5px 0">fluxo contínuo · 10 a 15 dias úteis por parecer conforme a complexidade</dd>
+              </dl>
+            </div>
+
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h3 style="margin:0 0 6px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Sincronização com Teams e Google</h3>
+              <p style="margin:0 0 12px;font-size:13px;color:#495A5D">Desenhado agora para não ser remendo depois. Quatro regras, e a terceira é a que importa.</p>
+              <div style="display:flex;flex-direction:column;gap:10px;font-size:13px">
+                <div style="display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px">
+                  <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">1</span>
+                  <span><b>Compromisso vira evento com convidados.</b> Comitê, auditoria, treinamento, tabletop — tem hora e gente.</span>
+                </div>
+                <div style="display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px">
+                  <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">2</span>
+                  <span><b>Prazo vira evento de dia inteiro, marcado como prazo.</b> Vencimento de LIA, consentimento, chave e reavaliação não são reunião — e o convite carrega o que acontece se passar.</span>
+                </div>
+                <div style="display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px">
+                  <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#9E1F26">3</span>
+                  <span><b>Nada por demanda sai, e nenhum evento carrega dado pessoal.</b> Incidente, pedido de titular e achado ficam dentro da plataforma. O evento leva código, tipo e link de volta — nunca nome de titular, protocolo com dado, escopo do incidente ou anexo. Calendário corporativo é infraestrutura de terceiro: o que sair dele não volta.</span>
+                </div>
+                <div style="display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px">
+                  <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">4</span>
+                  <span><b>Direção única.</b> Este calendário é a fonte; mover a data no Teams não muda o prazo aqui. Prorrogar exige justificativa registrada, como a reclassificação de risco — senão o prazo legal vira negociável no arrastar do mouse.</span>
+                </div>
+              </div>
+              <p style="margin:12px 0 0;padding:10px 13px;background:#F2F6F6;border:1px solid #D2DCDD;border-radius:6px;font-size:12.5px;color:#495A5D">Implementação sugerida: ICS assinado por papel (feed somente leitura) antes de integração por API. Resolve 90% do valor sem pedir permissão de escrita no calendário de ninguém.</p>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ eT1 }}">
         <div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
             <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;padding:2px 7px;border-radius:3px;background:#F2F6F6;border:1px solid #D2DCDD;color:#495A5D">metrics-collector.py</span>
@@ -961,6 +1185,8 @@
 <script type="text/x-dc" data-dc-script data-props="{&quot;mostrarAnotacoes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Revisão&quot;}}">
 class Component extends DCLogic {
   telas = [
+    { id: 't0', nome: 'Minha fila', grupo: 'Trabalho' },
+    { id: 't10', nome: 'Calendário do ano', grupo: 'Trabalho' },
     { id: 't1', nome: 'Painel de governança', grupo: 'Esteira de entrega' },
     { id: 't2', nome: 'Catálogo e consentimentos', grupo: 'Esteira de entrega' },
     { id: 't3', nome: 'RIPD e LINDDUN', grupo: 'Esteira de entrega' },
@@ -1018,8 +1244,112 @@ class Component extends DCLogic {
     { id: 'P-2026-0718', direito: 'Eliminação (Art. 18, VI)', titular: 'hmac:aa41…9b20', titularId: 'T-2214', sistemas: 4, restanteH: 0, status: 'concluída', verificacao: 3 },
   ];
 
+  fila = [
+    {
+      id: 'PR #4821', tipo: 'Merge bloqueado', papeis: ['engenharia', 'dpo', 'produto'],
+      titulo: 'RIPD-2026-014 com recomendação P0 em aberto',
+      consequencia: 'O merge do PR #4821 está travado há 2 dias — nada de core-credito sobe até o RIPD fechar.',
+      prazo: 'go-live em 04/08 · 5 dias', urgencia: '30d',
+      rito: 'D1 · alta complexidade: campo sensível + decisão automatizada → aprovação do DPO e do comitê',
+      estado: ['triagem', 'parecer', 'aprovação', 'vigente'], estadoAtual: 1,
+      acoes: { engenharia: 'Concluir a P0 “redigir CPF no logger de cobrança”', dpo: 'Aprovar depois que a P0 fechar', produto: 'Acompanhar — a data de go-live depende disso' },
+      proximo: 'depois de você: DPO aprova e o status check volta a verde', tela: 't3',
+    },
+    {
+      id: 'INC-2026-003', tipo: 'Incidente', papeis: ['dpo', 'seguranca'],
+      titulo: 'Decisão de comunicação pendente há 6 h 12 min',
+      consequencia: 'O prazo de comunicação à ANPD e aos titulares está correndo. 4.118 titulares no escopo apurado.',
+      prazo: 'decidir hoje', urgencia: 'agora',
+      rito: 'D2 · alto: exposição confirmada de CPF e nome → decisão do comitê com fundamento registrado',
+      estado: ['aberto', 'contido', 'decisão', 'comunicado', 'encerrado'], estadoAtual: 2,
+      acoes: { dpo: 'Registrar a decisão de comunicar, com fundamento', seguranca: 'Anexar a evidência da contenção do token' },
+      proximo: 'depois da decisão: comunicação versionada sai do mesmo ato', tela: 't9',
+    },
+    {
+      id: 'P-2026-0729', tipo: 'Direito do titular', papeis: ['dpo'],
+      titulo: 'Revisão de decisão automatizada (Art. 20) — 18 h restantes',
+      consequencia: 'Prazo legal de 5 dias úteis vence amanhã. Verificação elevada já concluída.',
+      prazo: '18 h', urgencia: 'agora',
+      rito: 'D3 · decisão automatizada com efeito jurídico → revisão humana com fundamento e devolutiva',
+      estado: ['recebida', 'em análise', 'decidida', 'concluída'], estadoAtual: 1,
+      acoes: { dpo: 'Registrar a revisão e a devolutiva ao titular' },
+      proximo: 'a conclusão para o cronômetro e alimenta o indicador de prazo', tela: 't4',
+    },
+    {
+      id: 'LIA-2025-07', tipo: 'Base legal', papeis: ['dpo', 'produto'],
+      titulo: 'LIA vencida há 18 dias — score_risco sem base legal',
+      consequencia: 'O gate de CI bloqueia qualquer PR que toque o campo. Dois repositórios parados.',
+      prazo: 'vencida há 18 dias', urgencia: 'vencido',
+      rito: 'D3 · legítimo interesse → LIA vigente obrigatória, com balanceamento justificado por eixo',
+      estado: ['rascunho', 'balanceamento', 'assinada', 'vigente', 'vencida'], estadoAtual: 4,
+      acoes: { dpo: 'Abrir a renovação e reassinar', produto: 'Decidir: reduzir escopo ou trocar a base legal' },
+      proximo: 'assinatura devolve a base legal e libera o gate', tela: 't8',
+    },
+    {
+      id: 'alias/pii-cobranca', tipo: 'Chave', papeis: ['engenharia', 'seguranca'],
+      titulo: 'Rotação vence em 8 dias — recriptografia em 62,4%',
+      consequencia: 'Chave vencida não quebra o sistema: para de proteger em silêncio. Três datasets dependem dela.',
+      prazo: '8 dias', urgencia: '30d',
+      rito: 'obrigação de calendário promovida a item: janela de canary precisa caber antes do vencimento',
+      estado: ['nova', 'recriptografando', 'canary', 'ativa', 'revogada'], estadoAtual: 1,
+      acoes: { engenharia: 'Agendar a rotação e a janela de canary', seguranca: 'Aprovar a janela' },
+      proximo: 'promoção do canary e revogação da chave antiga', tela: 't7',
+    },
+    {
+      id: 'A-2026-011', tipo: 'Achado de auditoria', papeis: ['engenharia', 'dpo'],
+      titulo: 'Reaberto — a evidência não comprova o controle',
+      consequencia: 'Reincidência eleva a criticidade e leva o encerramento ao comitê.',
+      prazo: '9 dias úteis', urgencia: '30d',
+      rito: 'D2 · moderado: falha de execução, não de desenho → plano com critério de eficácia',
+      estado: ['aberto', 'causa raiz', 'plano', 'executado', 'verificado', 'encerrado'], estadoAtual: 3,
+      acoes: { engenharia: 'Reexecutar o expurgo e anexar o par pré/pós', dpo: 'Revalidar o critério de eficácia' },
+      proximo: 'auditoria testa de forma independente antes de encerrar', tela: 't6',
+    },
+  ];
+  calendario = [
+    { quando: 'em 12 dias', titulo: 'Revisão trimestral de indicadores', detalhe: 'gera item para o DPO com os desvios do trimestre', papeis: ['dpo', 'produto'] },
+    { quando: 'em 30 dias', titulo: 'Reavaliação de R04 · decisão automatizada', detalhe: 'prazo definido no aceite de risco do comitê', papeis: ['dpo'] },
+    { quando: 'em 45 dias', titulo: 'Revisão anual do RIPD-2025-009', detalhe: 'antecipa se houver mudança de modelo ou incidente relacionado', papeis: ['engenharia', 'dpo'] },
+    { quando: 'em 90 dias', titulo: 'Revalidar consentimento v3 · biometria_facial', detalhe: 'sem revalidação o campo perde base legal e o gate bloqueia', papeis: ['dpo', 'engenharia'] },
+  ];
+
+  trilhas = [
+    { id: 'ciclo', rot: 'Ciclo do programa', cor: '#0B5F66' },
+    { id: 'vencimento', rot: 'Vencimento de artefato', cor: '#8E5C08' },
+    { id: 'legal', rot: 'Prazo legal', cor: '#9E1F26' },
+    { id: 'capacitacao', rot: 'Capacitação', cor: '#6C3A8C' },
+    { id: 'auditoria', rot: 'Auditoria', cor: '#495A5D' },
+  ];
+  meses = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+  agenda = [
+    { m: 0, trilha: 'ciclo', curto: 'Indicadores Q4', titulo: 'Revisão trimestral de indicadores (Q4/2025)', tipo: 'compromisso', antecedencia: 'material 5 dias antes', seFalhar: 'o comitê decide sem número novo — a decisão vira opinião', dono: 'dpo', sync: true },
+    { m: 1, trilha: 'vencimento', curto: 'Reavaliar R04', titulo: 'Reavaliação de R04 · decisão automatizada', tipo: 'prazo', antecedencia: 'aviso 15 dias antes', seFalhar: 'risco aceito segue vigente sem revisão — reincidência em auditoria', dono: 'dpo', sync: true },
+    { m: 2, trilha: 'legal', curto: 'Consentimento v3', titulo: 'Revalidar consentimento v3 · biometria_facial', tipo: 'prazo', antecedencia: 'aviso 60 dias antes', seFalhar: 'o campo perde base legal e o gate bloqueia dois repositórios', dono: 'dpo', sync: true },
+    { m: 2, trilha: 'capacitacao', curto: 'Trilha técnica', titulo: 'Treinamento das squads — minimização, log e retenção', tipo: 'compromisso', antecedencia: 'turmas abertas 30 dias antes', seFalhar: 'achados de gate voltam a subir; é o indicador que mede', dono: 'engenharia', sync: true },
+    { m: 3, trilha: 'ciclo', curto: 'Indicadores Q1', titulo: 'Revisão trimestral de indicadores (Q1)', tipo: 'compromisso', antecedencia: 'material 5 dias antes', seFalhar: 'perde-se a chance de corrigir o roadmap no meio do ciclo', dono: 'dpo', sync: true },
+    { m: 3, trilha: 'vencimento', curto: 'RIPD-2025-009', titulo: 'Revisão anual do RIPD-2025-009', tipo: 'prazo', antecedencia: 'abre 30 dias antes', seFalhar: 'RIPD desatualizado não sustenta o tratamento em fiscalização', dono: 'engenharia', sync: true },
+    { m: 4, trilha: 'vencimento', curto: 'Rotação pii-cobranca', titulo: 'Rotação de alias/pii-cobranca (365 dias)', tipo: 'prazo', antecedencia: 'canary 20 dias antes', seFalhar: 'chave vencida não quebra nada: para de proteger em silêncio', dono: 'engenharia', sync: true },
+    { m: 4, trilha: 'auditoria', curto: 'Tabletop incidente', titulo: 'Teste do plano de resposta a incidente (tabletop)', tipo: 'compromisso', antecedencia: 'cenário escrito 10 dias antes', seFalhar: 'o plano só é testado no dia do incidente real', dono: 'seguranca', sync: true },
+    { m: 5, trilha: 'legal', curto: 'LIA-2026-02', titulo: 'LIA-2026-02 vence', tipo: 'prazo', antecedencia: 'aviso 60 dias antes', seFalhar: 'campos vinculados perdem base legal e o gate bloqueia', dono: 'dpo', sync: true },
+    { m: 5, trilha: 'auditoria', curto: 'Auditoria interna', titulo: 'Auditoria interna semestral do programa', tipo: 'compromisso', antecedencia: 'pacote de evidências 15 dias antes', seFalhar: 'achado velho reaparece como reincidência', dono: 'dpo', sync: true },
+    { m: 6, trilha: 'ciclo', curto: 'Indicadores Q2', titulo: 'Revisão trimestral de indicadores (Q2)', tipo: 'compromisso', antecedencia: 'material 5 dias antes', seFalhar: 'sem leitura de meio de ano o ciclo fecha no escuro', dono: 'dpo', sync: true },
+    { m: 6, trilha: 'ciclo', curto: 'Diagnóstico AS-IS', titulo: 'Diagnóstico AS-IS do ciclo (20 dias úteis)', tipo: 'compromisso', antecedencia: 'entrevistas agendadas 15 dias antes', seFalhar: 'o roadmap do ano seguinte nasce sem linha de base', dono: 'engenharia', sync: true },
+    { m: 7, trilha: 'ciclo', curto: 'Matriz e roadmap', titulo: 'Matriz de riscos consolidada e roadmap ao comitê', tipo: 'compromisso', antecedencia: 'pauta 5 dias antes', seFalhar: 'riscos altos entram no ano sem dono nem orçamento', dono: 'dpo', sync: true },
+    { m: 7, trilha: 'ciclo', curto: 'Políticas', titulo: 'Revisão de políticas, procedimentos e templates', tipo: 'compromisso', antecedencia: 'minuta ao jurídico 20 dias antes', seFalhar: 'template que ninguém consegue preencher continua em vigor', dono: 'dpo', sync: false },
+    { m: 8, trilha: 'vencimento', curto: 'Rotação kyc-bio', titulo: 'Rotação de alias/kyc-bio', tipo: 'prazo', antecedencia: 'canary 20 dias antes', seFalhar: 'a chave da biometria é a que sustenta o cripto-shredding', dono: 'seguranca', sync: true },
+    { m: 8, trilha: 'capacitacao', curto: 'Alta direção', titulo: 'Sessão de privacidade com a alta direção', tipo: 'compromisso', antecedencia: 'convite 30 dias antes', seFalhar: 'o aceite de risco continua sendo assinado sem contexto', dono: 'dpo', sync: true },
+    { m: 9, trilha: 'ciclo', curto: 'Indicadores Q3', titulo: 'Revisão trimestral de indicadores (Q3)', tipo: 'compromisso', antecedencia: 'material 5 dias antes', seFalhar: 'desvio do trimestre chega junto com o fechamento', dono: 'dpo', sync: true },
+    { m: 9, trilha: 'ciclo', curto: 'Orçamento', titulo: 'Aprovação de roadmap e orçamento do próximo ciclo', tipo: 'compromisso', antecedencia: 'proposta 15 dias antes', seFalhar: 'o programa começa o ano seguinte sem pessoas nem ferramenta', dono: 'dpo', sync: true },
+    { m: 10, trilha: 'vencimento', curto: 'RIPD-2026-014', titulo: 'Revisão anual do RIPD-2026-014', tipo: 'prazo', antecedencia: 'abre 30 dias antes', seFalhar: 'o RIPD do modelo de crédito envelhece com o modelo mudando', dono: 'engenharia', sync: true },
+    { m: 10, trilha: 'auditoria', curto: 'Auditoria externa', titulo: 'Janela de auditoria externa', tipo: 'compromisso', antecedencia: 'dossiê pronto 20 dias antes', seFalhar: 'evidência montada às pressas não sustenta o encerramento', dono: 'dpo', sync: true },
+    { m: 11, trilha: 'legal', curto: 'Expurgo anual', titulo: 'Expurgo anual verificado + relatório com hash', tipo: 'prazo', antecedencia: 'simulação 10 dias antes', seFalhar: 'dado que devia ter sido eliminado entra no ano seguinte', dono: 'engenharia', sync: true },
+    { m: 11, trilha: 'ciclo', curto: 'Fechamento', titulo: 'Fechamento de indicadores e maturidade do ciclo', tipo: 'compromisso', antecedencia: 'consolidação 10 dias antes', seFalhar: 'sem fechamento não há comparação entre ciclos', dono: 'dpo', sync: true },
+  ];
+  cargaMes = [30, 20, 55, 45, 50, 65, 85, 80, 45, 55, 70, 60];
+
   state = {
-    tela: 't1', papel: 'dpo', apresentacao: false, demo: false,
+    tela: 't0', papel: 'dpo', apresentacao: false, demo: false,
+    trilhaFiltro: 'todas', soMeus: false,
     cenario: 'Crédito IA · financeiro', confirmandoCenario: null, reclass: [],
     riscoSel: 'R04', pendente: null, justRisco: '',
     protocolo: 'P-2026-0731', aba: 'dados',
@@ -1126,9 +1456,77 @@ class Component extends DCLogic {
 
     return {
       papel, tela: s.tela,
+      navTrabalho: nav('Trabalho'),
+      eT0: s.tela === 't0',
+      eT10: s.tela === 't10',
+      ...(() => {
+        const corDe = {};
+        this.trilhas.forEach((t) => { corDe[t.id] = t.cor; });
+        const visivel = (a) => (s.trilhaFiltro === 'todas' || a.trilha === s.trilhaFiltro) && (!s.soMeus || a.dono === papel);
+        const itens = this.agenda.filter(visivel);
+        return {
+          chipsTrilha: [{ id: 'todas', rot: 'Todas as trilhas', cor: '#6E8184' }, ...this.trilhas].map((t) => ({
+            rot: t.rot,
+            marcar: () => this.setState({ trilhaFiltro: t.id }),
+            estilo: 'display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:999px;cursor:pointer;font:inherit;font-size:12.5px;border:1px solid '
+              + (s.trilhaFiltro === t.id ? t.cor + ';background:#FFFFFF;color:#0E1719;font-weight:600' : '#D2DCDD;background:#F2F6F6;color:#495A5D'),
+            estiloPonto: 'width:9px;height:9px;border-radius:50%;display:inline-block;background:' + t.cor,
+          })),
+          soMeus: s.soMeus,
+          rotuloSoMeus: s.soMeus ? 'Mostrando só os meus' : 'Mostrar só os meus',
+          alternarSoMeus: () => this.setState({ soMeus: !s.soMeus }),
+          mesesGrade: this.meses.map((m, idx) => ({
+            rot: m,
+            carga: this.cargaMes[idx] + '%',
+            estiloCarga: 'display:block;height:100%;width:' + this.cargaMes[idx] + '%;background:' + (this.cargaMes[idx] >= 75 ? '#9E1F26' : this.cargaMes[idx] >= 55 ? '#8E5C08' : '#0B5F66'),
+            itens: itens.filter((a) => a.m === idx).map((a) => ({
+              curto: a.curto,
+              estilo: 'display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:4px;font-size:12.5px;text-align:left;background:#F2F6F6;border:1px solid #D2DCDD;border-left:3px solid ' + corDe[a.trilha],
+            })),
+          })),
+          agendaLista: itens.map((a) => ({
+            ...a,
+            mes: this.meses[a.m],
+            trilhaRot: (this.trilhas.find((t) => t.id === a.trilha) || {}).rot,
+            estiloPonto: 'width:9px;height:9px;border-radius:50%;display:inline-block;background:' + corDe[a.trilha],
+            estiloTipo: 'display:inline-flex;padding:2px 8px;border-radius:999px;font-size:12.5px;font-weight:600;border:1px solid '
+              + (a.tipo === 'prazo' ? '#9E1F2652;background:#F5DEDF;color:#9E1F26' : '#0B5F6640;background:#DCEAEA;color:#0B5F66'),
+            rotuloSync: a.sync ? 'sincroniza' : 'interno',
+          })),
+          nProvisionado: this.agenda.length,
+          nPrazos: this.agenda.filter((a) => a.tipo === 'prazo').length,
+          nMeus: this.agenda.filter((a) => a.dono === papel).length,
+        };
+      })(),
       eT1: s.tela === 't1', eT2: s.tela === 't2', eT3: s.tela === 't3', eT4: s.tela === 't4',
       eT5: s.tela === 't5', eT6: s.tela === 't6', eT7: s.tela === 't7', eT8: s.tela === 't8', eT9: s.tela === 't9',
       anotar: this.props.mostrarAnotacoes ?? true,
+      ...(() => {
+        const meus = this.fila.filter((f) => f.papeis.includes(papel));
+        const tomUrg = { vencido: '#9E1F26', agora: '#8E5C08', '30d': '#495A5D' };
+        const rotUrg = { vencido: 'prazo vencido', agora: 'para hoje', '30d': 'próximos 30 dias' };
+        return {
+          fila: meus.map((f) => ({
+            ...f,
+            acao: f.acoes[papel] || 'Acompanhar — nenhuma ação sua neste item',
+            temAcao: Boolean(f.acoes[papel]),
+            abrir: () => this.setState({ tela: f.tela }),
+            rotuloUrgencia: rotUrg[f.urgencia],
+            estiloUrgencia: 'display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;font-weight:600;color:#FFFFFF;background:' + tomUrg[f.urgencia],
+            passos: f.estado.map((p, idx) => ({
+              rot: p,
+              estilo: 'display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid '
+                + (idx === f.estadoAtual ? '#0B5F66;background:#DCEAEA;color:#0E1719;font-weight:600' : '#D2DCDD;background:#F2F6F6;color:#6E8184'),
+            })),
+          })),
+          filaVazia: meus.length === 0,
+          nVencido: meus.filter((f) => f.urgencia === 'vencido').length,
+          nAgora: meus.filter((f) => f.urgencia === 'agora').length,
+          n30: meus.filter((f) => f.urgencia === '30d').length,
+          fora: this.fila.length - meus.length,
+          calendario: this.calendario.filter((c) => c.papeis.includes(papel)),
+        };
+      })(),
       apresentacao: s.apresentacao,
       alternarApresentacao: () => this.setState({ apresentacao: !s.apresentacao }),
       navEsteira: nav('Esteira de entrega'), navOperacao: nav('Operação e prova'),

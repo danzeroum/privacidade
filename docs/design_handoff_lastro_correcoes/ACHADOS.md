@@ -1,6 +1,7 @@
 # Achados — checklist
 
-41 achados: **3 críticos · 6 altos · 23 médios · 9 baixos**. A coluna PR remete a `IMPLEMENTACAO.md`.
+41 achados: **3 críticos · 6 altos · 23 médios · 9 baixos** — mais **C-17** e **C-18**, descobertos
+durante a implementação (43 no total). A coluna PR remete a `IMPLEMENTACAO.md`.
 Evidência completa de cada item em `Validacao UX e LGPD.dc.html`.
 
 ## Transversais
@@ -23,6 +24,8 @@ Evidência completa de cada item em `Validacao UX e LGPD.dc.html`.
 | C-14 | Médio | CSS | Nenhum ponto de quebra de largura | `ui/estilos.css` | 6 |
 | C-15 | Baixo | T2 · T4 · T6 · T8 | Controles inertes sem distinção dos reais | telas | 5 |
 | C-16 | Baixo | todas | Voz de ensaio no cromo do produto | telas | 5 |
+| C-17 | Crítico | T4 · API | Campo de titular revelável que não está no ROPA | `mock/scenarios.ts`, `mock/api.ts` | 2 |
+| C-18 | Alto | repositório | O projeto exige gate de CI e não tem `.github/workflows/` | novo `.github/workflows/ci.yml` | próprio |
 
 ## Por tela
 
