@@ -9,6 +9,10 @@ import {
   MAQUINAS, TRANSICOES_INCIDENTE, estadosDe, motivoDaRecusa, transicaoPermitida,
   type Artefato,
 } from '../src/mock/estados';
+import {
+  CATEGORIAS, GATILHOS, TABELAS, TABELAS_IDS, aplicar, condicoesDe, nivelDoRisco,
+  reproduzir, tomDoRisco, ultimaDecisao, vigenteDe,
+} from '../src/mock/decisoes';
 import { CampoPII, Didatico, Explica } from '../src/ui/primitivos';
 import { MemoryRouter } from 'react-router-dom';
 import T2 from '../src/screens/T2';
@@ -22,7 +26,7 @@ import T4 from '../src/screens/T4';
 import T6 from '../src/screens/T6';
 import { useSessao, limparBancosDaSessao } from '../src/store/sessao';
 import { sha256, hashCpf } from '../src/lib/sha256';
-import type { EstadoIncidente, Papel } from '../src/mock/types';
+import type { DecisaoRegistrada, EstadoIncidente, Papel } from '../src/mock/types';
 
 let banco: BancoMock;
 beforeEach(() => {
@@ -2205,5 +2209,351 @@ describe('PR 7 · a rota de transição — sequência, conteúdo, registro', ()
       gatilhoDeReabertura: 'Coleta de identificador direto reabre.',
     });
     expect(banco.auditoria.at(-1)!.justificativa).not.toContain('529.982.247-25');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('PR 8 · D1, D2 e D3 como dados versionados', () => {
+  it('entrada indefinida cai no cenário mais restritivo, não em erro', () => {
+    // Categoria ausente com todo o resto no valor mais brando possível: se a
+    // omissão caísse no permissivo, isto sairia como baixa complexidade.
+    const d = aplicar('d1', {
+      volumeTitulares: 10, decisaoAutomatizada: false, transferenciaInternacional: false,
+    });
+    expect(d.saida.complexidade).toBe('alta');
+    expect(d.assumidas).toContain('categoria');
+    expect(d.entradas.categoria).toBe('sensivel');
+    // E a frase diz que assumiu, em vez de decidir calada.
+    expect(d.frase).toContain('categoria não informado, assumido sensivel');
+  });
+
+  it('o restritivo de toda versão produz a saída mais restritiva da tabela', () => {
+    // Invariante: o dia em que alguém subir um limiar e esquecer do restritivo,
+    // "entrada ausente cai no pior caso" vira mentira em silêncio.
+    const pior: Record<string, Record<string, string | number | boolean>> = {
+      d1: { complexidade: 'alta', alcada: 'dpo_e_comite' },
+      d2: { nivel: 'critico' },
+      d3: { ripd: 'obrigatorio', analiseAlgoritmica: true },
+    };
+    for (const id of TABELAS_IDS) {
+      for (const v of TABELAS[id].versoes) {
+        const d = aplicar(id, {}, v.versao);
+        expect(d.assumidas.sort(), `${id}@${v.versao}`).toEqual(Object.keys(v.restritivo).sort());
+        for (const [campo, valor] of Object.entries(pior[id])) {
+          expect(d.saida[campo], `${id}@${v.versao}: ${campo}`).toBe(valor);
+        }
+      }
+    }
+  });
+
+  it('toda condição tem termo e todo valor de saída tem rótulo', () => {
+    // A frase é derivada da regra. Condição sem termo cairia na chave canônica
+    // — legível, mas feia de propósito: quem vê `volumeTitulares>=100000` na
+    // tela sabe que faltou traduzir.
+    for (const id of TABELAS_IDS) {
+      for (const v of TABELAS[id].versoes) {
+        for (const chave of condicoesDe(v)) {
+          expect(v.termos[chave], `${id}@${v.versao}: condição "${chave}" sem termo`).toBeTruthy();
+        }
+        for (const r of v.regras) {
+          for (const [campo, valor] of Object.entries(r.entao)) {
+            expect(v.saidas[`${campo}=${valor}`], `${id}@${v.versao}: saída "${campo}=${valor}" sem rótulo`)
+              .toBeTruthy();
+          }
+        }
+      }
+    }
+  });
+
+  it('toda tabela fecha com uma regra que casa com tudo', () => {
+    for (const id of TABELAS_IDS) {
+      for (const v of TABELAS[id].versoes) {
+        const ultima = v.regras[v.regras.length - 1];
+        expect(Object.keys(ultima.quando), `${id}@${v.versao}`).toHaveLength(0);
+      }
+    }
+  });
+
+  it('a D2 cobre as 25 células sem cair na regra de fechamento', () => {
+    const ultima = vigenteDe('d2').regras.length - 1;
+    for (let p = 1; p <= 5; p += 1) {
+      for (let i = 1; i <= 5; i += 1) {
+        const d = aplicar('d2', { probabilidade: p, impacto: i, score: p * i });
+        expect(d.regra, `P${p} × I${i} caiu no fechamento — buraco na tabela`).toBeLessThan(ultima);
+        expect(d.assumidas).toHaveLength(0);
+      }
+    }
+  });
+
+  it('gatilho de decisão automatizada na D3 exige RIPD e análise algorítmica', () => {
+    const d = aplicar('d3', { gatilhos: ['T3', 'T6'], gatilhosCriticos: 1, gatilhosTotal: 2 });
+    expect(d.saida.ripd).toBe('obrigatorio');
+    expect(d.saida.analiseAlgoritmica).toBe(true);
+    expect(d.frase).toContain('decisão automatizada (T3)');
+    expect(d.frase).toContain('análise algorítmica exigida');
+
+    // Contraprova: sem gatilho nenhum a triagem responde, e responde dispensa.
+    const vazio = aplicar('d3', { gatilhos: [], gatilhosCriticos: 0, gatilhosTotal: 0 });
+    expect(vazio.saida.ripd).toBe('dispensavel_com_justificativa');
+    expect(vazio.assumidas).toHaveLength(0);
+    // Lista **ausente** é outra coisa: a triagem não rodou, e aí é o pior caso.
+    expect(aplicar('d3', {}).saida.ripd).toBe('obrigatorio');
+  });
+
+  it('score 15 na D2 é a mesma faixa da célula correspondente da grade da T5', () => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    render(<MemoryRouter><T5 /></MemoryRouter>);
+
+    // P 3 × I 5 = 15. A célula e a tabela não podem discordar.
+    const celula = screen.getByLabelText(/Probabilidade 3, impacto 5, score 15/);
+    expect(nivelDoRisco(3, 5)).toBe('critico');
+    expect(celula.className).toContain(tomDoRisco(3, 5));
+    expect(celula.className).toContain('crit');
+
+    // E a fronteira: 14 não é a mesma faixa que 15.
+    expect(tomDoRisco(3, 5)).not.toBe(tomDoRisco(2, 5));
+  });
+
+  it('alterar a D2 muda a cor da matriz sem tocar em T5.tsx', () => {
+    const regra = vigenteDe('d2').regras[0].quando.score as { min: number };
+    const original = regra.min;
+    try {
+      // Baixar o corte de crítico para 8 deve repintar a célula P 2 × I 4.
+      expect(tomDoRisco(2, 4)).toBe('warn');
+      regra.min = 8;
+      limparBancosDaSessao();
+      useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+      render(<MemoryRouter><T5 /></MemoryRouter>);
+      expect(tomDoRisco(2, 4)).toBe('crit');
+      expect(screen.getByLabelText(/Probabilidade 2, impacto 4, score 8/).className).toContain('crit');
+    } finally {
+      regra.min = original;
+    }
+    expect(tomDoRisco(2, 4)).toBe('warn');
+  });
+
+  it('decisão gravada em d1@1 mantém a saída de d1@1 depois de publicada a d1@2', () => {
+    const ripd = banco.cenario.ripds[0];
+    const gravada = ultimaDecisao(ripd.decisoes, 'd1')!;
+    expect(gravada.versao).toBe(1);
+    expect(vigenteDe('d1').versao).toBe(2);
+
+    // Reprodução: mesma entrada, mesma versão, mesma saída — meses depois.
+    const conferencia = reproduzir(gravada);
+    expect(conferencia.confere).toBe(true);
+    expect(conferencia.saida).toEqual(gravada.saida);
+
+    // A versão nova responde outra coisa para as mesmas entradas, e é
+    // exatamente por isso que ela não pode reescrever a decisão antiga.
+    const hoje = aplicar('d1', gravada.entradas);
+    expect(hoje.versao).toBe(2);
+    expect(hoje.saida.alcada).toBe('dpo_e_comite');
+    expect(gravada.saida.alcada).toBe('dpo');
+  });
+
+  it('toda decisão semeada em todo cenário reproduz', () => {
+    for (const id of ['banco', 'varejo', 'streaming']) {
+      const b = new BancoMock(id);
+      const registros = [
+        ...b.cenario.ripds.flatMap((r) => r.decisoes ?? []),
+        ...b.cenario.riscos.flatMap((r) => r.decisoes ?? []),
+      ];
+      expect(registros.length, `${id}: nenhuma decisão semeada`).toBeGreaterThan(0);
+      for (const reg of registros) {
+        expect(reproduzir(reg).confere, `${id}: ${reg.tabela}@${reg.versao}`).toBe(true);
+      }
+    }
+  });
+
+  it('registro que aponta para versão fora do catálogo não reproduz — e diz por quê', () => {
+    const reg = { ...aplicar('d1', {}), versao: 99, quando: '2026-01-01T00:00:00Z' };
+    const r = reproduzir(reg);
+    expect(r.confere).toBe(false);
+    // Aplicar outra versão em silêncio seria responder por uma regra que não
+    // foi a usada: pior que não conferir.
+    expect(r.motivo).toContain('d1@99');
+    expect(r.saida).toBeUndefined();
+  });
+
+  it('todo gatilho de todo cenário está no catálogo, e nenhum rótulo é repetido no dado', () => {
+    for (const id of ['banco', 'varejo', 'streaming']) {
+      const b = new BancoMock(id);
+      for (const r of b.cenario.ripds) {
+        for (const t of r.triggers) {
+          expect(GATILHOS[t.codigo], `${id}: gatilho ${t.codigo} fora do catálogo`).toBeDefined();
+          expect(t.evidencias.length).toBeGreaterThan(0);
+          // O cenário diz qual acionou; o que ele significa mora no catálogo.
+          expect(Object.keys(t).sort()).toEqual(['codigo', 'evidencias']);
+        }
+      }
+      for (const c of b.cenario.campos) {
+        expect(CATEGORIAS, `${id}: categoria ${c.categoria}`).toContain(c.categoria);
+      }
+    }
+  });
+
+  it('decisoes.ts é puro: não importa nada, não lê papel, banco nem relógio', () => {
+    const fonte = readFileSync('src/mock/decisoes.ts', 'utf8');
+    expect(fonte.match(/^\s*import\s/m), 'decisoes.ts não deve importar nada').toBeNull();
+
+    const soCodigo = fonte
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/[^\n]*/g, '')
+      .replace(/'[^']*'/g, "''")
+      .replace(/`[^`]*`/g, '``');
+    for (const proibido of ['papel', 'ator', 'justificativa']) {
+      expect(new RegExp(`\\b${proibido}\\b`).test(soCodigo), `decisoes.ts lê "${proibido}"`).toBe(false);
+    }
+    // Sem relógio: a versão vigente é a maior publicada, não a que a data
+    // escolher. Decisão que muda de resposta em agosto não é reproduzível.
+    for (const proibido of ['Date', 'BancoMock', 'auditAppend', 'pode(']) {
+      expect(soCodigo.includes(proibido), `decisoes.ts referencia "${proibido}"`).toBe(false);
+    }
+  });
+});
+
+describe('PR 8 · a rota que aplica a tabela', () => {
+  const aplicarVia = (papel: Papel, tabela: string, body: Record<string, unknown>) =>
+    chamar<DecisaoRegistrada>(papel, { metodo: 'POST', caminho: `/v1/dmn/${tabela}/aplicar`, body });
+
+  it('grava a versão aplicada no trail antes de responder', () => {
+    const ripd = banco.cenario.ripds[0];
+    const antes = banco.auditoria.length;
+    const res = aplicarVia('dpo', 'd1', { id: ripd.id });
+
+    expect(res.status).toBe(200);
+    expect(banco.auditoria).toHaveLength(antes + 1);
+    const linha = banco.auditoria.at(-1)!;
+    expect(linha.acao).toBe('DECISAO_APLICADA');
+    // A versão entra no payload do hash: versão fora da cadeia é versão
+    // adulterável sem quebrar a prova.
+    expect(linha.campos).toContain(`d1@${res.body.versao}`);
+    expect(banco.auditVerificar().integro).toBe(true);
+  });
+
+  it('reaplicar acrescenta decisão nova e não apaga a anterior', () => {
+    const ripd = banco.cenario.ripds[0];
+    const antiga = ultimaDecisao(ripd.decisoes, 'd1')!;
+    aplicarVia('dpo', 'd1', { id: ripd.id });
+
+    const daD1 = (ripd.decisoes ?? []).filter((d) => d.tabela === 'd1');
+    expect(daD1).toHaveLength(2);
+    expect(daD1[0]).toEqual(antiga);
+    expect(daD1[0].versao).toBe(1);
+    expect(daD1[1].versao).toBe(2);
+    expect(ultimaDecisao(ripd.decisoes, 'd1')!.versao).toBe(2);
+  });
+
+  it('as entradas vêm do artefato: mandar entradas no corpo é 422', () => {
+    const ripd = banco.cenario.ripds[0];
+    const res = aplicarVia('dpo', 'd1', {
+      id: ripd.id, entradas: { categoria: 'anonimizado', volumeTitulares: 1 },
+    });
+    expect(res.status).toBe(422);
+    expect(res.regra).toContain('não é reproduzível');
+    expect((ripd.decisoes ?? []).filter((d) => d.tabela === 'd1')).toHaveLength(1);
+  });
+
+  it('a D1 lê categoria, volume, decisão automatizada e remessa do próprio artefato', () => {
+    const ripd = banco.cenario.ripds[0];
+    const res = aplicarVia('dpo', 'd1', { id: ripd.id });
+    // b-cpf/b-renda/b-score são pessoais e b-hist é pseudonimizado: a mais
+    // restritiva é `pessoal`, e é ela que vale — não a média nem a primeira.
+    expect(res.body.entradas.categoria).toBe('pessoal');
+    expect(res.body.entradas.volumeTitulares).toBe(ripd.volumeTitulares);
+    // T3 na triagem e OpenAI no compartilhamento de b-hist.
+    expect(res.body.entradas.decisaoAutomatizada).toBe(true);
+    expect(res.body.entradas.transferenciaInternacional).toBe(true);
+    expect(res.body.assumidas).toHaveLength(0);
+  });
+
+  it('se o log falhar, a decisão não é gravada e a resposta é 503', () => {
+    const risco = banco.cenario.riscos.find((r) => !r.decisoes)!;
+    banco.simularFalhaDeLog = true;
+    const res = aplicarVia('dpo', 'd2', { id: risco.codigo });
+    expect(res.status).toBe(503);
+    expect(risco.decisoes).toBeUndefined();
+  });
+
+  it('tabela desconhecida é 404 e artefato inexistente também', () => {
+    expect(aplicarVia('dpo', 'd9', { id: 'r1' }).status).toBe(404);
+    expect(aplicarVia('dpo', 'd1', { id: 'RIPD-INEXISTENTE' }).status).toBe(404);
+  });
+
+  it('aplicar é escrita; ler o catálogo alcança quem audita', () => {
+    expect(aplicarVia('auditor', 'd1', { id: 'r1' }).status).toBe(403);
+    const catalogo = chamar<{ tabelas: { id: string; vigente: number; versoes: unknown[] }[] }>(
+      'auditor', { metodo: 'GET', caminho: '/v1/dmn' },
+    );
+    expect(catalogo.status).toBe(200);
+    expect(catalogo.body.tabelas.map((t) => t.id)).toEqual(['d1', 'd2', 'd3']);
+    // Todas as versões publicadas ficam visíveis: quem confere uma decisão de
+    // março precisa ler a tabela de março, não só a de hoje.
+    expect(catalogo.body.tabelas.find((t) => t.id === 'd1')!.versoes).toHaveLength(2);
+    expect(catalogo.body.tabelas.find((t) => t.id === 'd1')!.vigente).toBe(2);
+  });
+});
+
+describe('PR 8 · a tela explica a decisão em uma frase', () => {
+  beforeEach(() => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+  });
+
+  it('a T3 mostra o rito citando as entradas, a versão e o que a vigente diria', () => {
+    montar(<T3 />);
+    const rito = screen.getByRole('heading', { name: 'Rito aplicado' }).closest('.card') as HTMLElement;
+
+    // A frase cita as entradas que a produziram, não só o resultado — e a
+    // gravada é a da d1@1, que ainda não somava a remessa internacional.
+    expect(within(rito).getByText('D1 · alta complexidade: decisão automatizada → aprovação do DPO'))
+      .toBeInTheDocument();
+    expect(within(rito).getByText(/D3 · RIPD obrigatório: decisão automatizada \(T3\)/)).toBeInTheDocument();
+    expect(within(rito).getByText('d1@1')).toBeInTheDocument();
+    expect(within(rito).getAllByText(/reproduz a mesma saída/).length).toBeGreaterThan(0);
+
+    // Versão vigente diferente da gravada: a tela mostra a prévia como prévia,
+    // com a frase que a d1@2 daria para as **mesmas** entradas.
+    expect(within(rito).getByText(
+      /decisão automatizada \+ transferência internacional → aprovação do DPO e do comitê/,
+    )).toBeInTheDocument();
+    expect(within(rito).getByText(/Isto é prévia, não decisão/)).toBeInTheDocument();
+    expect(within(rito).getByRole('button', { name: /Reaplicar com d1@2/ })).toBeInTheDocument();
+  });
+
+  it('reaplicar pela T3 registra e a tela passa a exibir a versão vigente', () => {
+    montar(<T3 />);
+    fireEvent.click(screen.getByRole('button', { name: /Reaplicar com d1@2/ }));
+    const rito = screen.getByRole('heading', { name: 'Rito aplicado' }).closest('.card') as HTMLElement;
+    expect(within(rito).getByText('d1@2')).toBeInTheDocument();
+    expect(within(rito).queryByRole('button', { name: /Reaplicar com d1@2/ })).not.toBeInTheDocument();
+    expect(useSessao.getState().banco.auditoria.at(-1)!.acao).toBe('DECISAO_APLICADA');
+  });
+
+  it('papel sem escrita não recebe o botão de aplicar — ausência, não desabilitado', () => {
+    useSessao.setState({ papel: 'auditor' });
+    montar(<T3 />);
+    const rito = screen.getByRole('heading', { name: 'Rito aplicado' }).closest('.card') as HTMLElement;
+    expect(within(rito).queryByRole('button', { name: /Reaplicar/ })).not.toBeInTheDocument();
+    // A decisão continua legível: o auditor perde o ato, não a prova.
+    expect(within(rito).getByText('d1@1')).toBeInTheDocument();
+  });
+
+  it('a T5 avisa quando a decisão gravada é anterior à reclassificação', () => {
+    montar(<T5 />);
+    // R2 vem com D2 gravada; reclassificar muda o P × I por baixo dela.
+    fireEvent.click(screen.getByRole('button', { name: /^R2:/ }));
+    expect(screen.getByText(/risco (alto|crítico|moderado|baixo):/)).toBeInTheDocument();
+
+    const b = useSessao.getState().banco;
+    request(b, {
+      papel: 'dpo', ator: 'teste', metodo: 'PATCH', caminho: '/v1/risks/R2',
+      body: { probabilidade: 1, impacto: 1, justificativa: 'Controle compensatório entrou em produção e foi verificado.' },
+    });
+    act(() => { useSessao.setState((s) => ({ versao: s.versao + 1 })); });
+
+    expect(screen.getByText(/o risco hoje está em P 1 × I 1/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Aplicar D2 com o P × I atual/ })).toBeInTheDocument();
   });
 });

@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Cabecalho, Cartao, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
+import { Cabecalho, Cartao, Nota, Permitido, Pill, Recusa, Tabela } from '../ui/primitivos';
 import { ModalReclassificar, CORES_DANO } from '../ui/reclassificar';
 import { useSessao } from '../store/sessao';
-import type { Risco } from '../mock/types';
+import {
+  aplicar as aplicarTabela, nivelDoRisco, reproduzir, tomDoRisco, ultimaDecisao, vigenteDe,
+} from '../mock/decisoes';
+import type { DecisaoRegistrada, Risco } from '../mock/types';
 
 const NIVEIS = [1, 2, 3, 4, 5];
-const faixaDaCelula = (score: number) => (score >= 15 ? 'crit' : score >= 8 ? 'warn' : 'ok');
 
 export default function T5() {
   const banco = useSessao((s) => s.banco);
@@ -66,7 +68,9 @@ export default function T5() {
   const dominios = riscos.reduce<Record<string, { total: number; soma: number; criticos: number }>>((acc, r) => {
     const d = acc[r.dominio] ?? { total: 0, soma: 0, criticos: 0 };
     d.total += 1; d.soma += r.probabilidade * r.impacto;
-    if (r.probabilidade * r.impacto >= 15) d.criticos += 1;
+    // Também aqui o corte é a D2: dois lugares contando "crítico" com
+    // limiares próprios é o segundo modelo de risco entrando pela porta dos fundos.
+    if (nivelDoRisco(r.probabilidade, r.impacto) === 'critico') d.criticos += 1;
     acc[r.dominio] = d;
     return acc;
   }, {});
@@ -113,8 +117,11 @@ export default function T5() {
                     <div
                       key={p}
                       role="gridcell"
-                      className={`matriz-celula ${faixaDaCelula(p * i)}`}
-                      aria-label={`Probabilidade ${p}, impacto ${i}, score ${p * i}`}
+                      // PR 8 — a faixa é a D2, não um limiar escrito aqui. Mudar
+                      // o corte na tabela muda a cor da grade sem tocar nesta tela;
+                      // era esse o segundo modelo de risco que o MAPA proíbe.
+                      className={`matriz-celula ${tomDoRisco(p, i)}`}
+                      aria-label={`Probabilidade ${p}, impacto ${i}, score ${p * i} · ${nivelDoRisco(p, i)}`}
                       onPointerUp={() => {
                         if (!arrasto) return;
                         const a = { ...arrasto, p, i };
@@ -179,6 +186,7 @@ export default function T5() {
                 </Pill>
               </dd>
             </dl>
+            <NivelD2 risco={selecionado} />
             <div className="row" style={{ marginTop: 12 }}>
               <Permitido
                 acao="gerenciar_risco"
@@ -275,6 +283,85 @@ export default function T5() {
           }}
         />
       )}
+    </>
+  );
+}
+
+/**
+ * PR 8 — o nível do risco, decidido pela D2 e gravado com a versão aplicada.
+ *
+ * Duas maneiras de a decisão gravada ficar para trás, e as duas aparecem em vez
+ * de serem corrigidas em silêncio: a tabela ganhou versão nova, ou o risco foi
+ * reclassificado depois. Recalcular calado seria mais bonito e resolveria o
+ * problema errado — quem defende a priorização meses depois precisa do que foi
+ * decidido, não do que a conta daria hoje.
+ */
+function NivelD2({ risco }: { risco: Risco }) {
+  const chamar = useSessao((s) => s.chamar);
+  const avisar = useSessao((s) => s.avisar);
+  const reg = ultimaDecisao(risco.decisoes, 'd2');
+  const vigente = vigenteDe('d2').versao;
+
+  const aplicarD2 = () => {
+    const res = chamar<DecisaoRegistrada>(
+      { metodo: 'POST', caminho: '/v1/dmn/d2/aplicar', body: { id: risco.codigo } }, 'dmn-d2',
+    );
+    if (res.status === 200) {
+      avisar('ok', `D2@${res.body.versao} aplicada a ${risco.codigo} e registrada.`);
+      useSessao.setState((s) => ({ versao: s.versao + 1 }));
+    }
+  };
+
+  const botao = (rotulo: string) => (
+    <Permitido acao="escrever" alternativa={null}>
+      <div className="row" style={{ marginTop: 8 }}>
+        <button className="btn" onClick={aplicarD2}>{rotulo}</button>
+      </div>
+    </Permitido>
+  );
+
+  if (!reg) {
+    return (
+      <>
+        <Nota>Nenhuma decisão da D2 gravada para {risco.codigo}. A cor da célula na matriz já sai da tabela;
+          o que falta é o registro de qual versão decidiu este risco.</Nota>
+        {botao(`Aplicar D2 (d2@${vigente})`)}
+        <Recusa ancora="dmn-d2" />
+      </>
+    );
+  }
+
+  const desatualizada = reg.versao !== vigente;
+  const mudouOArtefato = reg.entradas.probabilidade !== risco.probabilidade
+    || reg.entradas.impacto !== risco.impacto;
+  const conferencia = reproduzir(reg);
+  const hoje = desatualizada ? aplicarTabela('d2', reg.entradas) : null;
+
+  return (
+    <>
+      <p style={{ margin: '10px 0 0', fontSize: 12.5 }}>{reg.frase}</p>
+      <div className="row" style={{ marginTop: 6, gap: 8 }}>
+        <span className="hash">d2@{reg.versao}</span>
+        <span className="hint">
+          {conferencia.confere ? 'reproduz a mesma saída' : `não reproduz: ${conferencia.motivo}`}
+        </span>
+      </div>
+      {mudouOArtefato && (
+        <Nota tom="warn">
+          Decidida com P {String(reg.entradas.probabilidade)} × I {String(reg.entradas.impacto)}; o risco hoje
+          está em P {risco.probabilidade} × I {risco.impacto}. A decisão não acompanha a reclassificação —
+          aplicar de novo grava uma decisão nova, com as entradas de agora.
+          {botao('Aplicar D2 com o P × I atual')}
+        </Nota>
+      )}
+      {hoje && (
+        <Nota tom="warn">
+          A versão vigente é <span className="mono">d2@{vigente}</span>: para as mesmas entradas ela
+          responderia <b>{hoje.frase}</b>. Prévia, não decisão.
+          {botao(`Reaplicar com d2@${vigente}`)}
+        </Nota>
+      )}
+      <Recusa ancora="dmn-d2" />
     </>
   );
 }

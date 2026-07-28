@@ -14,6 +14,15 @@ import type {
   EstadoSolicitacao, EstadoAchado, EstadoIncidente, EstadoChave,
 } from './estados';
 
+/**
+ * PR 8 — pelo mesmo motivo dos estados: `mock/decisoes.ts` é a autoridade sobre
+ * o que uma decisão registrada carrega. Aqui só se reexporta.
+ */
+export type {
+  TabelaId, Decisao, DecisaoRegistrada, Complexidade, Alcada, NivelRisco, ExigenciaRipd,
+} from './decisoes';
+import type { DecisaoRegistrada } from './decisoes';
+
 export type Papel = 'engenharia' | 'dpo' | 'produto' | 'seguranca' | 'auditor';
 
 export type Finalidade = 'atendimento' | 'cobranca' | 'auditoria' | 'seguranca';
@@ -104,10 +113,14 @@ export interface GateRun {
   ripdId?: string;
 }
 
+/**
+ * PR 8 — o gatilho no cenário diz **quais** acionaram e com que evidência. O que
+ * cada código significa (rótulo e criticidade) mora no catálogo `GATILHOS` de
+ * `mock/decisoes.ts`, que é a entrada da D3. Antes o rótulo e o `critico` eram
+ * repetidos em cada cenário: três cópias da mesma verdade.
+ */
 export interface RipdTrigger {
   codigo: string;
-  categoria: string;
-  critico: boolean;
   evidencias: string[];
 }
 
@@ -133,9 +146,20 @@ export interface Ripd {
   operacoes: { operacao: string; finalidade: string; baseLegal: BaseLegal; liaCodigo?: string }[];
   recomendacoes: Recomendacao[];
   triggers: RipdTrigger[];
+  /** Entrada da D1. Ausente cai no cenário mais restritivo, não em erro. */
+  volumeTitulares?: number;
   /** PR 7 — estados do `MAPA-PROCESSOS.md §2`. `vigente` é o antigo `aprovado`. */
   status: EstadoRipd;
   linddun: LinddunItem[];
+  /**
+   * PR 8 — as decisões como foram tomadas, com a versão da tabela e as entradas.
+   *
+   * Lista **append-only** pelo mesmo motivo do audit trail: reaplicar D1 grava
+   * uma decisão nova e a anterior continua ali, dizendo por qual regra o parecer
+   * foi julgado em março. Campo único seria mais simples e apagaria justamente a
+   * prova que este PR existe para produzir. A vigente é a última da tabela.
+   */
+  decisoes?: DecisaoRegistrada[];
 }
 
 export interface LinddunItem {
@@ -168,6 +192,8 @@ export interface Risco {
   prazoDeReavaliacao?: string;
   gatilhoDeReabertura?: string;
   ripdCodigo?: string;
+  /** PR 8 — D2 aplicada, append-only como no RIPD. A vigente é a última. */
+  decisoes?: DecisaoRegistrada[];
 }
 
 export interface Reclassificacao {
