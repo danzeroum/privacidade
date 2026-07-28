@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSessao } from '../store/sessao';
 import { pode, type Acao } from '../mock/permissoes';
+import { redigir, resumoDaRedacao } from '../lib/redator';
 import type { Finalidade } from '../mock/types';
 
 export function Cartao({ titulo, hint, acao, children, className = '' }: {
@@ -80,31 +81,57 @@ export function Modal({ titulo, children, rodape, aoFechar }: {
   );
 }
 
-const FINALIDADES: { valor: Finalidade; rotulo: string }[] = [
-  { valor: 'atendimento', rotulo: 'atendimento — responder solicitação do titular' },
-  { valor: 'cobranca', rotulo: 'cobranca — negociação de dívida' },
-  { valor: 'auditoria', rotulo: 'auditoria — verificação de conformidade' },
-];
+/** Descrição de cada finalidade, para o rótulo da opção. A lista vem do catálogo. */
+const GLOSSA_FINALIDADE: Record<Finalidade, string> = {
+  atendimento: 'responder solicitação do titular',
+  cobranca: 'negociação de dívida',
+  auditoria: 'verificação de conformidade',
+  seguranca: 'investigação de incidente',
+};
 
 /**
  * Campo com dado pessoal. O estado padrão é mascarado, para todo mundo.
  *
  * Sensível não tem botão: não existe caminho na interface que revele dado do
- * Art. 11. Para os demais, revelar exige finalidade e justificativa, dura 60
- * segundos e volta a mascarar sozinho.
+ * Art. 11. Para os demais, revelar exige finalidade **catalogada** (C-03),
+ * justificativa e protocolo selecionado (T4-01), dura 60 segundos contados por
+ * relógio (C-05) e volta a mascarar sozinho.
  */
 export function CampoPII({ titularId, chave, rotulo, mascara, sensivel }: {
   titularId: string; chave: string; rotulo: string; mascara: string; sensivel: boolean;
 }) {
   const chamar = useSessao((s) => s.chamar);
+  const banco = useSessao((s) => s.banco);
+  const protocolo = useSessao((s) => s.protocoloSelecionado);
   const [aberto, setAberto] = useState(false);
   const [valor, setValor] = useState<string | null>(null);
+  const [expiraEm, setExpiraEm] = useState(0);
   const [restante, setRestante] = useState(0);
   const [finalidade, setFinalidade] = useState<Finalidade | ''>('');
   const [justificativa, setJustificativa] = useState('');
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
+  /**
+   * C-05 — a janela é um instante no futuro, não um contador que só anda
+   * enquanto a aba está viva. `setInterval` em aba inativa é estrangulado pelo
+   * navegador, e o valor ficava visível muito além dos 60 segundos anunciados.
+   * Aqui o tick só desenha; quem decide é o relógio.
+   */
+  useEffect(() => {
+    if (!expiraEm) return;
+    const tick = () => {
+      const falta = Math.max(0, Math.ceil((expiraEm - Date.now()) / 1000));
+      setRestante(falta);
+      if (falta === 0) {
+        setValor(null);
+        setExpiraEm(0);
+        if (timer.current) clearInterval(timer.current);
+      }
+    };
+    tick();
+    timer.current = setInterval(tick, 250);
+    return () => { if (timer.current) clearInterval(timer.current); };
+  }, [expiraEm]);
 
   if (sensivel) {
     return (
@@ -114,30 +141,34 @@ export function CampoPII({ titularId, chave, rotulo, mascara, sensivel }: {
     );
   }
 
+  /**
+   * C-03 — as finalidades ofertadas são as do catálogo, não uma lista fixa da
+   * tela. Campo fora do ROPA (C-17) ou sem finalidade registrada não recebe
+   * botão: o formulário deixa de oferecer o que a API vai recusar.
+   */
+  const meta = banco.cenario.titulares.find((t) => t.id === titularId)?.campos.find((c) => c.chave === chave);
+  const catalogado = meta?.campoCatalogoId
+    ? banco.cenario.campos.find((c) => c.id === meta.campoCatalogoId)
+    : undefined;
+  const finalidadesOfertadas = catalogado?.finalidadesCompativeis ?? [];
+  const revelavel = finalidadesOfertadas.length > 0;
+
+  const previa = redigir(justificativa);
+
   const confirmar = () => {
     const res = chamar<{ valor: string; expiraEmSegundos: number }>({
       metodo: 'POST',
       caminho: '/v1/pseudonyms/resolve',
       purpose: finalidade || undefined,
-      body: { titularId, campo: chave, justificativa },
+      body: { titularId, campo: chave, justificativa, protocolo },
     });
     if (res.status !== 200) return;
 
     setValor(res.body.valor);
-    setRestante(res.body.expiraEmSegundos);
+    setExpiraEm(Date.now() + res.body.expiraEmSegundos * 1000);
     setAberto(false);
     setJustificativa('');
     setFinalidade('');
-    timer.current = setInterval(() => {
-      setRestante((r) => {
-        if (r <= 1) {
-          if (timer.current) clearInterval(timer.current);
-          setValor(null);
-          return 0;
-        }
-        return r - 1;
-      });
-    }, 1000);
   };
 
   return (
@@ -146,7 +177,7 @@ export function CampoPII({ titularId, chave, rotulo, mascara, sensivel }: {
         <span className="dots">{valor ?? mascara}</span>
         {valor
           ? <span className="countdown">{restante}s</span>
-          : (
+          : revelavel && (
             <Permitido acao="revelar_pii">
               <button className="reveal" onClick={() => setAberto(true)}>revelar</button>
             </Permitido>
@@ -161,7 +192,7 @@ export function CampoPII({ titularId, chave, rotulo, mascara, sensivel }: {
             <button className="btn" onClick={() => setAberto(false)}>Cancelar</button>
             <button
               className="btn primary"
-              disabled={!finalidade || justificativa.trim().length < 20}
+              disabled={!finalidade || justificativa.trim().length < 20 || !protocolo}
               onClick={confirmar}
             >
               Revelar e registrar
@@ -169,15 +200,24 @@ export function CampoPII({ titularId, chave, rotulo, mascara, sensivel }: {
           </>}
         >
           <Nota tom="warn">
-            A tentativa é gravada no audit trail <b>antes</b> da resposta, com o seu nome, a finalidade
-            e os campos efetivamente exibidos. O valor volta a ficar mascarado em 60 segundos.
+            A tentativa é gravada no audit trail <b>antes</b> da resposta, com o seu nome, a finalidade,
+            o protocolo e os campos efetivamente exibidos. O valor volta a ficar mascarado em 60 segundos.
           </Nota>
+          {protocolo
+            ? <p className="hint" style={{ marginTop: 8 }}>Sob o protocolo <span className="mono">{protocolo}</span>.</p>
+            : <Nota tom="crit">Nenhuma solicitação selecionada. Escolha o protocolo na fila antes de revelar — é ele que amarra o acesso ao atendimento.</Nota>}
           <div className="field">
             <label htmlFor="rev-finalidade">Finalidade do acesso</label>
             <select id="rev-finalidade" value={finalidade} onChange={(e) => setFinalidade(e.target.value as Finalidade)}>
               <option value="">Selecione…</option>
-              {FINALIDADES.map((f) => <option key={f.valor} value={f.valor}>{f.rotulo}</option>)}
+              {finalidadesOfertadas.map((f) => (
+                <option key={f} value={f}>{f} — {GLOSSA_FINALIDADE[f]}</option>
+              ))}
             </select>
+            <span className="hint">
+              Finalidades registradas no catálogo para <span className="mono">{catalogado?.nome}</span>.
+              A rota recusa qualquer outra.
+            </span>
           </div>
           <div className="field">
             <label htmlFor="rev-justificativa">Justificativa (mínimo 20 caracteres)</label>
@@ -189,6 +229,14 @@ export function CampoPII({ titularId, chave, rotulo, mascara, sensivel }: {
             />
             <span className="hint">{justificativa.trim().length}/20</span>
           </div>
+          {/* C-04 — o texto gravado é mostrado antes de gravar. O trail é imutável:
+              descobrir depois que o CPF foi para lá não adianta nada. */}
+          {previa.houveRemocao && (
+            <Nota tom="warn">
+              A justificativa contém {resumoDaRedacao(previa.achados)} — será gravada assim:
+              {' '}<span className="mono">{previa.texto}</span>
+            </Nota>
+          )}
         </Modal>
       )}
     </>

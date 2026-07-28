@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act, cleanup } from '@testing-library/react'
 import { BancoMock } from '../src/mock/db';
 import { request } from '../src/mock/api';
 import { pode } from '../src/mock/permissoes';
+import { POLITICAS, POLITICA_PADRAO, politicaDe } from '../src/mock/politicas';
 import { CampoPII } from '../src/ui/primitivos';
 import T2 from '../src/screens/T2';
 import T4 from '../src/screens/T4';
@@ -43,7 +44,7 @@ describe('Regra 2 — hash de CPF não é anonimização (Art. 12)', () => {
   it('recusa categoria anonimizado com armazenamento em hash', () => {
     const res = chamar('engenharia', {
       metodo: 'POST', caminho: '/v1/catalog/validar',
-      body: { nome: 'cpf_sha', tipoArmazenado: 'hash', categoria: 'anonimizado', sensivel: false, baseLegal: 'execucao_contrato' },
+      body: { nome: 'cpf_sha', tipoArmazenado: 'hash', categoria: 'anonimizado', sensivel: false, baseLegal: 'execucao_contrato', finalidadesCompativeis: [] },
     });
     expect(res.status).toBe(422);
     expect((res.body as { erro: string }).erro).toContain('k-anonimato');
@@ -52,7 +53,7 @@ describe('Regra 2 — hash de CPF não é anonimização (Art. 12)', () => {
   it('aceita anonimizado quando o armazenamento é agregado', () => {
     const res = chamar('engenharia', {
       metodo: 'POST', caminho: '/v1/catalog/validar',
-      body: { nome: 'cesta_media', tipoArmazenado: 'agregado', categoria: 'anonimizado', sensivel: false, baseLegal: 'execucao_contrato' },
+      body: { nome: 'cesta_media', tipoArmazenado: 'agregado', categoria: 'anonimizado', sensivel: false, baseLegal: 'execucao_contrato', finalidadesCompativeis: [] },
     });
     expect(res.status).toBe(200);
   });
@@ -60,7 +61,9 @@ describe('Regra 2 — hash de CPF não é anonimização (Art. 12)', () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe('Regra 3 — revelar exige finalidade, justificativa e registro ANTES da resposta', () => {
-  const corpo = { titularId: 't1', campo: 'cpf', justificativa: 'Confirmação de identidade para o protocolo 2026-0731' };
+  // Adaptação de contrato do PR 2 (T4-01): a revelação passou a exigir o
+  // protocolo sob o qual acontece. O que estes testes provam continua igual.
+  const corpo = { titularId: 't1', campo: 'cpf', protocolo: '2026-0731', justificativa: 'Confirmação de identidade para o protocolo 2026-0731' };
 
   it('recusa sem X-Purpose', () => {
     const res = chamar('dpo', { metodo: 'POST', caminho: '/v1/pseudonyms/resolve', body: corpo });
@@ -101,7 +104,7 @@ describe('Regra 4 — dado sensível não é revelável em tela alguma', () => {
   it('a API recusa mesmo com finalidade e justificativa válidas', () => {
     const res = chamar('dpo', {
       metodo: 'POST', caminho: '/v1/pseudonyms/resolve', purpose: 'atendimento',
-      body: { titularId: 't1', campo: 'biometria', justificativa: 'Verificação de identidade solicitada pelo titular' },
+      body: { titularId: 't1', campo: 'biometria', protocolo: '2026-0731', justificativa: 'Verificação de identidade solicitada pelo titular' },
     });
     expect(res.status).toBe(403);
     expect((res.body as { erro: string }).erro).toContain('sensível');
@@ -172,7 +175,7 @@ describe('Regra 8 — transferência internacional exige mecanismo (Art. 33)', (
   it('recusa destino internacional sem mecanismo', () => {
     const res = chamar('engenharia', {
       metodo: 'POST', caminho: '/v1/catalog/validar',
-      body: { nome: 'perfil', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, baseLegal: 'execucao_contrato', internacional: true, mecanismo: 'nao_aplicavel' },
+      body: { nome: 'perfil', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, baseLegal: 'execucao_contrato', internacional: true, mecanismo: 'nao_aplicavel', finalidadesCompativeis: ['auditoria'] },
     });
     expect(res.status).toBe(422);
     expect((res.body as { erro: string }).erro).toContain('Art. 33');
@@ -181,7 +184,7 @@ describe('Regra 8 — transferência internacional exige mecanismo (Art. 33)', (
   it('aceita com cláusulas-padrão da ANPD', () => {
     const res = chamar('engenharia', {
       metodo: 'POST', caminho: '/v1/catalog/validar',
-      body: { nome: 'perfil', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, baseLegal: 'execucao_contrato', internacional: true, mecanismo: 'clausulas_padrao_anpd' },
+      body: { nome: 'perfil', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, baseLegal: 'execucao_contrato', internacional: true, mecanismo: 'clausulas_padrao_anpd', finalidadesCompativeis: ['auditoria'] },
     });
     expect(res.status).toBe(200);
   });
@@ -219,7 +222,7 @@ describe('Privacy by default na interface', () => {
 
   it('o DPO revela com justificativa e o valor volta a mascarar em 60 segundos', () => {
     vi.useFakeTimers();
-    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [], protocoloSelecionado: '2026-0731' });
     render(<CampoPII titularId="t1" chave="cpf" rotulo="CPF" mascara="•••.•••.•••-••" sensivel={false} />);
 
     fireEvent.click(screen.getByRole('button', { name: /revelar/i }));
@@ -471,5 +474,304 @@ describe('C-02 · invariante da rota que sai antes da guarda', () => {
         expect(pode(p, 'escrever'), `${p} busca titular mas não escreve`).toBe(true);
       }
     }
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PR 2 — Fluxo de atendimento e prova (C-03, C-04, C-05, C-17, T4-01…T4-05)
+// ═════════════════════════════════════════════════════════════════════════════
+
+const REVELA_CPF = {
+  metodo: 'POST' as const, caminho: '/v1/pseudonyms/resolve', purpose: 'atendimento' as const,
+  body: { titularId: 't1', campo: 'cpf', protocolo: '2026-0731', justificativa: 'Confirmação de identidade para o protocolo 2026-0731' },
+};
+
+describe('Política de resposta por rota (PR 1 → tabela declarativa)', () => {
+  it('toda rota alcançável tem política declarada — o padrão fecha, não abre', () => {
+    for (const p of POLITICAS) {
+      expect(p.nota.length, `${p.metodo} ${p.caminho}`).toBeGreaterThan(0);
+    }
+    // Rota nunca declarada cai no padrão: escrita, 403.
+    expect(politicaDe('POST', 'rota/inventada')).toBeNull();
+    expect(POLITICA_PADRAO.tipo).toBe('escrita');
+    expect(POLITICA_PADRAO.foraDeEscopo).toBe('403');
+    const res = chamar('auditor', { metodo: 'POST', caminho: '/v1/rota/inventada' });
+    expect(res.status).toBe(403);
+  });
+
+  it('só rotas que confirmam existência de titular respondem 404 uniforme', () => {
+    for (const p of POLITICAS) {
+      if (p.foraDeEscopo === '404_uniforme') {
+        expect(p.caminho.source, `${p.metodo} ${p.caminho}`).toContain('titulares');
+      }
+    }
+  });
+});
+
+describe('C-17 — campo revelável precisa estar no ROPA', () => {
+  it('todo campo exibível de todo cenário aponta para uma entrada do catálogo', () => {
+    for (const id of ['banco', 'varejo', 'midia']) {
+      const b = new BancoMock(id);
+      for (const t of b.cenario.titulares) {
+        for (const c of t.campos) {
+          const alvo = b.cenario.campos.find((x) => x.id === c.campoCatalogoId);
+          expect(alvo, `${id}/${t.id}/${c.chave} sem entrada no ROPA`).toBeDefined();
+        }
+      }
+    }
+  });
+
+  it('campo sem vínculo com o catálogo é recusado com 422, não revelado com aviso', () => {
+    const alvo = banco.cenario.titulares.find((t) => t.id === 't1')!.campos.find((c) => c.chave === 'cpf')!;
+    delete alvo.campoCatalogoId;
+    const res = chamar('dpo', REVELA_CPF);
+    expect(res.status).toBe(422);
+    expect((res.body as { erro: string }).erro).toContain('catálogo');
+    expect(JSON.stringify(res.body)).not.toContain('529.982.247-25');
+  });
+
+  it('validar inventário recusa campo sem finalidades declaradas — campo novo não nasce sem política', () => {
+    const semLista = chamar('engenharia', {
+      metodo: 'POST', caminho: '/v1/catalog/validar',
+      body: { nome: 'apelido', tipoArmazenado: 'bruto', categoria: 'pessoal', sensivel: false, baseLegal: 'execucao_contrato' },
+    });
+    expect(semLista.status).toBe(422);
+    expect((semLista.body as { erro: string }).erro).toContain('finalidades compatíveis');
+
+    // Lista vazia é declaração válida de "não revelável" — diferente de ausente.
+    const listaVazia = chamar('engenharia', {
+      metodo: 'POST', caminho: '/v1/catalog/validar',
+      body: { nome: 'apelido', tipoArmazenado: 'bruto', categoria: 'pessoal', sensivel: false, baseLegal: 'execucao_contrato', finalidadesCompativeis: [] },
+    });
+    expect(listaVazia.status).toBe(200);
+  });
+});
+
+describe('C-03 — a finalidade é confrontada com o catálogo', () => {
+  it('recusa finalidade que não consta para o campo, mesmo com justificativa boa', () => {
+    // `b-cpf` aceita atendimento, cobranca e auditoria — nunca seguranca.
+    const res = chamar('dpo', { ...REVELA_CPF, purpose: 'seguranca' });
+    expect(res.status).toBe(422);
+    expect((res.body as { erro: string }).erro).toContain('não consta no catálogo');
+    expect(JSON.stringify(res.body)).not.toContain('529.982.247-25');
+  });
+
+  it('lista vazia significa não revelável, jamais "qualquer uma"', () => {
+    const campo = banco.cenario.campos.find((c) => c.id === 'b-cpf')!;
+    campo.finalidadesCompativeis = [];
+    for (const purpose of ['atendimento', 'cobranca', 'auditoria', 'seguranca'] as const) {
+      expect(chamar('dpo', { ...REVELA_CPF, purpose }).status, purpose).toBe(422);
+    }
+  });
+
+  it('a recusa por finalidade incompatível é registrada como negada', () => {
+    const antes = banco.auditoria.length;
+    chamar('dpo', { ...REVELA_CPF, purpose: 'seguranca' });
+    const registro = banco.auditoria.at(-1)!;
+    expect(banco.auditoria.length).toBe(antes + 1);
+    expect(registro.resultado).toBe('negado');
+  });
+
+  it('o formulário oferece só as finalidades do catálogo — não uma lista fixa da tela', () => {
+    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [], protocoloSelecionado: '2026-0731' });
+    render(<CampoPII titularId="t1" chave="renda" rotulo="Renda declarada" mascara="R$ ••••,••" sensivel={false} />);
+    fireEvent.click(screen.getByRole('button', { name: /revelar/i }));
+    const opcoes = [...screen.getByLabelText(/finalidade/i).querySelectorAll('option')]
+      .map((o) => (o as HTMLOptionElement).value).filter(Boolean);
+    // b-renda: cobranca e auditoria. Atendimento não está catalogado para ele.
+    expect(opcoes).toEqual(['cobranca', 'auditoria']);
+  });
+});
+
+describe('C-04 — justificativa é redigida antes de entrar no log imutável', () => {
+  it('o CPF citado na justificativa não chega ao audit trail', () => {
+    const res = chamar('dpo', {
+      ...REVELA_CPF,
+      body: { ...REVELA_CPF.body, justificativa: 'Titular confirmou o CPF 529.982.247-25 por telefone hoje' },
+    });
+    expect(res.status).toBe(200);
+    const registro = banco.auditoria.at(-1)!;
+    expect(registro.justificativa).not.toContain('529.982.247-25');
+    expect(registro.justificativa).toContain('[CPF removido]');
+  });
+
+  it('o histórico de reclassificação de risco também é redigido', () => {
+    const risco = banco.cenario.riscos[0];
+    const res = chamar('dpo', {
+      metodo: 'PATCH', caminho: `/v1/risks/${risco.codigo}`,
+      body: { probabilidade: 2, impacto: 2, justificativa: 'Relato do titular ana.silva@exemplo.com sobre exposição indevida' },
+    });
+    expect(res.status).toBe(200);
+    expect(banco.reclassificacoes.at(-1)!.justificativa).not.toContain('ana.silva@exemplo.com');
+  });
+});
+
+describe('C-05 — o re-mascaramento é do relógio, não do contador da aba', () => {
+  it('o valor some ao passar dos 60 segundos, mesmo sem os ticks intermediários', () => {
+    vi.useFakeTimers();
+    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [], protocoloSelecionado: '2026-0731' });
+    render(<CampoPII titularId="t1" chave="cpf" rotulo="CPF" mascara="•••.•••.•••-••" sensivel={false} />);
+    fireEvent.click(screen.getByRole('button', { name: /revelar/i }));
+    fireEvent.change(screen.getByLabelText(/finalidade/i), { target: { value: 'atendimento' } });
+    fireEvent.change(screen.getByLabelText(/justificativa/i), {
+      target: { value: 'Confirmação de identidade para o protocolo 2026-0731' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /revelar e registrar/i }));
+    expect(screen.getByText('529.982.247-25')).toBeInTheDocument();
+
+    // Aba inativa: o relógio anda, os timers não disparam na cadência normal.
+    // O valor precisa sumir mesmo assim.
+    act(() => { vi.setSystemTime(Date.now() + 61_000); vi.advanceTimersByTime(300); });
+    expect(screen.queryByText('529.982.247-25')).toBeNull();
+    vi.useRealTimers();
+  });
+});
+
+describe('T4-01 — a revelação acontece sob um protocolo', () => {
+  it('sem protocolo selecionado, a revelação é recusada com 422', () => {
+    const res = chamar('dpo', { ...REVELA_CPF, body: { ...REVELA_CPF.body, protocolo: undefined } });
+    expect(res.status).toBe(422);
+    expect(JSON.stringify(res.body)).not.toContain('529.982.247-25');
+  });
+
+  it('protocolo de outro titular é recusado — é o defeito de contexto trocado', () => {
+    // 2026-0730 pertence a t2.
+    const res = chamar('dpo', { ...REVELA_CPF, body: { ...REVELA_CPF.body, protocolo: '2026-0730' } });
+    expect(res.status).toBe(422);
+    expect((res.body as { erro: string }).erro).toContain('não pertence');
+  });
+
+  it('o protocolo entra no registro e é selado no hash da cadeia', () => {
+    const res = chamar('dpo', REVELA_CPF);
+    expect(res.status).toBe(200);
+    const registro = banco.auditoria.at(-1)!;
+    expect(registro.protocolo).toBe('2026-0731');
+
+    // Trocar o protocolo sem recalcular o hash quebra a verificação: prova de
+    // que o campo está no payload, e não apenas guardado ao lado dele.
+    registro.protocolo = '2026-0730';
+    expect(banco.auditVerificar().integro).toBe(false);
+  });
+});
+
+describe('T4-02 — concluir o atendimento', () => {
+  it('a conclusão para o cronômetro e registra antes de responder', () => {
+    const antes = banco.auditoria.length;
+    const res = chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/requests/s1/concluir',
+      body: { desfecho: 'atendido', evidencia: 'Relação de destinatários enviada ao titular.' },
+    });
+    expect(res.status).toBe(200);
+    expect(banco.auditoria.length).toBe(antes + 1);
+    expect(banco.auditoria.at(-1)!.acao).toBe('SOLICITACAO_CONCLUIDA');
+
+    const s = banco.cenario.solicitacoes.find((x) => x.id === 's1')!;
+    expect(s.status).toBe('concluida');
+    expect(s.concluidaEmMs).toBeGreaterThan(0);
+  });
+
+  it('recusar sem fundamento é 422; com fundamento, muda o status para recusada', () => {
+    const semRazao = chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/requests/s1/concluir',
+      body: { desfecho: 'recusado_com_fundamento', evidencia: 'não dá' },
+    });
+    expect(semRazao.status).toBe(422);
+    expect(banco.cenario.solicitacoes.find((x) => x.id === 's1')!.status).toBe('em_analise');
+
+    const comRazao = chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/requests/s1/concluir',
+      body: { desfecho: 'recusado_com_fundamento', evidencia: 'Guarda fiscal obrigatória de 5 anos impede a eliminação agora.' },
+    });
+    expect(comRazao.status).toBe(200);
+    expect(banco.cenario.solicitacoes.find((x) => x.id === 's1')!.status).toBe('recusada');
+  });
+
+  it('se o audit trail falha, a solicitação continua aberta', () => {
+    banco.simularFalhaDeLog = true;
+    const res = chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/requests/s1/concluir',
+      body: { desfecho: 'atendido', evidencia: 'Pacote entregue.' },
+    });
+    expect(res.status).toBe(503);
+    expect(banco.cenario.solicitacoes.find((x) => x.id === 's1')!.status).toBe('em_analise');
+  });
+
+  it('concluir é ato do DPO — engenharia escreve, mas não encerra', () => {
+    expect(pode('engenharia', 'escrever')).toBe(true);
+    expect(pode('engenharia', 'concluir_solicitacao')).toBe(false);
+    const res = chamar('engenharia', {
+      metodo: 'POST', caminho: '/v1/requests/s1/concluir',
+      body: { desfecho: 'atendido', evidencia: 'Pacote entregue.' },
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('T4-03 — revisão de decisão automatizada deixa prova (Art. 20)', () => {
+  it('exige fundamento, registra e devolve resposta ao titular no mesmo ato', () => {
+    const curto = chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/decisoes/dec_44ab10/revisar',
+      body: { resultado: 'revertida', fundamento: 'ok' },
+    });
+    expect(curto.status).toBe(422);
+
+    const s3 = banco.cenario.solicitacoes.find((x) => x.id === 's3')!;
+    const mensagensAntes = s3.mensagens.length;
+    const res = chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/decisoes/dec_44ab10/revisar',
+      body: { resultado: 'revertida', fundamento: 'Comprovante de renda apresentado não estava na base na hora da decisão.' },
+    });
+    expect(res.status).toBe(200);
+    expect(banco.auditoria.at(-1)!.acao).toBe('DECISAO_REVISADA');
+    expect(banco.auditoria.at(-1)!.protocolo).toBe('2026-0729');
+    expect(s3.mensagens.length).toBe(mensagensAntes + 1);
+
+    const decisao = banco.cenario.titulares.find((t) => t.id === 't3')!.decisao!;
+    expect(decisao.revisao?.resultado).toBe('revertida');
+    expect(decisao.aprovado).toBe(true); // era false, foi revertida de fato
+  });
+
+  it('manter o resultado também exige fundamento — homologar não é revisar', () => {
+    const res = chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/decisoes/dec_44ab10/revisar',
+      body: { resultado: 'mantida', fundamento: '' },
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('rever decisão é ato do DPO; para os demais a rota recusa', () => {
+    for (const p of ['engenharia', 'produto', 'seguranca', 'auditor'] as Papel[]) {
+      expect(pode(p, 'revisar_decisao'), p).toBe(false);
+      const res = chamar(p, {
+        metodo: 'POST', caminho: '/v1/decisoes/dec_44ab10/revisar',
+        body: { resultado: 'mantida', fundamento: 'Decisão conferida e mantida após análise dos fatores.' },
+      });
+      expect(res.status, p).toBe(403);
+    }
+  });
+});
+
+describe('T4-05 — "atendidas no SLA" mede SLA', () => {
+  it('cada solicitação encerrada tem instante de conclusão comparável ao prazo', () => {
+    for (const id of ['banco', 'varejo', 'midia']) {
+      const b = new BancoMock(id);
+      const encerradas = b.cenario.solicitacoes.filter((s) => s.status === 'concluida' || s.status === 'recusada');
+      expect(encerradas.length, id).toBeGreaterThan(0);
+      for (const s of encerradas) {
+        expect(s.concluidaEmMs, `${id}/${s.protocolo} sem instante de conclusão`).toBeDefined();
+        // O rótulo exibido é derivado do instante: não dá para divergirem.
+        expect(s.concluidaEm).toBe(new Date(s.concluidaEmMs!).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }));
+      }
+    }
+  });
+
+  it('a conclusão registrada pela rota fica dentro ou fora do prazo conforme o relógio', () => {
+    const s2 = banco.cenario.solicitacoes.find((x) => x.id === 's2')!;
+    chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/requests/s2/concluir',
+      body: { desfecho: 'atendido', evidencia: 'Eliminação executada e verificada.' },
+    });
+    // s2 vence em 19 h: concluída agora, está no prazo.
+    expect(s2.concluidaEmMs!).toBeLessThanOrEqual(s2.prazoLimiteMs);
   });
 });

@@ -9,6 +9,8 @@ import type { Papel } from './types';
 export type Acao =
   | 'revelar_pii'
   | 'buscar_titular'
+  | 'concluir_solicitacao'
+  | 'revisar_decisao'
   | 'aprovar_ripd'
   | 'assinar_lia'
   | 'gerar_ripd'
@@ -35,7 +37,8 @@ export type Acao =
 const MAPA: Record<Papel, Acao[]> = {
   engenharia: ['gerar_ripd', 'ver_gate_detalhe', 'ver_pipeline_rotacao', 'ver_log_kms',
     'rodar_expurgo', 'ver_portal_titular', 'ver_total_itens', 'escrever'],
-  dpo: ['revelar_pii', 'buscar_titular', 'aprovar_ripd', 'assinar_lia', 'gerenciar_risco',
+  dpo: ['revelar_pii', 'buscar_titular', 'concluir_solicitacao', 'revisar_decisao',
+    'aprovar_ripd', 'assinar_lia', 'gerenciar_risco',
     'ver_portal_titular', 'ver_total_itens', 'rodar_expurgo', 'escrever'],
   produto: ['ver_portal_titular'],
   seguranca: ['ver_pipeline_rotacao', 'ver_log_kms', 'ver_gate_detalhe', 'ver_total_itens',

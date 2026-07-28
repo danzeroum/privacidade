@@ -1,7 +1,12 @@
 import { BancoMock, FalhaDeAuditoria, LogImutavel } from './db';
 import { pode } from './permissoes';
+import { POLITICA_PADRAO, politicaDe } from './politicas';
+import { redigir } from '../lib/redator';
 import { BASES_PARA_SENSIVEL } from './types';
-import type { BaseLegal, Campo, Categoria, Finalidade, Mecanismo, Papel, TipoArmazenado } from './types';
+import type {
+  BaseLegal, Campo, Categoria, DesfechoSolicitacao, Finalidade, Mecanismo, Papel,
+  ResultadoRevisao, TipoArmazenado,
+} from './types';
 
 export interface Req {
   metodo: 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -35,56 +40,58 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
   const body = (req.body ?? {}) as Record<string, any>;
 
   /**
-   * Verificar a integridade da cadeia é leitura: recomputa hashes e compara,
-   * sem mudar uma linha. Por isso sai antes da guarda de escrita — é
-   * justamente o que o auditor externo veio fazer, e prendê-lo a `escrever`
-   * tiraria dele o único ato que sustenta o parecer.
+   * A guarda lê a política declarada da rota (`mock/politicas.ts`) em vez de
+   * ser desviada por casos especiais. Antes, rotas com necessidade própria
+   * saíam antes dela e o motivo ficava na ordem das linhas do `switch` — uma
+   * lista de exceções, que cresce. Agora o motivo mora no dado, e a rota sem
+   * política declarada é recusada por padrão.
    *
-   * Decisão registrada para o PR 3: quando `verificar` passar a gravar
-   * `INTEGRIDADE_VERIFICADA` no trail (T6-01), o registro é consequência do
-   * sistema, não escalada do ator — a rota ganha a ação própria
+   * Duas consequências que valem nomear:
+   *
+   * `POST /v1/audit/verificar` é `leitura` porque recomputa hashes e compara,
+   * sem mudar uma linha. Decisão registrada para o PR 3: quando ela passar a
+   * gravar `INTEGRIDADE_VERIFICADA` (T6-01), o registro é consequência do
+   * sistema, não escalada do ator — ganha a ação própria
    * `verificar_integridade`, concedida a todos os papéis de leitura, e **não**
    * volta para dentro de `escrever`.
+   *
+   * `POST /v1/titulares/buscar` é `escrita` (grava no trail antes de responder)
+   * com `foraDeEscopo: '404_uniforme'`, porque um 403 ali confirmaria que a
+   * rota existe e que o pedido só falhou por permissão — o oráculo que a
+   * Regra 5 fecha.
    */
-  if (raiz === 'audit' && partes[1] === 'verificar') {
+  const politica = politicaDe(metodo, partes.join('/')) ?? POLITICA_PADRAO;
+
+  const recusaDeEscopo = (): Res<T> => (politica.foraDeEscopo === '404_uniforme'
+    ? erro(404, 'Não encontrado.',
+      'Fora de escopo responde igual a inexistente — 403 confirmaria a existência.')
+    : erro(403, 'Seu papel não alcança esta operação.',
+      `Política da rota: ${politica.nota}`)) as Res<T>;
+
+  if (politica.tipo === 'escrita' && !pode(papel, 'escrever')) {
+    registrarRecusaNaGuarda(banco, req, politica.nota);
+    return recusaDeEscopo();
+  }
+  if (politica.acao && !pode(papel, politica.acao)) {
+    registrarRecusaNaGuarda(banco, req, politica.nota);
+    return recusaDeEscopo();
+  }
+
+  if (metodo === 'POST' && raiz === 'audit' && partes[1] === 'verificar') {
     return ok(banco.auditVerificar()) as Res<T>;
   }
-
-  /**
-   * A busca por titular também sai antes da guarda genérica, por outro motivo:
-   * ela precisa responder **404 uniforme** a quem está fora de escopo. Caindo
-   * na guarda, um papel sem `escrever` receberia 403 — e o 403 confirmaria que
-   * a rota existe e que o pedido só falhou por permissão, reabrindo pela porta
-   * da guarda o oráculo que a Regra 5 fecha.
-   *
-   * Isto não é uma exceção como a que existia em `audit` (C-02): `buscar_titular`
-   * é estritamente mais restritiva que `escrever` — só o DPO a tem, e o DPO
-   * escreve. Nada alcança esta rota que não alcançaria a guarda.
-   */
   if (metodo === 'POST' && raiz === 'titulares' && partes[1] === 'buscar') {
     return buscarTitular<T>(banco, req);
-  }
-
-  // Papel sem `escrever` não alcança rota de escrita — inclusive as de auditoria.
-  // A exceção que existia aqui para `audit` deixava PATCH /v1/audit/{id} e
-  // POST /v1/audit/forjar ao alcance do auditor externo, invertendo o princípio
-  // do projeto: quem protegia era a interface (C-02).
-  if (metodo !== 'GET' && !pode(papel, 'escrever')) {
-    return erro(403, 'Seu papel tem acesso somente de leitura.',
-      'Papel sem a ação "escrever" não recebe rota de escrita — nem as de auditoria.') as Res<T>;
   }
 
   switch (`${metodo} ${raiz}`) {
     // ── REGRA 3 e 4 — revelação de PII ────────────────────────────────────
     case 'POST pseudonyms': {
       if (partes[1] !== 'resolve') break;
-      const { titularId, campo, justificativa } = body as { titularId: string; campo: string; justificativa: string };
+      const { titularId, campo, justificativa, protocolo } = body as {
+        titularId: string; campo: string; justificativa: string; protocolo?: string;
+      };
 
-      if (!pode(papel, 'revelar_pii')) {
-        registrarNegativa(banco, ator, papel, campo, 'papel sem permissão de reidentificação');
-        return erro(403, 'Seu papel não reidentifica dado pessoal.',
-          'Só o DPO tem a ação revelar_pii — e na interface o botão sequer é renderizado.') as Res<T>;
-      }
       if (!req.purpose) {
         registrarNegativa(banco, ator, papel, campo, 'sem X-Purpose');
         return erro(403, 'Finalidade não declarada no cabeçalho X-Purpose.',
@@ -102,16 +109,71 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         return erro(403, `${meta.rotulo} é dado sensível e não é revelável em nenhuma tela.`,
           'Art. 11: dado sensível só existe como prova de que existe, a base legal e a data de destruição.') as Res<T>;
       }
+
+      /**
+       * C-17 — fail-closed: campo exibível que não está no ROPA não é
+       * revelável. Se existe caminho de leitura fora do inventário, o
+       * inventário deixa de ser a fonte da verdade — que é o que o resto do
+       * projeto inteiro sustenta.
+       */
+      const catalogado = meta.campoCatalogoId
+        ? banco.cenario.campos.find((c) => c.id === meta.campoCatalogoId)
+        : undefined;
+      if (!catalogado) {
+        registrarNegativa(banco, ator, papel, campo, 'campo fora do catálogo');
+        return erro(422, `O campo ${meta.rotulo} não está no catálogo de dados.`,
+          'C-17: campo sem entrada no ROPA não tem finalidade, base legal nem prazo declarados — e por isso não é revelável.') as Res<T>;
+      }
+
+      /**
+       * C-03 — a finalidade declarada é confrontada com as finalidades
+       * catalogadas do campo. Lista vazia significa não revelável, jamais
+       * "qualquer uma": campo que nasce sem política não ganha política por
+       * omissão.
+       */
+      if (!catalogado.finalidadesCompativeis.includes(req.purpose)) {
+        registrarNegativa(banco, ator, papel, campo, `finalidade ${req.purpose} incompatível`);
+        const registradas = catalogado.finalidadesCompativeis.length > 0
+          ? `As registradas para ele são: ${catalogado.finalidadesCompativeis.join(', ')}.`
+          : 'Ele não tem nenhuma finalidade de acesso registrada.';
+        return erro(422,
+          `A finalidade "${req.purpose}" não consta no catálogo para ${catalogado.nome}. ${registradas}`,
+          'Art. 6º, I: a finalidade do acesso precisa ser uma das declaradas no inventário para aquele campo.') as Res<T>;
+      }
+
       if (!justificativa || justificativa.trim().length < 20) {
         return erro(422, 'A justificativa precisa de ao menos 20 caracteres.',
           'Justificativa curta não sustenta o acesso em auditoria.') as Res<T>;
       }
 
+      /**
+       * T4-01 — sem protocolo não há revelação. É o que amarra o acesso ao
+       * objeto de trabalho: sem ele, o registro diria quem acessou e por quê,
+       * mas não sob qual atendimento — e um acesso sem atendimento é um acesso
+       * sem pedido do titular.
+       */
+      if (!protocolo) {
+        registrarNegativa(banco, ator, papel, campo, 'sem protocolo selecionado');
+        return erro(422, 'Selecione a solicitação antes de revelar o dado.',
+          'T4-01: a revelação acontece sob um protocolo, e é ele que entra no registro.') as Res<T>;
+      }
+      const solicitacao = banco.cenario.solicitacoes.find((s) => s.protocolo === protocolo);
+      if (!solicitacao || solicitacao.titularId !== titularId) {
+        registrarNegativa(banco, ator, papel, campo, 'protocolo de outro titular');
+        return erro(422, 'O protocolo selecionado não pertence a este titular.',
+          'T4-01: revelar sob o protocolo de outra pessoa é o defeito que esta verificação fecha.') as Res<T>;
+      }
+
+      // C-04 — a redação acontece antes do append, não na exibição: o trail é
+      // imutável, e o que entra nele fica.
+      const redacao = redigir(justificativa);
+
       // REGRA 3 — o log vem ANTES da resposta. Se a gravação falha, a resposta falha.
       try {
         banco.auditAppend({
           ator, atorPapel: papel, acao: 'CAMPO_REVELADO', recursoTipo: 'campo',
-          recursoId: `${titularId}/${campo}`, finalidade: req.purpose, justificativa, campos: [campo],
+          recursoId: `${titularId}/${campo}`, finalidade: req.purpose,
+          justificativa: redacao.texto, protocolo, campos: [campo],
         });
       } catch (e) {
         const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar o acesso.';
@@ -122,6 +184,8 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         valor: titular.segredos[campo] ?? '—',
         expiraEmSegundos: 60,
         campos: [campo],
+        justificativaGravada: redacao.texto,
+        houveRedacao: redacao.houveRemocao,
       }) as Res<T>;
     }
 
@@ -156,8 +220,23 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
       const c = body as {
         nome: string; tipoArmazenado: TipoArmazenado; categoria: Categoria;
         sensivel: boolean; baseLegal: BaseLegal; internacional?: boolean; mecanismo?: Mecanismo;
+        finalidadesCompativeis?: Finalidade[];
       };
       const erros: string[] = [];
+
+      /**
+       * C-03, segunda condição fail-closed. A revelação já recusa campo cuja
+       * lista de finalidades não cobre o propósito declarado; se a validação do
+       * inventário aceitasse campo sem a lista, todo campo novo nasceria sem
+       * política e a recusa viraria letra morta na entrada.
+       *
+       * Lista ausente e lista vazia são coisas diferentes aqui: ausente é erro
+       * de preenchimento e é recusada; vazia é declaração deliberada de "não
+       * revelável" e passa, porque `includes` de lista vazia é sempre falso.
+       */
+      if (!Array.isArray(c.finalidadesCompativeis)) {
+        erros.push('Campo sem finalidades compatíveis declaradas não entra no ROPA. Para um campo que não deve ser revelado, declare a lista vazia — ausência não é o mesmo que "nenhuma".');
+      }
 
       // REGRA 2 — hash de CPF não é anonimização (Art. 12).
       if (c.categoria === 'anonimizado' && c.tipoArmazenado !== 'agregado') {
@@ -314,9 +393,11 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         return erro(422, 'A reclassificação exige justificativa de ao menos 20 caracteres.',
           'O histórico é imutável: a justificativa fica anexada para sempre.') as Res<T>;
       }
+      // C-04 — o histórico de reclassificação é imutável pelas mesmas razões que
+      // o trail. Redigir antes de guardar, não na hora de exibir.
       banco.reclassificacoes.push({
         codigo, de: { p: risco.probabilidade, i: risco.impacto }, para: { p: probabilidade, i: impacto },
-        justificativa, ator, quando: new Date().toISOString(),
+        justificativa: redigir(justificativa).texto, ator, quando: new Date().toISOString(),
       });
       risco.probabilidade = probabilidade;
       risco.impacto = impacto;
@@ -324,7 +405,110 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
       return ok({ codigo, probabilidade, impacto }) as Res<T>;
     }
 
+    /**
+     * T4-03 — revisão de decisão automatizada (Art. 20).
+     *
+     * O direito à revisão não é o direito de ver o seletor: é o direito à
+     * decisão revista por alguém que responde por ela. Por isso a rota exige
+     * fundamento, grava antes de responder e devolve a resposta ao titular pelo
+     * mesmo ato — a devolutiva não fica dependendo de o DPO lembrar de escrever
+     * depois.
+     */
+    case 'POST decisoes': {
+      if (partes[2] !== 'revisar') break;
+      const titular = banco.cenario.titulares.find((t) => t.decisao?.id === partes[1]);
+      const decisao = titular?.decisao;
+      if (!titular || !decisao) return erro(404, 'Não encontrado.') as Res<T>;
+      if (decisao.revisao) {
+        return erro(409, 'Esta decisão já foi revisada.',
+          'A revisão é ato único e registrado: rever de novo é solicitação nova do titular.') as Res<T>;
+      }
+
+      const resultado = String(body.resultado ?? '') as ResultadoRevisao;
+      if (!['mantida', 'revertida', 'ajustada'].includes(resultado)) {
+        return erro(422, 'Resultado de revisão inválido.') as Res<T>;
+      }
+      // Manter o resultado do modelo também é decisão humana, e também precisa
+      // de razão: sem ela a revisão é homologação com outro nome.
+      if (String(body.fundamento ?? '').trim().length < 20) {
+        return erro(422, 'A revisão exige fundamento de ao menos 20 caracteres.',
+          'Art. 20, §1º: o titular pode pedir os critérios da decisão — fundamento vazio não é critério.') as Res<T>;
+      }
+
+      const fundamento = redigir(String(body.fundamento)).texto;
+      const solicitacao = banco.cenario.solicitacoes.find(
+        (s) => s.titularId === titular.id && s.direito === 'revisao_decisao',
+      );
+      try {
+        banco.auditAppend({
+          ator, atorPapel: papel, acao: 'DECISAO_REVISADA', recursoTipo: 'decisao_automatizada',
+          recursoId: decisao.id, protocolo: solicitacao?.protocolo,
+          justificativa: fundamento, campos: [resultado],
+        });
+      } catch (e) {
+        const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a revisão.';
+        return erro(503, msg, 'Sem prova no trail, a revisão não aconteceu.') as Res<T>;
+      }
+
+      decisao.revisao = { resultado, fundamento, revisadaPor: ator, quando: new Date().toISOString() };
+      if (resultado === 'revertida') decisao.aprovado = !decisao.aprovado;
+      // A devolutiva sai do mesmo ato — o titular não depende de uma segunda ação.
+      solicitacao?.mensagens.push({
+        remetente: 'dpo',
+        corpo: `Revisão concluída: decisão ${resultado}. Fundamento: ${fundamento}`,
+        quando: 'agora',
+      });
+      return ok({
+        decisaoId: decisao.id, resultado, aprovado: decisao.aprovado,
+        devolutivaEnviada: Boolean(solicitacao),
+      }) as Res<T>;
+    }
+
+    /**
+     * T4-02 — o ato que para o cronômetro. Sem ele, o SLA corre para sempre e
+     * a fila nunca fecha: a tela media prazo de coisas que ninguém podia
+     * terminar.
+     */
     case 'POST requests': {
+      if (partes[2] === 'concluir') {
+        const s = banco.cenario.solicitacoes.find((x) => x.id === partes[1] || x.protocolo === partes[1]);
+        if (!s) return erro(404, 'Não encontrado.') as Res<T>;
+        if (s.status === 'concluida') {
+          return erro(409, `O protocolo ${s.protocolo} já foi concluído.`) as Res<T>;
+        }
+
+        const desfecho = String(body.desfecho ?? '') as DesfechoSolicitacao;
+        const evidencia = String(body.evidencia ?? '');
+        if (!['atendido', 'atendido_parcialmente', 'recusado_com_fundamento'].includes(desfecho)) {
+          return erro(422, 'Desfecho inválido.') as Res<T>;
+        }
+        // Recusar exige fundamento: negar um direito sem dizer por quê não é
+        // decisão, é silêncio com aparência de decisão.
+        if (desfecho === 'recusado_com_fundamento' && evidencia.trim().length < 20) {
+          return erro(422, 'Recusa exige fundamento de ao menos 20 caracteres.',
+            'Art. 18, §4º: a negativa é comunicada com a razão — sem ela o titular não tem o que contestar.') as Res<T>;
+        }
+
+        const fundamento = redigir(evidencia).texto;
+        try {
+          banco.auditAppend({
+            ator, atorPapel: papel, acao: 'SOLICITACAO_CONCLUIDA', recursoTipo: 'solicitacao',
+            recursoId: s.protocolo, protocolo: s.protocolo, justificativa: fundamento,
+            campos: [desfecho],
+          });
+        } catch (e) {
+          const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a conclusão.';
+          return erro(503, msg, 'Sem registro não há conclusão.') as Res<T>;
+        }
+
+        const agora = Date.now();
+        s.status = desfecho === 'recusado_com_fundamento' ? 'recusada' : 'concluida';
+        s.desfecho = desfecho;
+        s.fundamento = fundamento;
+        s.concluidaEmMs = agora;
+        s.concluidaEm = new Date(agora).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+        return ok({ protocolo: s.protocolo, status: s.status, dentroDoPrazo: agora <= s.prazoLimiteMs }) as Res<T>;
+      }
       if (partes[2] !== 'mensagens') break;
       const s = banco.cenario.solicitacoes.find((x) => x.id === partes[1]);
       if (!s) return erro(404, 'Não encontrado.') as Res<T>;
@@ -373,10 +557,6 @@ function buscarTitular<T>(banco: BancoMock, req: Req): Res<T> {
   const naoEncontrado = erro(404, 'Não encontrado.',
     'Busca fora do escopo do ator responde igual a busca sem resultado — 403 confirmaria a existência.');
 
-  if (!pode(papel, 'buscar_titular')) {
-    registrarBuscaNegada(banco, ator, papel, cpfHash, 'papel sem a ação buscar_titular');
-    return naoEncontrado as Res<T>;
-  }
   if (!req.purpose) {
     registrarBuscaNegada(banco, ator, papel, cpfHash, 'sem X-Purpose');
     return erro(403, 'Finalidade não declarada no cabeçalho X-Purpose.',
@@ -402,6 +582,21 @@ function buscarTitular<T>(banco: BancoMock, req: Req): Res<T> {
   const titular = banco.cenario.titulares.find((t) => t.cpfHash === cpfHash);
   if (!titular) return naoEncontrado as Res<T>;
   return ok({ id: titular.id, pseudonimo: `hmac:${cpfHash.slice(0, 4)}…${cpfHash.slice(-4)}` }) as Res<T>;
+}
+
+/** A guarda recusou o pedido: registra sem deixar a negativa derrubar a resposta. */
+function registrarRecusaNaGuarda(banco: BancoMock, req: Req, politicaNota: string) {
+  if (req.metodo === 'POST' && req.caminho.includes('titulares/buscar')) {
+    const cpfHash = String((req.body as { cpfHash?: string } | undefined)?.cpfHash ?? '');
+    registrarBuscaNegada(banco, req.ator, req.papel, cpfHash, 'papel sem a ação buscar_titular');
+    return;
+  }
+  if (req.metodo === 'POST' && req.caminho.includes('pseudonyms/resolve')) {
+    const campo = String((req.body as { campo?: string } | undefined)?.campo ?? '—');
+    registrarNegativa(banco, req.ator, req.papel, campo, 'papel sem permissão de reidentificação');
+    return;
+  }
+  void politicaNota;
 }
 
 /** A tentativa recusada também entra no trail — negativa sem rastro não é controle. */

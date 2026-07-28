@@ -10,6 +10,8 @@ export interface EntradaAudit {
   recursoId: string;
   finalidade?: Finalidade;
   justificativa?: string;
+  /** T4-01 — o protocolo sob o qual o acesso aconteceu. Entra no payload do hash. */
+  protocolo?: string;
   campos?: string[];
   resultado?: 'sucesso' | 'negado' | 'erro';
 }
@@ -63,7 +65,7 @@ export class BancoMock {
     return sha256([
       l.hashAnterior ?? 'genesis',
       l.ocorridoEm, l.ator, l.acao, l.recursoTipo, l.recursoId,
-      l.finalidade ?? '-', l.campos.join(','), l.resultado,
+      l.finalidade ?? '-', l.protocolo ?? '-', l.campos.join(','), l.resultado,
     ].join('|'));
   }
 
@@ -92,6 +94,7 @@ export class BancoMock {
       recursoId: e.recursoId,
       finalidade: e.finalidade,
       justificativa: e.justificativa,
+      protocolo: e.protocolo,
       campos: e.campos ?? [],
       resultado: e.resultado ?? 'sucesso',
       hashAnterior: anterior ? anterior.hash : null,
@@ -135,8 +138,8 @@ export class BancoMock {
       const esperado = this.calcularHash({
         id: l.id, ocorridoEm: l.ocorridoEm, ator: l.ator, atorPapel: l.atorPapel,
         acao: l.acao, recursoTipo: l.recursoTipo, recursoId: l.recursoId,
-        finalidade: l.finalidade, justificativa: l.justificativa, campos: l.campos,
-        resultado: l.resultado, hashAnterior: anterior,
+        finalidade: l.finalidade, justificativa: l.justificativa, protocolo: l.protocolo,
+        campos: l.campos, resultado: l.resultado, hashAnterior: anterior,
       });
       if (esperado !== l.hash && divergencia === null) divergencia = l.id;
       anterior = l.hash;

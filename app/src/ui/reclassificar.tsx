@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Modal, Nota } from './primitivos';
 import { useSessao } from '../store/sessao';
+import { redigir, resumoDaRedacao } from '../lib/redator';
 import type { Risco } from '../mock/types';
 
 /**
@@ -15,6 +16,7 @@ export function ModalReclassificar({ risco, p, i, aoFechar }: {
   const [justificativa, setJustificativa] = useState('');
   const [prob, setProb] = useState(p);
   const [imp, setImp] = useState(i);
+  const previa = redigir(justificativa);
 
   const aplicar = () => {
     const res = chamar({
@@ -67,6 +69,14 @@ export function ModalReclassificar({ risco, p, i, aoFechar }: {
         />
         <span className="hint">{justificativa.trim().length}/20</span>
       </div>
+      {/* C-04 — mesma prévia da revelação: o que vai para o histórico imutável
+          é mostrado antes de ir, porque depois não sai mais. */}
+      {previa.houveRemocao && (
+        <Nota tom="warn">
+          A justificativa contém {resumoDaRedacao(previa.achados)} — será registrada assim:
+          {' '}<span className="mono">{previa.texto}</span>
+        </Nota>
+      )}
     </Modal>
   );
 }
