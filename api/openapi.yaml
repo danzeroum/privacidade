@@ -1,0 +1,783 @@
+openapi: 3.1.0
+info:
+  title: Lastro — API de governança de privacidade
+  version: "1.0.0"
+  description: |
+    Contrato que liga os 12 artefatos de privacidade à plataforma.
+
+    Regras válidas para toda a API:
+
+    * **`X-Purpose` é obrigatório** em qualquer rota que toque dado de titular. Ausência devolve 403
+      e grava `ACESSO_SEM_FINALIDADE` no audit trail.
+    * **404, nunca 403**, para recurso de titular fora do escopo do ator — 403 confirmaria a existência.
+    * **`totalItems` é omitido** para papéis não confiáveis; a paginação é por cursor (anti-enumeração).
+    * **Toda leitura de dado pessoal grava antes de responder.** Se o log falha, a resposta falha.
+    * Nenhum corpo de requisição ou resposta carrega CPF, e-mail ou cartão em texto claro, exceto o
+      retorno de `/pseudonyms/resolve`, que é efêmero e integralmente auditado.
+
+servers:
+  - url: https://lastro.internal/v1
+
+security:
+  - oidc: []
+
+tags:
+  - name: catálogo
+    description: Artefato 1 — data-inventory.*.yaml
+  - name: threat model
+    description: Artefato 2 — threat-model.md
+  - name: gates
+    description: Artefatos 3 e 4 — privacy-ci-gate.yml, architecture-review.yml
+  - name: ripd
+    description: Artefatos 5 e 12 — ripd-triage.sh, parecer-tecnico.md
+  - name: telemetria
+    description: Artefatos 6 e 10 — privacy-redactor.ts, metrics-collector.py
+  - name: pseudônimos
+    description: Artefato 7 — pseudonymizer.ts
+  - name: expurgo
+    description: Artefato 8 — expurgo-permanente.py
+  - name: kms
+    description: Artefato 9 — kms-rotation.yml
+  - name: riscos
+    description: Artefato 11 — risk-matrix.csv
+  - name: lia
+  - name: direitos
+
+paths:
+  /catalog/inventories:
+    post:
+      tags: [catálogo]
+      summary: Recebe um data-inventory.yaml versionado (webhook de push)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InventarioEntrada' }
+      responses:
+        '201':
+          description: Versão importada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InventarioResultado' }
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+
+  /catalog/inventories:validate:
+    post:
+      tags: [catálogo]
+      summary: Valida sem persistir e devolve o diff contra a versão vigente
+      description: Alimenta o drag-and-drop da tela T2.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InventarioEntrada' }
+      responses:
+        '200':
+          description: Resultado da validação com diff
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InventarioResultado' }
+
+  /catalog/fields:
+    get:
+      tags: [catálogo]
+      summary: ROPA vivo — campos catalogados com filtros da tela T2
+      parameters:
+        - { name: base_legal, in: query, schema: { $ref: '#/components/schemas/BaseLegal' } }
+        - { name: sensivel, in: query, schema: { type: boolean } }
+        - { name: transferencia_internacional, in: query, schema: { type: boolean } }
+        - { name: retencao_max_dias, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Página de campos
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, hasMore]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Campo' }
+                  hasMore: { type: boolean }
+                  cursor: { type: string }
+                  totalItems:
+                    type: integer
+                    description: Presente apenas para papéis dpo, seguranca e auditor_externo.
+
+  /threat-models/{repo}:
+    parameters:
+      - { name: repo, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [threat model]
+      summary: Threat model LINDDUN do repositório
+      responses:
+        '200':
+          description: Modelo com diagrama e ameaças
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ThreatModel' }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+    put:
+      tags: [threat model]
+      summary: Grava o modelo e devolve o markdown para commit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ThreatModel' }
+      responses:
+        '200':
+          description: Markdown pronto para o repositório
+          content:
+            text/markdown:
+              schema: { type: string }
+
+  /gates/runs:
+    post:
+      tags: [gates]
+      summary: Registra a execução de um gate de privacidade
+      description: Chamado por privacy-ci-gate.yml e architecture-review.yml.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GateRun' }
+      responses:
+        '201':
+          description: Execução registrada com as mensagens já traduzidas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  findings:
+                    type: array
+                    items: { $ref: '#/components/schemas/GateFinding' }
+    get:
+      tags: [gates]
+      summary: Execuções recentes — alimenta os cartões da tela T1
+      parameters:
+        - { name: desde, in: query, schema: { type: string, format: date-time } }
+        - { name: bloqueou_merge, in: query, schema: { type: boolean } }
+      responses:
+        '200':
+          description: Lista de execuções
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/GateRun' }
+
+  /ripds/triage:
+    post:
+      tags: [ripd]
+      summary: Recebe o ripd-report.json do ripd-triage.sh
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [head_sha, triggers_acionados, bloquear_merge]
+              properties:
+                head_sha: { type: string }
+                pr_numero: { type: integer }
+                bloquear_merge: { type: boolean }
+                triggers_acionados:
+                  type: array
+                  items: { $ref: '#/components/schemas/RipdTrigger' }
+      responses:
+        '201':
+          description: RIPD aberto em rascunho quando há gatilho crítico
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ripd_id: { type: string, format: uuid }
+                  codigo: { type: string, examples: ['RIPD-2026-014'] }
+                  bloqueia_merge: { type: boolean }
+
+  /ripds/{id}/render:
+    post:
+      tags: [ripd]
+      summary: Renderiza o RIPD.md a partir do template parecer-tecnico.md
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Documento renderizado e commitado no PR
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documento_uri: { type: string }
+                  documento_hash: { type: string }
+                  commit_sha: { type: string }
+
+  /ripds/{id}/approve:
+    post:
+      tags: [ripd]
+      summary: Aprovação do DPO — libera o status check no GitHub
+      description: |
+        A aprovação é vinculada ao `head_sha` avaliado. Um push posterior invalida a aprovação e o
+        bloqueio volta.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decisao, parecer, head_sha]
+              properties:
+                decisao: { type: string, enum: [aprovado, reprovado, aprovado_com_ressalva] }
+                parecer: { type: string, minLength: 20 }
+                head_sha: { type: string }
+      responses:
+        '200':
+          description: Decisão registrada e assinada
+        '403':
+          description: Ator sem papel de DPO
+
+  /pseudonyms/resolve:
+    post:
+      tags: [pseudônimos]
+      summary: Reidentifica um pseudônimo HMAC
+      description: |
+        Exige `X-Purpose` e justificativa. A tentativa é gravada no audit trail **antes** da resolução.
+        O valor devolvido tem validade de exibição de 60 segundos e nunca é cacheável.
+        Campos marcados como sensíveis são recusados por esta rota em qualquer circunstância.
+      parameters:
+        - { $ref: '#/components/parameters/Purpose' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, campo, justificativa]
+              properties:
+                token: { type: string }
+                campo: { type: string, examples: ['cpf'] }
+                justificativa: { type: string, minLength: 20 }
+      responses:
+        '200':
+          description: Valor resolvido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valor: { type: string }
+                  expira_em: { type: string, format: date-time }
+                  audit_id: { type: integer }
+          headers:
+            Cache-Control:
+              schema: { type: string, const: 'no-store' }
+        '403':
+          description: Finalidade não autorizada, campo sensível, ou justificativa insuficiente
+
+  /purge/runs:
+    post:
+      tags: [expurgo]
+      summary: Registra a execução diária do expurgo-permanente.py
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExpurgoRun' }
+      responses:
+        '201': { description: Execução registrada }
+
+  /purge/runs/{id}/verify:
+    post:
+      tags: [expurgo]
+      summary: Recalcula os hashes do lote e confirma a integridade
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Resultado da verificação
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  integro: { type: boolean }
+                  divergencias:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        tabela: { type: string }
+                        esperado: { type: string }
+                        encontrado: { type: string }
+
+  /kms/keys:
+    get:
+      tags: [kms]
+      summary: Chaves, status e dependências
+      responses:
+        '200':
+          description: Lista de chaves
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ChaveKms' }
+
+  /kms/rotations/{id}/steps:
+    post:
+      tags: [kms]
+      summary: Reporta o progresso de uma etapa do kms-rotation.yml
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [etapa, status]
+              properties:
+                etapa: { type: string, enum: [gerar, parameter_store, canary_5, recriptografar, revogar_antiga] }
+                status: { type: string, enum: [pendente, executando, concluida, falhou] }
+                progresso: { type: number, minimum: 0, maximum: 100 }
+                detalhe: { type: string }
+      responses:
+        '200': { description: Etapa atualizada }
+
+  /metrics/snapshots:
+    post:
+      tags: [telemetria]
+      summary: Recebe o docs/metrics/latest.json do metrics-collector.py
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '201': { description: Snapshot gravado }
+    get:
+      tags: [telemetria]
+      summary: Séries para os cartões e tendências da tela T1
+      parameters:
+        - { name: metrica, in: query, schema: { type: string } }
+        - { name: desde, in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Série temporal
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Metrica' }
+
+  /telemetry/redaction:
+    post:
+      tags: [telemetria]
+      summary: Contadores agregados do privacy-redactor.ts
+      description: |
+        Recebe apenas **contagens** por serviço e por padrão detectado. O valor redigido nunca
+        trafega — enviá-lo transformaria a telemetria em um segundo vazamento.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [servico, janela, ocorrencias]
+              properties:
+                servico: { type: string }
+                janela: { type: string, examples: ['2026-07-28T00:00:00Z/PT1H'] }
+                ocorrencias:
+                  type: object
+                  additionalProperties: { type: integer }
+      responses:
+        '202': { description: Aceito }
+
+  /risks:
+    get:
+      tags: [riscos]
+      summary: Matriz de riscos
+      responses:
+        '200':
+          description: Lista de riscos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Risco' }
+            text/csv:
+              schema: { type: string, description: 'Round-trip com docs/risk-matrix.csv' }
+
+  /risks/{id}:
+    patch:
+      tags: [riscos]
+      summary: Reclassifica um risco
+      description: A justificativa é obrigatória e o histórico é imutável.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [justificativa]
+              properties:
+                probabilidade: { type: integer, minimum: 1, maximum: 5 }
+                impacto: { type: integer, minimum: 1, maximum: 5 }
+                justificativa: { type: string, minLength: 20 }
+      responses:
+        '200': { description: Reclassificação registrada }
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+
+  /lias/{id}/render:
+    post:
+      tags: [lia]
+      summary: Gera o LIA.md com timestamp, hash e assinatura do DPO
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Documento assinado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documento_uri: { type: string }
+                  documento_hash: { type: string }
+                  assinatura: { type: string }
+        '409':
+          description: LIA incompleta — alternativa sem justificativa ou balanceamento ausente
+
+  /requests:
+    get:
+      tags: [direitos]
+      summary: Fila de solicitações de titular com cronômetro de SLA
+      parameters:
+        - { name: status, in: query, schema: { type: string } }
+        - { name: alerta_dpo, in: query, schema: { type: boolean, description: 'menos de 24h para o prazo' } }
+      responses:
+        '200':
+          description: Fila
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Solicitacao' }
+
+  /requests/{id}/messages:
+    post:
+      tags: [direitos]
+      summary: Mensagem entre titular e DPO dentro da plataforma
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [corpo]
+              properties:
+                corpo:
+                  type: string
+                  description: Recusado se contiver CPF em texto claro.
+      responses:
+        '201': { description: Mensagem enviada }
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+
+  /audit:
+    get:
+      tags: [direitos]
+      summary: Audit trail append-only
+      parameters:
+        - { name: ator, in: query, schema: { type: string } }
+        - { name: acao, in: query, schema: { type: string } }
+        - { name: recurso_id, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Linhas do log
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditLinha' }
+            text/csv:
+              schema: { type: string }
+
+  /audit/verify:
+    post:
+      tags: [direitos]
+      summary: Recalcula a cadeia de hashes e devolve as divergências
+      responses:
+        '200':
+          description: Resultado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  blocos: { type: integer }
+                  integro: { type: boolean }
+                  primeira_divergencia: { type: integer, nullable: true }
+
+components:
+  securitySchemes:
+    oidc:
+      type: openIdConnect
+      openIdConnectUrl: https://sso.internal/.well-known/openid-configuration
+
+  parameters:
+    Purpose:
+      name: X-Purpose
+      in: header
+      required: true
+      description: Finalidade declarada do acesso. Deve constar no claim `purposes[]` do token.
+      schema:
+        type: string
+        enum: [atendimento, cobranca, auditoria, seguranca]
+
+  responses:
+    NaoEncontrado:
+      description: |
+        Não encontrado. Devolvido também quando o recurso existe mas está fora do escopo do ator —
+        um 403 confirmaria a existência.
+    ErroValidacao:
+      description: Payload inválido
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              erro: { type: string }
+              campos:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    campo: { type: string }
+                    motivo: { type: string }
+
+  schemas:
+    BaseLegal:
+      type: string
+      enum: [consentimento, obrigacao_legal, politica_publica, pesquisa, execucao_contrato,
+             exercicio_direitos, protecao_vida, tutela_saude, legitimo_interesse, protecao_credito]
+
+    Campo:
+      type: object
+      required: [nome, categoria, base_legal, retencao]
+      properties:
+        nome: { type: string }
+        sistema: { type: string }
+        dataset: { type: string }
+        tipo_armazenado: { type: string, enum: [bruto, hash, hmac, criptografado, agregado] }
+        categoria: { type: string, enum: [anonimizado, pseudonimizado, pessoal, sensivel] }
+        sensivel: { type: boolean }
+        finalidade: { type: string }
+        base_legal: { $ref: '#/components/schemas/BaseLegal' }
+        lia_codigo: { type: string, nullable: true }
+        retencao: { type: string, examples: ['P5Y'] }
+        compartilhamentos:
+          type: array
+          items:
+            type: object
+            properties:
+              destino: { type: string }
+              transferencia_internacional: { type: boolean }
+              mecanismo: { type: string }
+
+    InventarioEntrada:
+      type: object
+      required: [repositorio, arquivo, commit_sha, conteudo]
+      properties:
+        repositorio: { type: string }
+        arquivo: { type: string }
+        commit_sha: { type: string }
+        conteudo: { type: object, additionalProperties: true }
+
+    InventarioResultado:
+      type: object
+      properties:
+        valido: { type: boolean }
+        versao_id: { type: string, format: uuid }
+        erros:
+          type: array
+          items: { type: string }
+        diff:
+          type: array
+          items:
+            type: object
+            properties:
+              operacao: { type: string, enum: [add, remove, change] }
+              campo: { type: string }
+              detalhe: { type: string }
+
+    ThreatModel:
+      type: object
+      properties:
+        titulo: { type: string }
+        dfd_mermaid: { type: string }
+        ameacas:
+          type: array
+          items:
+            type: object
+            properties:
+              categoria:
+                type: string
+                enum: [linkability, identifiability, non_repudiation, detectability,
+                       disclosure, unawareness, non_compliance, location, inference, discrimination]
+              ameaca: { type: string }
+              mitigacao: { type: string }
+              severidade: { type: string, enum: [baixa, media, alta, critica] }
+              implementada: { type: boolean }
+
+    GateRun:
+      type: object
+      required: [workflow, head_sha, conclusao, run_url]
+      properties:
+        workflow: { type: string, enum: [privacy-ci-gate, architecture-review, privacy-dod, kms-rotation] }
+        repositorio: { type: string }
+        pr_numero: { type: integer }
+        pr_autor: { type: string }
+        head_sha: { type: string }
+        conclusao: { type: string, enum: [success, failure, neutral, cancelled, action_required] }
+        bloqueou_merge: { type: boolean }
+        run_url: { type: string, format: uri }
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/GateFinding' }
+
+    GateFinding:
+      type: object
+      required: [regra, severidade, mensagem_bruta]
+      properties:
+        regra: { type: string, examples: ['pii_em_log'] }
+        arquivo: { type: string }
+        linha: { type: integer }
+        severidade: { type: string, enum: [baixa, media, alta, critica] }
+        mensagem_bruta: { type: string, description: 'Saída original do workflow.' }
+        mensagem_humana: { type: string, description: 'Tradução exibida na tela T1.' }
+        como_corrigir: { type: string }
+
+    RipdTrigger:
+      type: object
+      required: [id, categoria, critico]
+      properties:
+        id: { type: string, pattern: '^T([1-9]|10)$' }
+        categoria: { type: string }
+        critico: { type: boolean }
+        evidencias:
+          type: array
+          items: { type: string }
+
+    ExpurgoRun:
+      type: object
+      required: [data_referencia, entradas]
+      properties:
+        data_referencia: { type: string, format: date }
+        origem: { type: string, enum: [cron, manual, solicitacao_titular, pos_restore] }
+        entradas:
+          type: array
+          items:
+            type: object
+            required: [tabela, metodo, registros, hash_pre, hash_pos]
+            properties:
+              sistema: { type: string }
+              tabela: { type: string }
+              metodo: { type: string, enum: [hard_delete, crypto_shredding, anonimizacao, compactacao_log] }
+              registros: { type: integer, minimum: 0 }
+              ids_afetados_hash:
+                type: string
+                description: Hash com sal por execução. Identificadores em claro são recusados.
+              hash_pre: { type: string }
+              hash_pos: { type: string }
+
+    ChaveKms:
+      type: object
+      properties:
+        alias: { type: string }
+        finalidade: { type: string }
+        status: { type: string, enum: [pendente, ativa, canary, depreciada, revogada] }
+        rotacao_prevista: { type: string, format: date }
+        suporta_cripto_shredding: { type: boolean }
+        dependencias:
+          type: array
+          items: { type: string }
+
+    Metrica:
+      type: object
+      properties:
+        metrica: { type: string }
+        valor: { type: number }
+        unidade: { type: string, enum: [percentual, horas, dias, contagem, score] }
+        meta: { type: number, nullable: true }
+        coletado_em: { type: string, format: date-time }
+        variacao: { type: number, nullable: true }
+
+    Risco:
+      type: object
+      properties:
+        codigo: { type: string, examples: ['R1'] }
+        descricao: { type: string }
+        probabilidade: { type: integer, minimum: 1, maximum: 5 }
+        impacto: { type: integer, minimum: 1, maximum: 5 }
+        score: { type: integer, readOnly: true }
+        dano: { type: string, enum: [material, moral, discriminacao, perda_de_controle] }
+        tratamento: { type: string }
+        tipo: { type: string, enum: [mitigar, transferir, evitar, aceitar] }
+        dono: { type: string }
+        dominio: { type: string }
+        prazo: { type: string, format: date }
+        reavaliacao: { type: string, format: date }
+        status: { type: string, enum: [aberto, em_tratamento, mitigado, aceito, reaberto] }
+
+    Solicitacao:
+      type: object
+      properties:
+        protocolo: { type: string }
+        titular_pseudonimo:
+          type: string
+          description: Pseudônimo HMAC. O CPF nunca trafega nesta rota.
+        direito:
+          type: string
+          enum: [confirmacao, acesso, correcao, anonimizacao, bloqueio, eliminacao,
+                 portabilidade, compartilhamentos, revogacao, revisao_decisao]
+        status: { type: string, enum: [recebida, em_analise, aguardando_titular, concluida, recusada] }
+        nivel_verificacao:
+          type: integer
+          minimum: 1
+          maximum: 3
+          description: 1 sessão válida, 2 MFA, 3 verificação elevada (obrigatório para eliminação).
+        prazo_limite: { type: string, format: date-time }
+        restante_segundos: { type: integer }
+        alerta_dpo: { type: boolean }
+
+    AuditLinha:
+      type: object
+      properties:
+        id: { type: integer }
+        ocorrido_em: { type: string, format: date-time }
+        ator: { type: string }
+        acao: { type: string }
+        recurso_tipo: { type: string }
+        recurso_id: { type: string }
+        finalidade: { type: string, nullable: true }
+        campos:
+          type: array
+          items: { type: string }
+        resultado: { type: string, enum: [sucesso, negado, erro] }
+        hash_anterior: { type: string, nullable: true }
+        hash: { type: string }

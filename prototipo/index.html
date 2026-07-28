@@ -1,0 +1,1930 @@
+<title>Lastro — governança de privacidade LGPD</title>
+
+<style>
+/* ===================================================================
+   TOKENS
+   Acento único: petróleo. Neutros com viés ciano (escolhidos, não herdados).
+   Semânticas (ok/alerta/crítico) são independentes do acento.
+   =================================================================== */
+:root {
+  --bg: #E9EDEE;  --surface: #FFFFFF;  --surface-2: #F2F6F6;  --surface-3: #E4EAEB;
+  --line: #D2DCDD; --line-strong: #B6C4C6;
+  --text: #0E1719; --text-2: #495A5D; --text-3: #6E8184;
+  --accent: #0B5F66; --accent-2: #0F7E86; --accent-soft: #DCEAEA; --on-accent: #FFFFFF;
+  --ok: #2F6E45;   --ok-soft: #DDEBE0;
+  --warn: #8E5C08; --warn-soft: #F3E7CE;
+  --crit: #9E1F26; --crit-soft: #F5DEDF;
+  --sens: #6C3A8C; --sens-soft: #EBDFF3;
+  --shadow: 0 1px 2px rgba(14,23,25,.06), 0 6px 18px -10px rgba(14,23,25,.22);
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --r: 4px; --r-lg: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #08100F; --surface: #0F1A1B; --surface-2: #152224; --surface-3: #1C2C2E;
+    --line: #24373A; --line-strong: #375054;
+    --text: #DFE9E8; --text-2: #9BB0B1; --text-3: #75898B;
+    --accent: #46ABB1; --accent-2: #5FC3C8; --accent-soft: #10312F; --on-accent: #04191A;
+    --ok: #62B07C;   --ok-soft: #123020;
+    --warn: #D2A044; --warn-soft: #33260C;
+    --crit: #E0737C; --crit-soft: #38161A;
+    --sens: #B78BD4; --sens-soft: #2A1B36;
+    --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 26px -14px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #08100F; --surface: #0F1A1B; --surface-2: #152224; --surface-3: #1C2C2E;
+  --line: #24373A; --line-strong: #375054;
+  --text: #DFE9E8; --text-2: #9BB0B1; --text-3: #75898B;
+  --accent: #46ABB1; --accent-2: #5FC3C8; --accent-soft: #10312F; --on-accent: #04191A;
+  --ok: #62B07C; --ok-soft: #123020; --warn: #D2A044; --warn-soft: #33260C;
+  --crit: #E0737C; --crit-soft: #38161A; --sens: #B78BD4; --sens-soft: #2A1B36;
+  --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 26px -14px rgba(0,0,0,.8);
+}
+:root[data-theme="light"] {
+  --bg: #E9EDEE; --surface: #FFFFFF; --surface-2: #F2F6F6; --surface-3: #E4EAEB;
+  --line: #D2DCDD; --line-strong: #B6C4C6;
+  --text: #0E1719; --text-2: #495A5D; --text-3: #6E8184;
+  --accent: #0B5F66; --accent-2: #0F7E86; --accent-soft: #DCEAEA; --on-accent: #FFFFFF;
+  --ok: #2F6E45; --ok-soft: #DDEBE0; --warn: #8E5C08; --warn-soft: #F3E7CE;
+  --crit: #9E1F26; --crit-soft: #F5DEDF; --sens: #6C3A8C; --sens-soft: #EBDFF3;
+  --shadow: 0 1px 2px rgba(14,23,25,.06), 0 6px 18px -10px rgba(14,23,25,.22);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font-family: var(--font-ui); font-size: 14px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 600; text-wrap: balance; margin: 0; letter-spacing: -.01em; }
+a { color: var(--accent); }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; border-radius: 3px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* ===================== SHELL ===================== */
+.app { display: grid; grid-template-columns: 252px minmax(0, 1fr); min-height: 100vh; }
+
+.rail {
+  background: var(--surface); border-right: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 2px; padding: 18px 12px 24px;
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+}
+.brand { display: flex; flex-direction: column; gap: 2px; padding: 4px 10px 18px; }
+.brand-name { font-family: var(--font-display); font-size: 21px; letter-spacing: -.02em; }
+.brand-sub { font-size: 11px; color: var(--text-3); letter-spacing: .07em; text-transform: uppercase; }
+.rail-group { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-3); padding: 16px 10px 6px; }
+.nav {
+  display: flex; align-items: baseline; gap: 9px; width: 100%; text-align: left;
+  padding: 7px 10px; border: 0; background: none; border-radius: var(--r);
+  cursor: pointer; color: var(--text-2); transition: background .12s, color .12s;
+}
+.nav:hover { background: var(--surface-2); color: var(--text); }
+.nav[aria-current="true"] { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+.nav-id { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); min-width: 18px; }
+.nav[aria-current="true"] .nav-id { color: var(--accent); }
+.rail-foot { margin-top: auto; padding: 14px 10px 0; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--text-3); }
+
+.topbar {
+  position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 14px;
+  padding: 10px 28px; background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); flex-wrap: wrap;
+}
+.seg { display: flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r); padding: 2px; }
+.seg button { border: 0; background: none; padding: 4px 11px; border-radius: 3px; cursor: pointer; color: var(--text-2); font-size: 12.5px; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
+.topbar-label { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--text-3); }
+.spacer { flex: 1; }
+
+.shield {
+  display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; cursor: pointer;
+  background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent); border-radius: 999px; font-size: 12px; font-weight: 600;
+}
+.icon-btn { border: 1px solid var(--line); background: var(--surface); border-radius: var(--r); padding: 5px 9px; cursor: pointer; color: var(--text-2); }
+
+main { padding: 26px 28px 72px; max-width: 1500px; }
+.screen { display: none; }
+.screen[data-active="true"] { display: block; animation: rise .18s ease-out; }
+@keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ===================== HEADER DE TELA ===================== */
+.head { margin-bottom: 22px; }
+.eyebrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 9px; }
+.src {
+  font-family: var(--font-mono); font-size: 11px; padding: 2px 7px; border-radius: 3px;
+  background: var(--surface-2); border: 1px solid var(--line); color: var(--text-2);
+}
+.src::before { content: "◆ "; color: var(--accent); }
+.head h1 { font-size: 30px; line-height: 1.15; }
+.head p { color: var(--text-2); margin: 8px 0 0; max-width: 68ch; }
+.role-note {
+  margin-top: 12px; padding: 9px 13px; border-left: 2px solid var(--accent);
+  background: var(--surface-2); border-radius: 0 var(--r) var(--r) 0; font-size: 13px; color: var(--text-2);
+}
+.role-note b { color: var(--text); }
+
+/* ===================== PRIMITIVOS ===================== */
+.grid { display: grid; gap: 14px; }
+.g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.g-2-1 { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.g-1-2 { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+@media (max-width: 1180px) { .g4 { grid-template-columns: repeat(2, minmax(0,1fr)); } .g3, .g-2-1, .g-1-2, .g2 { grid-template-columns: minmax(0,1fr); } }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px 18px; }
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.card-head h3 { font-size: 15.5px; }
+.card-head .hint { font-size: 11.5px; color: var(--text-3); }
+.sec-title { font-size: 11px; letter-spacing: .11em; text-transform: uppercase; color: var(--text-3); margin: 30px 0 12px; }
+
+.kpi { display: flex; flex-direction: column; gap: 6px; }
+.kpi-label { font-size: 11.5px; color: var(--text-2); }
+.kpi-val { font-family: var(--font-display); font-size: 32px; line-height: 1; font-variant-numeric: tabular-nums; }
+.kpi-val small { font-size: 15px; color: var(--text-3); margin-left: 2px; }
+.kpi-foot { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-3); }
+.trend { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.trend.up { color: var(--ok); } .trend.down { color: var(--crit); } .trend.flat { color: var(--text-3); }
+.meter { height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--accent); }
+.meter i.warn { background: var(--warn); } .meter i.crit { background: var(--crit); } .meter i.ok { background: var(--ok); }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap;
+}
+.pill.ok   { background: var(--ok-soft);   color: var(--ok);   border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 32%, transparent); }
+.pill.crit { background: var(--crit-soft); color: var(--crit); border-color: color-mix(in srgb, var(--crit) 32%, transparent); }
+.pill.neutral { background: var(--surface-2); color: var(--text-2); border-color: var(--line); }
+.pill.sens {
+  background: var(--sens-soft); color: var(--sens); border-color: color-mix(in srgb, var(--sens) 35%, transparent);
+  background-image: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--sens) 14%, transparent) 5px 7px);
+}
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tw { overflow-x: auto; }
+th {
+  text-align: left; font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--text-3); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tbody tr:hover { background: var(--surface-2); }
+tbody tr:last-child td { border-bottom: 0; }
+.num { font-variant-numeric: tabular-nums; text-align: right; }
+table.dense { font-size: 12px; }
+table.dense th, table.dense td { padding: 7px 7px; }
+.mono { font-family: var(--font-mono); font-size: 12px; }
+.hash { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-3); }
+
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field label { font-size: 11.5px; color: var(--text-2); font-weight: 600; }
+input[type="text"], input[type="search"], select, textarea {
+  font: inherit; font-size: 13px; color: var(--text); background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--r); padding: 6px 9px; width: 100%;
+}
+textarea { resize: vertical; min-height: 70px; line-height: 1.45; }
+.btn {
+  display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line);
+  background: var(--surface); border-radius: var(--r); padding: 6px 13px; cursor: pointer;
+  font-size: 13px; font-weight: 500; transition: border-color .12s, background .12s;
+}
+.btn:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
+.btn.ghost { background: none; }
+.btn.danger { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 40%, transparent); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* Toggle — nasce desligado por padrão em tudo que coleta ou revela dado. */
+.toggle { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; user-select: none; }
+.toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.track { width: 34px; height: 19px; border-radius: 999px; background: var(--surface-3); border: 1px solid var(--line); position: relative; transition: background .14s; flex: none; }
+.track::after { content: ""; position: absolute; inset: 2px auto 2px 2px; width: 13px; border-radius: 50%; background: var(--text-3); transition: transform .14s, background .14s; }
+.toggle input:checked + .track { background: var(--accent); border-color: var(--accent); }
+.toggle input:checked + .track::after { transform: translateX(15px); background: var(--on-accent); }
+.toggle input:focus-visible + .track { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+
+/* Valor mascarado: o padrão é o cadeado; revelar é o desvio. */
+.masked {
+  display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-mono);
+  background: var(--surface-2); border: 1px dashed var(--line-strong); border-radius: var(--r); padding: 2px 8px;
+}
+.masked .dots { letter-spacing: .12em; color: var(--text-3); }
+.reveal { border: 0; background: none; cursor: pointer; color: var(--accent); font-size: 11px; font-weight: 600; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+.masked.open { border-style: solid; border-color: var(--warn); background: var(--warn-soft); }
+.masked.open .dots { color: var(--text); letter-spacing: 0; }
+.countdown { font-size: 10.5px; color: var(--warn); font-variant-numeric: tabular-nums; }
+
+.note { font-size: 12px; color: var(--text-2); background: var(--surface-2); border: 1px solid var(--line); border-left: 2px solid var(--accent); border-radius: 0 var(--r) var(--r) 0; padding: 9px 12px; }
+.note.crit { border-left-color: var(--crit); }
+.note.warn { border-left-color: var(--warn); }
+
+.banner { display: flex; gap: 13px; align-items: flex-start; padding: 14px 16px; border-radius: var(--r-lg); border: 1px solid; }
+.banner.crit { background: var(--crit-soft); border-color: color-mix(in srgb, var(--crit) 32%, transparent); }
+.banner.ok { background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 32%, transparent); }
+.banner h4 { font-size: 15px; margin-bottom: 3px; }
+.banner p { margin: 0; font-size: 13px; color: var(--text-2); }
+.banner .mark { font-size: 20px; line-height: 1.2; }
+
+dialog {
+  border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); color: var(--text);
+  padding: 0; max-width: 520px; width: calc(100% - 32px); box-shadow: var(--shadow);
+}
+dialog::backdrop { background: rgba(4, 12, 13, .55); backdrop-filter: blur(2px); }
+.dlg-head { padding: 16px 20px 0; }
+.dlg-head h3 { font-size: 18px; }
+.dlg-body { padding: 14px 20px; display: flex; flex-direction: column; gap: 13px; }
+.dlg-foot { padding: 13px 20px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px; background: var(--surface-2); border-radius: 0 0 var(--r-lg) var(--r-lg); }
+
+.stepper { display: flex; flex-direction: column; gap: 0; }
+.step { display: grid; grid-template-columns: 30px minmax(0,1fr); gap: 14px; padding-bottom: 22px; position: relative; }
+.step:not(:last-child)::before { content: ""; position: absolute; left: 14px; top: 28px; bottom: 0; width: 1px; background: var(--line); }
+.step-n {
+  width: 29px; height: 29px; border-radius: 50%; display: grid; place-items: center; z-index: 1;
+  background: var(--surface); border: 1px solid var(--line); font-family: var(--font-mono); font-size: 12px; color: var(--text-2);
+}
+.step.done .step-n { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.step h4 { font-size: 15px; margin-bottom: 3px; }
+.step .step-desc { font-size: 12.5px; color: var(--text-3); margin-bottom: 11px; }
+
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-2); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 16px; overflow-x: auto; }
+.tab { border: 0; background: none; padding: 8px 13px; cursor: pointer; color: var(--text-2); font-size: 13px; border-bottom: 2px solid transparent; white-space: nowrap; }
+.tab[aria-selected="true"] { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+
+.tree { font-size: 13px; }
+.tree-sys { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--r); cursor: pointer; }
+.tree-sys:hover { background: var(--surface-2); }
+.tree-sys.sel { background: var(--accent-soft); font-weight: 600; }
+.tree-ds { padding: 4px 8px 4px 30px; color: var(--text-2); font-size: 12.5px; display: flex; justify-content: space-between; }
+.count { font-variant-numeric: tabular-nums; color: var(--text-3); font-size: 11.5px; }
+
+.drop { border: 1px dashed var(--line-strong); border-radius: var(--r-lg); padding: 20px; text-align: center; color: var(--text-2); background: var(--surface-2); font-size: 13px; }
+.diff { font-family: var(--font-mono); font-size: 11.5px; line-height: 1.7; }
+.diff .add { color: var(--ok); } .diff .del { color: var(--crit); }
+
+.msg { display: flex; flex-direction: column; gap: 3px; padding: 10px 13px; border-radius: var(--r-lg); max-width: 78%; font-size: 13px; }
+.msg.them { background: var(--surface-2); border: 1px solid var(--line); align-self: flex-start; }
+.msg.us { background: var(--accent-soft); align-self: flex-end; }
+.msg .who { font-size: 10.5px; color: var(--text-3); letter-spacing: .05em; text-transform: uppercase; }
+
+.sla { display: flex; flex-direction: column; gap: 6px; }
+.sla-bar { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+.sla-bar i { display: block; height: 100%; }
+.sla-time { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.cal-h { font-size: 10px; text-align: center; color: var(--text-3); text-transform: uppercase; letter-spacing: .06em; padding-bottom: 3px; }
+.cal-d { aspect-ratio: 1; border-radius: 3px; display: grid; place-items: center; font-size: 11px; font-variant-numeric: tabular-nums; border: 1px solid transparent; cursor: default; }
+.cal-d.empty { background: none; }
+.cal-d[data-vol] { background: var(--accent-soft); color: var(--text-2); }
+.cal-d.sel { border-color: var(--accent); font-weight: 700; color: var(--text); }
+.cal-d.miss { background: var(--crit-soft); color: var(--crit); font-weight: 700; }
+
+.pipe { display: flex; align-items: stretch; gap: 0; overflow-x: auto; }
+.pipe-step { flex: 1; min-width: 132px; padding: 13px 14px; border: 1px solid var(--line); border-right: 0; background: var(--surface-2); }
+.pipe-step:first-child { border-radius: var(--r-lg) 0 0 var(--r-lg); }
+.pipe-step:last-child { border-right: 1px solid var(--line); border-radius: 0 var(--r-lg) var(--r-lg) 0; }
+.pipe-step.done { background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 28%, transparent); }
+.pipe-step.now { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.pipe-step h5 { font-size: 12.5px; margin: 0 0 4px; font-family: var(--font-ui); font-weight: 700; }
+.pipe-step p { margin: 0; font-size: 11.5px; color: var(--text-2); }
+
+.scorecard { display: flex; flex-direction: column; gap: 2px; }
+.score-row { display: grid; grid-template-columns: 108px 1fr auto; align-items: center; gap: 12px; padding: 8px; border-radius: var(--r); cursor: pointer; border: 0; background: none; text-align: left; width: 100%; }
+.score-row:hover { background: var(--surface-2); }
+.score-row[aria-expanded="true"] { background: var(--surface-2); }
+.pips { display: flex; gap: 4px; }
+.pip { width: 100%; height: 8px; border-radius: 2px; background: var(--surface-3); flex: 1; }
+.pip.on { background: var(--accent); }
+.score-detail { padding: 2px 8px 12px 128px; font-size: 12.5px; color: var(--text-2); }
+.score-detail ul { margin: 4px 0 0; padding-left: 18px; }
+
+.matrix-wrap { position: relative; }
+svg.chart { display: block; width: 100%; height: auto; }
+svg text { font-family: var(--font-ui); fill: var(--text-3); }
+.grid-line { stroke: var(--line); stroke-width: 1; }
+.bub { cursor: grab; transition: opacity .12s; }
+.bub:hover { opacity: .85; }
+.bub.sel { stroke: var(--text); stroke-width: 2; }
+.bub-label { fill: #fff; font-size: 10px; font-weight: 700; pointer-events: none; }
+
+.raci td { text-align: center; }
+.raci td:first-child { text-align: left; font-weight: 500; }
+.raci select { width: auto; padding: 3px 6px; font-size: 12px; text-align: center; }
+.letter { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font-size: 11px; font-weight: 700; }
+.letter.A { background: var(--accent); color: var(--on-accent); }
+.letter.R { background: var(--accent-soft); color: var(--accent); }
+.letter.C { background: var(--surface-3); color: var(--text-2); }
+.letter.I { background: none; color: var(--text-3); border: 1px dashed var(--line-strong); }
+
+.bal { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.bal-cell { aspect-ratio: 1.5; border-radius: var(--r); display: grid; place-items: center; font-size: 11px; text-align: center; padding: 6px; border: 1px solid var(--line); color: var(--text-3); }
+.bal-cell.on { border-color: var(--text); font-weight: 700; color: var(--text); box-shadow: inset 0 0 0 1px var(--text); }
+.bal-1 { background: var(--ok-soft); } .bal-2 { background: var(--warn-soft); } .bal-3 { background: var(--crit-soft); }
+
+.ck { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.ck:last-child { border-bottom: 0; }
+.ck-name { display: block; font-weight: 600; font-size: 13px; }
+.ck-just { display: block; font-size: 12px; color: var(--text-2); margin-top: 3px; }
+
+.bars { display: flex; align-items: flex-end; gap: 5px; height: 92px; }
+.bars div { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 2px; position: relative; }
+.bars div.alt { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.bar-x { display: flex; gap: 5px; margin-top: 5px; font-size: 10px; color: var(--text-3); }
+.bar-x span { flex: 1; text-align: center; }
+
+.stack { display: flex; flex-direction: column; gap: 13px; }
+.kv { display: grid; grid-template-columns: 128px 1fr; gap: 10px; font-size: 13px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.kv:last-child { border-bottom: 0; }
+.kv dt { color: var(--text-3); font-size: 12px; }
+.kv dd { margin: 0; }
+
+/* Papel do usuário controla o que sequer é oferecido na tela. */
+body[data-role="produto"] [data-only="dpo"],
+body[data-role="produto"] [data-only="eng"],
+body[data-role="eng"] [data-only="dpo"],
+body[data-role="dpo"] [data-only="eng"] { display: none; }
+.role-tag { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); border: 1px solid var(--line); border-radius: 3px; padding: 1px 5px; }
+</style>
+
+<div class="app">
+  <!-- =================== RAIL =================== -->
+  <nav class="rail" aria-label="Telas">
+    <div class="brand">
+      <span class="brand-name">Lastro</span>
+      <span class="brand-sub">Governança · LGPD</span>
+    </div>
+
+    <div class="rail-group">Esteira de entrega</div>
+    <button class="nav" data-goto="t1" aria-current="true"><span class="nav-id">T1</span> Painel de governança</button>
+    <button class="nav" data-goto="t2"><span class="nav-id">T2</span> Catálogo de dados</button>
+    <button class="nav" data-goto="t3"><span class="nav-id">T3</span> RIPD e LINDDUN</button>
+
+    <div class="rail-group">Operação e prova</div>
+    <button class="nav" data-goto="t4"><span class="nav-id">T4</span> Direitos do titular</button>
+    <button class="nav" data-goto="t5"><span class="nav-id">T5</span> Riscos e RACI</button>
+    <button class="nav" data-goto="t6"><span class="nav-id">T6</span> Expurgo e auditoria</button>
+    <button class="nav" data-goto="t7"><span class="nav-id">T7</span> Chaves e criptografia</button>
+    <button class="nav" data-goto="t8"><span class="nav-id">T8</span> Editor de LIA</button>
+
+    <div class="rail-foot">
+      Protótipo navegável.<br>Dados de demonstração — nenhum titular real.
+    </div>
+  </nav>
+
+  <div>
+    <!-- =================== TOPBAR =================== -->
+    <header class="topbar">
+      <span class="topbar-label">Público</span>
+      <div class="seg" id="roles">
+        <button data-role="eng" aria-pressed="true">Engenharia</button>
+        <button data-role="dpo" aria-pressed="false">DPO</button>
+        <button data-role="produto" aria-pressed="false">Produto</button>
+      </div>
+      <span class="spacer"></span>
+      <button class="shield" id="shieldBtn" title="Como o mascaramento funciona">
+        <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0 1 3v5c0 4 3 7 7 8 4-1 7-4 7-8V3L8 0Zm0 2.2 5 2.1V8c0 3-2.1 5.4-5 6.2C5.1 13.4 3 11 3 8V4.3l5-2.1Z"/><path fill="currentColor" d="M7 6h2v5H7z"/></svg>
+        Dados mascarados
+      </button>
+      <button class="icon-btn" id="themeBtn" aria-label="Alternar tema">◐</button>
+    </header>
+
+    <main>
+<!-- ==================================================================
+     T1 — PAINEL DE GOVERNANÇA
+     ================================================================== -->
+<section class="screen" id="t1" data-active="true">
+  <div class="head">
+    <div class="eyebrow">
+      <span class="src">metrics-collector.py</span>
+      <span class="src">privacy-ci-gate.yml</span>
+      <span class="src">architecture-review.yml</span>
+      <span class="src">risk-matrix.csv</span>
+    </div>
+    <h1>Painel de governança</h1>
+    <p>O estado da privacidade em 30 segundos: maturidade, risco concentrado, o que a esteira barrou hoje e para onde as métricas do mês se moveram.</p>
+    <div class="role-note" id="note-t1"></div>
+  </div>
+
+  <div class="grid g4">
+    <div class="card kpi">
+      <span class="kpi-label">Cobertura do ROPA</span>
+      <span class="kpi-val">85,7<small>%</small></span>
+      <div class="meter"><i style="width:85.7%"></i></div>
+      <span class="kpi-foot"><span class="trend up">↑ 7,1 p.p.</span> vs. mês anterior · meta 90%</span>
+    </div>
+    <div class="card kpi">
+      <span class="kpi-label">SLA médio de titulares</span>
+      <span class="kpi-val">34<small>h</small></span>
+      <div class="meter"><i class="ok" style="width:28%"></i></div>
+      <span class="kpi-foot"><span class="trend up">↓ 7,5 h</span> · limite legal 15 dias úteis</span>
+    </div>
+    <div class="card kpi">
+      <span class="kpi-label">Serviços com log sem PII</span>
+      <span class="kpi-val">92<small>%</small></span>
+      <div class="meter"><i class="warn" style="width:92%"></i></div>
+      <span class="kpi-foot"><span class="trend up">↑ 4 p.p.</span> · 2 de 25 pendentes</span>
+    </div>
+    <div class="card kpi">
+      <span class="kpi-label">RIPD pendentes</span>
+      <span class="kpi-val">3</span>
+      <div class="meter"><i class="ok" style="width:37%"></i></div>
+      <span class="kpi-foot"><span class="trend up">↓ 3</span> · 1 vencido há 2 dias</span>
+    </div>
+  </div>
+
+  <div class="sec-title">Maturidade e concentração de risco</div>
+  <div class="grid g-1-2">
+    <div class="card">
+      <div class="card-head">
+        <h3>Scorecard NIST Privacy Framework</h3>
+        <span class="hint">clique para ver a evidência</span>
+      </div>
+      <div class="scorecard" id="scorecard"></div>
+      <div class="note" style="margin-top:14px">
+        Média <b>3,0</b> de 5 · meta <b>4,0</b> até dez/2026. O domínio mais fraco é <b>Comunicar</b>:
+        o portal de direitos já existe, mas o aviso de privacidade ainda não é versionado — sem versão
+        não há como provar o que o titular leu quando consentiu.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>Mapa de calor de riscos</h3>
+        <span class="hint">esforço × score (P×I) · cor = dano ao titular</span>
+      </div>
+      <div class="matrix-wrap"><svg class="chart" id="riskScatter" viewBox="0 0 620 300" role="img" aria-label="Dispersão de riscos por esforço e score"></svg></div>
+      <div class="legend" style="margin-top:10px">
+        <span><i class="dot" style="background:var(--crit)"></i> Material</span>
+        <span><i class="dot" style="background:var(--warn)"></i> Moral / perda de controle</span>
+        <span><i class="dot" style="background:var(--sens)"></i> Discriminação</span>
+        <span style="color:var(--text-3)">Bolha maior = ainda não mitigado</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec-title">Esteira de entrega — hoje</div>
+  <div class="grid g3">
+    <div class="card kpi">
+      <span class="kpi-label">PRs bloqueados</span>
+      <span class="kpi-val" style="color:var(--crit)">2</span>
+      <span class="kpi-foot">gate crítico acionado · exige RIPD aprovado</span>
+    </div>
+    <div class="card kpi">
+      <span class="kpi-label">Aprovados com aviso</span>
+      <span class="kpi-val" style="color:var(--warn)">1</span>
+      <span class="kpi-foot">registrado no ROPA, merge liberado</span>
+    </div>
+    <div class="card kpi">
+      <span class="kpi-label">Aprovados limpos</span>
+      <span class="kpi-val" style="color:var(--ok)">14</span>
+      <span class="kpi-foot">nenhum gatilho de RIPD nas últimas 24h</span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="card-head">
+      <h3>O que a esteira barrou</h3>
+      <span class="hint">mensagem traduzida do workflow — o log cru fica um clique adiante</span>
+    </div>
+    <div class="tw">
+      <table>
+        <thead><tr><th>PR</th><th>Repositório</th><th>Regra</th><th>O que aconteceu</th><th>Como resolver</th><th></th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="mono">#1234</td>
+            <td>credit-scoring</td>
+            <td><span class="pill crit">PII em log</span></td>
+            <td>Este PR envia CPF para o log da aplicação. Log é banco de dados pessoal: entra no ROPA e fica visível para todo mundo com acesso ao Kibana.</td>
+            <td>Passe a chamada pelo <span class="mono">privacy-redactor.ts</span> ou logue o UUID do cliente.</td>
+            <td><button class="btn ghost" data-goto="t3">Abrir RIPD →</button></td>
+          </tr>
+          <tr>
+            <td class="mono">#1234</td>
+            <td>credit-scoring</td>
+            <td><span class="pill crit">Sem base legal</span></td>
+            <td>O campo <span class="mono">historico_compras</span> entrou no catálogo sem base legal — não aparece no ROPA e a auditoria não consegue justificar o tratamento.</td>
+            <td>Declare <span class="mono">base_legal</span> no YAML. Se for legítimo interesse, vincule uma LIA vigente.</td>
+            <td><button class="btn ghost" data-goto="t8">Abrir LIA →</button></td>
+          </tr>
+          <tr>
+            <td class="mono">#307</td>
+            <td>analytics</td>
+            <td><span class="pill warn">LINDDUN desatualizado</span></td>
+            <td>A nova coluna mudou o fluxo de dados, mas o threat model continua na versão anterior.</td>
+            <td>Revise as categorias LINDDUN e gere o diagrama atualizado.</td>
+            <td><button class="btn ghost" data-goto="t3">Revisar →</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ==================================================================
+     T2 — CATÁLOGO DE DADOS (ROPA VIVO)
+     ================================================================== -->
+<section class="screen" id="t2">
+  <div class="head">
+    <div class="eyebrow"><span class="src">.privacy/data-inventory.*.yaml</span><span class="src">linhagem</span></div>
+    <h1>Catálogo de dados</h1>
+    <p>O ROPA é lido dos repositórios, não digitado. Cada campo carrega quem é o dono, para que serve, sob qual base legal e por quanto tempo fica.</p>
+    <div class="role-note" id="note-t2"></div>
+  </div>
+
+  <div class="grid g-1-2" style="align-items:start">
+    <div class="stack">
+      <div class="card">
+        <div class="card-head"><h3>Sistemas</h3><span class="hint">14 repositórios</span></div>
+        <div class="tree">
+          <div class="tree-sys sel"><span>📁</span> credit-scoring <span class="count" style="margin-left:auto">5 campos</span></div>
+          <div class="tree-ds"><span>clientes</span><span class="count">4</span></div>
+          <div class="tree-ds"><span>decisoes_ia</span><span class="count">1</span></div>
+          <div class="tree-sys"><span>📁</span> onboarding <span class="count" style="margin-left:auto">2 campos</span></div>
+          <div class="tree-ds"><span>cadastros</span><span class="count">2</span></div>
+          <div class="tree-sys"><span>📁</span> analytics <span class="count" style="margin-left:auto">0 campos</span></div>
+          <div class="tree-ds" style="color:var(--crit)"><span>⚠ sem inventário</span><span class="count">—</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Novo inventário</h3></div>
+        <div class="drop">Arraste o <span class="mono">data-inventory.yaml</span><br><span style="font-size:11.5px;color:var(--text-3)">valida contra o schema e mostra o diff</span></div>
+        <div class="note" style="margin-top:12px">
+          <b>Diff da última importação</b>
+          <div class="diff" style="margin-top:6px">
+            <div class="add">+ historico_compras · legitimo_interesse · LIA-SCORING-001</div>
+            <div class="del">− cep · removido (proxy discriminatório)</div>
+            <div style="color:var(--text-3)">~ score_serasa · retenção 180d → 90d</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="card">
+        <div class="card-head"><h3>Filtros</h3><span class="hint">espelham os campos do YAML</span></div>
+        <div class="grid g4" style="gap:11px">
+          <div class="field"><label for="f-base">Base legal</label>
+            <select id="f-base"><option>Todas</option><option>execucao_contrato</option><option>legitimo_interesse</option><option>consentimento</option><option>protecao_credito</option><option>obrigacao_legal</option></select></div>
+          <div class="field"><label for="f-sens">Sensível</label>
+            <select id="f-sens"><option>Todos</option><option>Somente sensíveis</option><option>Excluir sensíveis</option></select></div>
+          <div class="field"><label for="f-int">Transferência</label>
+            <select id="f-int"><option>Todas</option><option>Somente internacional</option><option>Somente nacional</option></select></div>
+          <div class="field"><label for="f-ret">Retenção</label>
+            <select id="f-ret"><option>Qualquer</option><option>Até 90 dias</option><option>Até 1 ano</option><option>Acima de 1 ano</option><option>Indeterminada</option></select></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h3>Campos catalogados</h3>
+          <span class="hint" id="catCount">7 campos · 3 sistemas</span>
+        </div>
+        <div class="tw">
+          <table id="catTable" class="dense">
+            <thead><tr><th>Campo</th><th>Guarda</th><th>Finalidade</th><th>Base legal</th><th>Retenção</th><th>Destino</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="note" style="margin-top:12px">
+          🔒 hash irreversível · 🎭 pseudônimo reversível pelo serviço autorizado · 📷 valor bruto ·
+          <b>nenhum valor de titular é exibido nesta tela</b> — o catálogo descreve campos, não conteúdo.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Fluxo ponta a ponta — <span class="mono">clientes.cpf</span></h3><span class="hint">origem → uso → guarda → compartilhamento → descarte</span></div>
+        <svg class="chart" id="flowDiagram" viewBox="0 0 900 150" role="img" aria-label="Fluxo do campo CPF"></svg>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================================================================
+     T3 — RIPD + LINDDUN
+     ================================================================== -->
+<section class="screen" id="t3">
+  <div class="head">
+    <div class="eyebrow"><span class="src">ripd-triage.sh</span><span class="src">threat-model.md</span><span class="src">parecer-tecnico.md</span></div>
+    <h1>RIPD e LINDDUN</h1>
+    <p>A triagem já rodou no PR. Aqui o parecer é preenchido com evidência técnica e vira o <span class="mono">RIPD.md</span> anexado ao próprio pull request.</p>
+    <div class="role-note" id="note-t3"></div>
+  </div>
+
+  <div class="banner crit" style="margin-bottom:20px">
+    <span class="mark">⛔</span>
+    <div style="flex:1">
+      <h4>Merge bloqueado — PR #1234 · credit-scoring</h4>
+      <p>Dois critérios críticos de RIPD foram acionados. O status check só volta a verde depois da aprovação do DPO.</p>
+      <div class="row" style="margin-top:9px">
+        <span class="pill crit">T1 · dado sensível</span>
+        <span class="pill crit">T3 · decisão automatizada</span>
+        <span class="pill warn">T6 · nova tecnologia</span>
+        <span class="pill warn">T8 · transferência internacional</span>
+        <span class="mono" style="color:var(--text-3);font-size:11.5px">RIPD-2026-014</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid g-2-1" style="align-items:start">
+    <div class="card">
+      <div class="card-head"><h3>Parecer técnico</h3><span class="hint">seções do template <span class="mono">parecer-tecnico.md</span></span></div>
+      <div class="stepper">
+        <div class="step done">
+          <div class="step-n">1</div>
+          <div>
+            <h4>Contexto e escopo</h4>
+            <div class="step-desc">O que entra, o que fica de fora e por quê.</div>
+            <textarea readonly>API de scoring v2.3.1, frontend web v1.8.0, DAG-credit-v3 e serviço de decisão via OpenAI gpt-4o.
+Fora de escopo: app mobile v1.2.0 (não integra scoring) e CRM de cobrança (ROPA próprio).</textarea>
+            <div class="row" style="margin-top:7px"><span class="mono" style="font-size:11.5px;color:var(--text-3)">danzeroum/credit-scoring · PR #1234 · a1b2c3d</span></div>
+          </div>
+        </div>
+
+        <div class="step done">
+          <div class="step-n">2</div>
+          <div>
+            <h4>Dados tratados</h4>
+            <div class="step-desc">Importados do catálogo — sem redigitação, sem divergência.</div>
+            <div class="tw"><table>
+              <thead><tr><th>Campo</th><th>Categoria</th><th>Base legal</th><th>Retenção</th></tr></thead>
+              <tbody>
+                <tr><td class="mono">cpf</td><td>pessoal</td><td>execucao_contrato</td><td class="num">5 anos</td></tr>
+                <tr><td class="mono">renda</td><td>pessoal</td><td>execucao_contrato</td><td class="num">2 anos</td></tr>
+                <tr><td class="mono">score_serasa</td><td>pessoal</td><td>protecao_credito</td><td class="num">90 dias</td></tr>
+                <tr><td class="mono">historico_compras</td><td>pseudonimizado</td><td>legitimo_interesse <span class="pill neutral">LIA-SCORING-001</span></td><td class="num">180 dias</td></tr>
+              </tbody>
+            </table></div>
+          </div>
+        </div>
+
+        <div class="step done">
+          <div class="step-n">3</div>
+          <div>
+            <h4>Fluxo de dados</h4>
+            <div class="step-desc">Editor mermaid com pré-visualização — o mesmo diagrama vai para o <span class="mono">threat-model.md</span>.</div>
+            <svg class="chart" id="ripdFlow" viewBox="0 0 760 90" role="img" aria-label="Fluxo do tratamento"></svg>
+          </div>
+        </div>
+
+        <div class="step done">
+          <div class="step-n">4</div>
+          <div>
+            <h4>Base legal por operação</h4>
+            <div class="step-desc">Legítimo interesse só é aceito com LIA vigente vinculada.</div>
+            <div class="tw"><table>
+              <thead><tr><th>Operação</th><th>Finalidade</th><th>Base legal</th><th>LIA</th></tr></thead>
+              <tbody>
+                <tr><td class="mono">POST /auth/cadastrar</td><td>Criar conta</td><td>execucao_contrato</td><td>—</td></tr>
+                <tr><td class="mono">POST /creditos/avaliar</td><td>Decidir concessão</td><td>protecao_credito</td><td>—</td></tr>
+                <tr><td class="mono">DAG credit-v3</td><td>Enriquecer modelo</td><td>legitimo_interesse</td><td><span class="pill ok">LIA-SCORING-001 · vigente</span></td></tr>
+                <tr><td class="mono">GET /me/dados</td><td>Direito de acesso</td><td>obrigacao_legal</td><td>—</td></tr>
+              </tbody>
+            </table></div>
+          </div>
+        </div>
+
+        <div class="step done">
+          <div class="step-n">5</div>
+          <div>
+            <h4>Matriz de riscos</h4>
+            <div class="step-desc">Alimenta a T5 — mesma fonte, mesmo número.</div>
+            <div class="tw"><table>
+              <thead><tr><th>Risco</th><th class="num">P</th><th class="num">I</th><th class="num">Score</th><th>Dano ao titular</th></tr></thead>
+              <tbody>
+                <tr><td>R1 · CPF no prompt do LLM</td><td class="num">4</td><td class="num">5</td><td class="num"><b>20</b></td><td>Material — crédito negado indevidamente</td></tr>
+                <tr><td>R2 · Decisão sem revisão</td><td class="num">3</td><td class="num">5</td><td class="num"><b>15</b></td><td>Discriminação algorítmica</td></tr>
+              </tbody>
+            </table></div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-n">6</div>
+          <div>
+            <h4>Recomendações</h4>
+            <div class="step-desc">Cada item tem dono e prazo — sem isso o RIPD não fecha.</div>
+            <div class="tw"><table>
+              <thead><tr><th></th><th>Recomendação</th><th>Dono</th><th>Prazo</th><th>Status</th></tr></thead>
+              <tbody>
+                <tr><td><span class="pill crit">P0</span></td><td>Pseudonimizar CPF antes do LLM</td><td class="mono">@eng-maria</td><td class="num">04/08</td><td><span class="pill ok">feito</span></td></tr>
+                <tr><td><span class="pill crit">P0</span></td><td>Endpoint de revisão de decisão</td><td class="mono">@eng-maria</td><td class="num">11/08</td><td><span class="pill warn">em curso</span></td></tr>
+                <tr><td><span class="pill crit">P0</span></td><td>Assinar SCC com a OpenAI</td><td class="mono">@juridico-ana</td><td class="num">04/08</td><td><span class="pill ok">feito</span></td></tr>
+                <tr><td><span class="pill warn">P1</span></td><td>Teste de disparate impact no CI</td><td class="mono">@ml-joao</td><td class="num">18/08</td><td><span class="pill neutral">aberto</span></td></tr>
+              </tbody>
+            </table></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:6px; border-top:1px solid var(--line); padding-top:14px">
+        <button class="btn primary" id="genRipd">Gerar RIPD.md e anexar ao PR</button>
+        <button class="btn" data-only="dpo">Aprovar como DPO</button>
+        <button class="btn danger" data-only="dpo">Reprovar</button>
+        <span class="hint" style="color:var(--text-3);font-size:11.5px">1 recomendação P0 ainda em aberto</span>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="card">
+        <div class="card-head"><h3>Checklist LINDDUN</h3><span class="hint">ativar gera mitigação</span></div>
+        <div id="linddun" class="stack" style="gap:0"></div>
+        <div class="note" style="margin-top:12px">
+          Os seis rótulos são os que este time usa no <span class="mono">threat-model.md</span>. A plataforma grava também
+          o equivalente canônico do LINDDUN (mostrado abaixo de cada nome), para que o modelo continue comparável fora de casa.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Mitigações geradas</h3></div>
+        <ul id="mitigacoes" style="margin:0; padding-left:18px; font-size:12.5px; color:var(--text-2); line-height:1.8"></ul>
+      </div>
+    </div>
+  </div>
+</section>
+<!-- ==================================================================
+     T4 — PORTAL DE DIREITOS DO TITULAR
+     ================================================================== -->
+<section class="screen" id="t4">
+  <div class="head">
+    <div class="eyebrow"><span class="src">pseudonymizer.ts</span><span class="src">privacy-redactor.ts</span><span class="src">Art. 18 · Art. 20</span></div>
+    <h1>Direitos do titular</h1>
+    <p>Cada direito do Art. 18 é um endpoint com prazo, nível de autenticação e evidência. Esta tela é o lado de dentro do balcão.</p>
+    <div class="role-note" id="note-t4"></div>
+  </div>
+
+  <div class="grid g4">
+    <div class="card kpi"><span class="kpi-label">Solicitações no mês</span><span class="kpi-val">27</span><span class="kpi-foot"><span class="trend up">↑ 6</span> vs. mês anterior</span></div>
+    <div class="card kpi"><span class="kpi-label">Tempo médio de resposta</span><span class="kpi-val">34<small>h</small></span><span class="kpi-foot">meta interna 5 dias · prazo legal 15</span></div>
+    <div class="card kpi"><span class="kpi-label">Atendidas no SLA</span><span class="kpi-val">100<small>%</small></span><div class="meter"><i class="ok" style="width:100%"></i></div></div>
+    <div class="card kpi"><span class="kpi-label">A menos de 24 h do prazo</span><span class="kpi-val" style="color:var(--warn)">1</span><span class="kpi-foot">DPO já notificado automaticamente</span></div>
+  </div>
+
+  <div class="sec-title">Fila de atendimento</div>
+  <div class="card">
+    <div class="tw">
+      <table>
+        <thead><tr><th>Protocolo</th><th>Direito</th><th>Titular</th><th>Sistemas</th><th>SLA</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="mono">2026-0731</td>
+            <td>Acesso <span class="pill neutral">II</span></td>
+            <td><span class="masked" data-value="529.982.247-25" data-label="CPF"><span class="dots">•••.•••.•••-••</span><button class="reveal" data-only="dpo">revelar</button></span></td>
+            <td class="mono" style="font-size:11.5px">3 sistemas</td>
+            <td><div class="sla"><span class="sla-time">3 d 04 h restantes</span><div class="sla-bar"><i class="ok" style="width:73%;background:var(--ok)"></i></div><span style="font-size:10.5px;color:var(--text-3)">de 15 dias úteis</span></div></td>
+            <td><span class="pill warn">em análise</span></td>
+            <td><button class="btn ghost" data-tab4="detalhe">Abrir</button></td>
+          </tr>
+          <tr>
+            <td class="mono">2026-0730</td>
+            <td>Eliminação <span class="pill neutral">VI</span></td>
+            <td><span class="masked" data-value="843.117.902-08" data-label="CPF"><span class="dots">•••.•••.•••-••</span><button class="reveal" data-only="dpo">revelar</button></span></td>
+            <td class="mono" style="font-size:11.5px">onboarding</td>
+            <td><div class="sla"><span class="sla-time" style="color:var(--warn)">19 h restantes</span><div class="sla-bar"><i style="width:94%;background:var(--warn)"></i></div><span style="font-size:10.5px;color:var(--warn)">DPO notificado</span></div></td>
+            <td><span class="pill warn">em análise</span></td>
+            <td><button class="btn ghost">Abrir</button></td>
+          </tr>
+          <tr>
+            <td class="mono">2026-0729</td>
+            <td>Revisão de decisão <span class="pill neutral">Art. 20</span></td>
+            <td><span class="masked" data-value="311.408.775-31" data-label="CPF"><span class="dots">•••.•••.•••-••</span><button class="reveal" data-only="dpo">revelar</button></span></td>
+            <td class="mono" style="font-size:11.5px">credit-scoring</td>
+            <td><div class="sla"><span class="sla-time">3 d restantes</span><div class="sla-bar"><i style="width:40%;background:var(--accent)"></i></div><span style="font-size:10.5px;color:var(--text-3)">de 5 dias úteis</span></div></td>
+            <td><span class="pill neutral">aguardando titular</span></td>
+            <td><button class="btn ghost">Abrir</button></td>
+          </tr>
+          <tr>
+            <td class="mono">2026-0721</td>
+            <td>Portabilidade <span class="pill neutral">V</span></td>
+            <td><span class="masked"><span class="dots">•••.•••.•••-••</span></span></td>
+            <td class="mono" style="font-size:11.5px">2 sistemas</td>
+            <td><span style="font-size:12px;color:var(--ok)">concluída em 12 dias</span></td>
+            <td><span class="pill ok">concluída</span></td>
+            <td><button class="btn ghost">Evidência</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="sec-title">Protocolo 2026-0731 · direito de acesso</div>
+  <div class="grid g-2-1" style="align-items:start">
+    <div class="card">
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" aria-selected="true" data-tab="dados">Dados do titular</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="compart">Compartilhamentos</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="revisao">Revisão de decisão</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="msg">Mensagens</button>
+      </div>
+
+      <div data-panel="dados">
+        <div class="note warn" style="margin-bottom:14px">
+          Identificação concluída com autenticação forte às 09:12. A sessão elevada expira em 14 min.
+          Nenhum valor abaixo foi carregado ainda — o servidor só envia o campo que você abrir.
+        </div>
+        <div class="grid g2">
+          <div class="card" style="background:var(--surface-2)">
+            <div class="card-head"><h3 style="font-size:14px">Identificação</h3><span class="pill neutral">execucao_contrato</span></div>
+            <dl class="kv">
+              <dt>Nome</dt><dd><span class="masked" data-value="Ana Beatriz Silva" data-label="Nome"><span class="dots">•••••• •••••••</span><button class="reveal" data-only="dpo">revelar</button></span></dd>
+              <dt>CPF</dt><dd><span class="masked" data-value="529.982.247-25" data-label="CPF"><span class="dots">•••.•••.•••-••</span><button class="reveal" data-only="dpo">revelar</button></span></dd>
+              <dt>E-mail</dt><dd><span class="masked" data-value="ana.silva@exemplo.com" data-label="E-mail"><span class="dots">•••••@••••••.•••</span><button class="reveal" data-only="dpo">revelar</button></span></dd>
+              <dt>Conta</dt><dd><span class="pill ok">ativa</span> desde 03/2024</dd>
+            </dl>
+          </div>
+          <div class="card" style="background:var(--surface-2)">
+            <div class="card-head"><h3 style="font-size:14px">Crédito</h3><span class="pill neutral">protecao_credito</span></div>
+            <dl class="kv">
+              <dt>Renda declarada</dt><dd><span class="masked" data-value="R$ 3.500,00" data-label="Renda"><span class="dots">R$ ••••,••</span><button class="reveal" data-only="dpo">revelar</button></span></dd>
+              <dt>Score</dt><dd><span class="masked" data-value="620" data-label="Score"><span class="dots">•••</span><button class="reveal" data-only="dpo">revelar</button></span></dd>
+              <dt>Última decisão</dt><dd>Reprovada · 26/07 · modelo v2.3.1</dd>
+              <dt>Retenção</dt><dd>90 dias · expurgo em 24/10</dd>
+            </dl>
+          </div>
+          <div class="card" style="background:var(--surface-2)">
+            <div class="card-head"><h3 style="font-size:14px">Biometria</h3><span class="pill sens">🔒 sensível</span></div>
+            <p style="margin:0;font-size:12.5px;color:var(--text-2)">Dado sensível não é exibido nesta tela em nenhuma hipótese. Existe apenas a prova de que foi coletado e quando será destruído.</p>
+            <dl class="kv" style="margin-top:8px">
+              <dt>Coletado</dt><dd>14/03/2024 · prova de vida</dd>
+              <dt>Base legal</dt><dd>consentimento (Art. 11, I)</dd>
+              <dt>Destruição</dt><dd>cripto-shredding em 30 dias</dd>
+            </dl>
+          </div>
+          <div class="card" style="background:var(--surface-2)">
+            <div class="card-head"><h3 style="font-size:14px">Exportar</h3></div>
+            <p style="margin:0 0 10px;font-size:12.5px;color:var(--text-2)">Gera pacote assinado com link expirável em 24 h. O download é registrado no audit trail.</p>
+            <div class="row"><button class="btn">JSON</button><button class="btn">CSV</button><button class="btn">PDF declaratório</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div data-panel="compart" hidden>
+        <div class="note" style="margin-bottom:14px">Resposta construída a partir da tabela <span class="mono">linhagem</span>, que é append-only. Não é uma lista mantida à mão.</div>
+        <div class="tw"><table>
+          <thead><tr><th>Destino</th><th>Papel</th><th>Finalidade</th><th>Base legal</th><th>Transferência</th><th>Última remessa</th></tr></thead>
+          <tbody>
+            <tr><td>OpenAI</td><td>operador</td><td>Enriquecimento do modelo</td><td>legitimo_interesse</td><td><span class="pill warn">🌎 EUA · SCC ANPD</span></td><td class="num">27/07</td></tr>
+            <tr><td>Serasa</td><td>controlador</td><td>Consulta de score</td><td>protecao_credito</td><td><span class="pill neutral">nacional</span></td><td class="num">26/07</td></tr>
+            <tr><td>SendGrid</td><td>operador</td><td>E-mail transacional</td><td>execucao_contrato</td><td><span class="pill warn">🌎 EUA · SCC ANPD</span></td><td class="num">28/07</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+
+      <div data-panel="revisao" hidden>
+        <div class="banner crit" style="margin-bottom:14px">
+          <span class="mark">⚖</span>
+          <div><h4>Decisão automatizada contestada</h4>
+          <p>Proposta reprovada em 26/07 pelo modelo <span class="mono">credit-scoring v2.3.1</span>. O titular pediu revisão humana — o analista abaixo pode reverter de fato, não apenas homologar.</p></div>
+        </div>
+        <div class="grid g2">
+          <div>
+            <h4 style="font-size:14px;margin-bottom:8px">Fatores que pesaram contra</h4>
+            <div class="stack" style="gap:8px">
+              <div><div class="row" style="justify-content:space-between"><span style="font-size:12.5px">tempo_emprego</span><span class="mono" style="color:var(--crit)">−0,34</span></div><div class="meter"><i class="crit" style="width:68%"></i></div></div>
+              <div><div class="row" style="justify-content:space-between"><span style="font-size:12.5px">score_serasa</span><span class="mono" style="color:var(--crit)">−0,21</span></div><div class="meter"><i class="crit" style="width:42%"></i></div></div>
+              <div><div class="row" style="justify-content:space-between"><span style="font-size:12.5px">renda</span><span class="mono" style="color:var(--ok)">+0,12</span></div><div class="meter"><i class="ok" style="width:24%"></i></div></div>
+            </div>
+            <p class="note" style="margin-top:12px">Nenhuma feature de CEP, nome ou canal de atendimento entra no modelo — foram removidas por serem proxy discriminatório.</p>
+          </div>
+          <div class="field">
+            <label for="revDecision">Decisão do analista</label>
+            <select id="revDecision"><option>Manter a reprovação</option><option>Reverter para aprovado</option><option>Aprovar com limite reduzido</option></select>
+            <label for="revWhy" style="margin-top:10px">Justificativa (vai para o titular e para o log)</label>
+            <textarea id="revWhy" placeholder="Explique em linguagem que o titular entenda."></textarea>
+            <div class="row" style="margin-top:10px"><button class="btn primary" data-only="dpo">Registrar revisão</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div data-panel="msg" hidden>
+        <div class="stack" style="gap:10px">
+          <div class="msg them"><span class="who">Titular · 18/07 14:02</span>Quero saber quais empresas receberam meus dados e por qual finalidade.</div>
+          <div class="msg us"><span class="who">DPO · 19/07 09:40</span>Recebido. Estou reunindo a linhagem completa nos três sistemas; retorno até 31/07 com a relação de destinatários e as finalidades.</div>
+          <div class="row" style="margin-top:4px"><input type="text" placeholder="Escrever ao titular…" style="flex:1"><button class="btn primary">Enviar</button></div>
+          <p class="note">A conversa fica dentro da plataforma. E-mail não é canal de atendimento: não dá para provar entrega nem controlar quem leu.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="card">
+        <div class="card-head"><h3>Buscar titular</h3></div>
+        <div class="field">
+          <label for="cpfSearch">CPF</label>
+          <input type="text" id="cpfSearch" placeholder="•••.•••.•••-••" inputmode="numeric">
+        </div>
+        <div class="row" style="margin-top:10px"><button class="btn primary" style="width:100%;justify-content:center">Identificar com autenticação forte</button></div>
+        <p class="note" style="margin-top:12px">A busca envia apenas o <b>hash</b> do CPF. O documento digitado nunca entra na URL, no histórico do navegador nem no log do gateway.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Distribuição do mês</h3></div>
+        <div class="stack" style="gap:9px">
+          <div><div class="row" style="justify-content:space-between;font-size:12.5px"><span>Acesso</span><span class="mono">11</span></div><div class="meter"><i style="width:100%"></i></div></div>
+          <div><div class="row" style="justify-content:space-between;font-size:12.5px"><span>Eliminação</span><span class="mono">7</span></div><div class="meter"><i style="width:64%"></i></div></div>
+          <div><div class="row" style="justify-content:space-between;font-size:12.5px"><span>Revogação</span><span class="mono">5</span></div><div class="meter"><i style="width:45%"></i></div></div>
+          <div><div class="row" style="justify-content:space-between;font-size:12.5px"><span>Revisão de decisão</span><span class="mono">3</span></div><div class="meter"><i style="width:27%"></i></div></div>
+          <div><div class="row" style="justify-content:space-between;font-size:12.5px"><span>Portabilidade</span><span class="mono">1</span></div><div class="meter"><i style="width:9%"></i></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================================================================
+     T5 — MATRIZ DE RISCOS E STAKEHOLDERS
+     ================================================================== -->
+<section class="screen" id="t5">
+  <div class="head">
+    <div class="eyebrow"><span class="src">docs/risk-matrix.csv</span><span class="src">RACI</span></div>
+    <h1>Riscos e RACI</h1>
+    <p>Dez riscos, um dono cada, prazo e data de reavaliação. Arrastar uma bolha muda a prioridade do programa — por isso exige justificativa registrada.</p>
+    <div class="role-note" id="note-t5"></div>
+  </div>
+
+  <div class="grid g-2-1" style="align-items:start">
+    <div class="card">
+      <div class="card-head">
+        <h3>Matriz 5 × 5</h3>
+        <span class="hint">arraste para reclassificar · clique para ver o detalhe</span>
+      </div>
+      <div class="matrix-wrap"><svg class="chart" id="riskMatrix" viewBox="0 0 560 430" role="img" aria-label="Matriz de risco probabilidade por impacto"></svg></div>
+      <div class="legend" style="margin-top:8px">
+        <span><i class="dot" style="background:var(--crit)"></i> Material</span>
+        <span><i class="dot" style="background:var(--warn)"></i> Perda de controle</span>
+        <span><i class="dot" style="background:var(--sens)"></i> Discriminação</span>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="card" id="riskDetail">
+        <div class="card-head"><h3 id="rdTitle">R1 · Vazamento de CPF via prompt do LLM</h3></div>
+        <dl class="kv" id="rdBody"></dl>
+        <div class="row" style="margin-top:12px"><button class="btn" data-goto="t3">Ver RIPD-2026-014 →</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Risco por domínio</h3><span class="hint">onde a dívida está concentrada</span></div>
+        <div class="stack" style="gap:9px" id="domainHeat"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec-title">Quem responde por quê</div>
+  <div class="card">
+    <div class="card-head"><h3>Matriz RACI</h3><span class="hint">um único accountable por processo — a plataforma recusa o segundo</span></div>
+    <div class="tw">
+      <table class="raci" id="raciTable">
+        <thead><tr><th>Processo</th><th>DPO</th><th>Jurídico</th><th>Segurança</th><th>Engenharia</th><th>Produto</th><th>Dados</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:12px">Engenharia é o único domínio que <b>executa</b> controle técnico. Jurídico escreve o contrato e o DPO documenta a base legal, mas RLS, redação de log e pseudonimização só existem se alguém escrever o código — por isso engenharia entra no design, não na homologação.</p>
+  </div>
+</section>
+
+<!-- ==================================================================
+     T6 — EXPURGO E AUDITORIA
+     ================================================================== -->
+<section class="screen" id="t6">
+  <div class="head">
+    <div class="eyebrow"><span class="src">expurgo-permanente.py</span><span class="src">audit_log · hash encadeado</span></div>
+    <h1>Expurgo e auditoria</h1>
+    <p>Retenção é atributo do dado, não item de backlog. Aqui está a prova diária de que o prazo foi cumprido — e a cadeia que mostra se alguém mexeu no registro.</p>
+    <div class="role-note" id="note-t6"></div>
+  </div>
+
+  <div class="grid g4">
+    <div class="card kpi"><span class="kpi-label">Eliminados hoje</span><span class="kpi-val">18.432</span><span class="kpi-foot">4 tabelas · 3 sistemas</span></div>
+    <div class="card kpi"><span class="kpi-label">Cripto-shredding</span><span class="kpi-val">6.712</span><span class="kpi-foot">registros em base imutável</span></div>
+    <div class="card kpi"><span class="kpi-label">Verificados</span><span class="kpi-val">3<small>/4</small></span><div class="meter"><i class="warn" style="width:75%"></i></div><span class="kpi-foot">1 lote aguardando verificação</span></div>
+    <div class="card kpi"><span class="kpi-label">Cadeia de auditoria</span><span class="kpi-val" style="color:var(--ok)">íntegra</span><span class="kpi-foot" id="chainStamp">última verificação há 2 h</span></div>
+  </div>
+
+  <div class="grid g-1-2" style="align-items:start;margin-top:14px">
+    <div class="stack">
+      <div class="card">
+        <div class="card-head"><h3>Julho de 2026</h3><span class="hint">volume diário</span></div>
+        <div class="cal" id="calendar"></div>
+        <div class="legend" style="margin-top:10px"><span><i class="dot" style="background:var(--accent-soft)"></i> job executado</span><span><i class="dot" style="background:var(--crit-soft)"></i> falhou</span></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Volume por semana</h3></div>
+        <div class="bars"><div style="height:52%"></div><div style="height:71%"></div><div style="height:44%"></div><div style="height:88%"></div><div class="alt" style="height:63%"></div></div>
+        <div class="bar-x"><span>S27</span><span>S28</span><span>S29</span><span>S30</span><span>S31</span></div>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="card">
+        <div class="card-head">
+          <h3>Lotes de hoje</h3>
+          <button class="btn" id="verifyBtn">Verificar integridade</button>
+        </div>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Sistema · tabela</th><th>Método</th><th class="num">Registros</th><th>Hash pré</th><th>Hash pós</th><th>Estado</th></tr></thead>
+            <tbody id="purgeRows">
+              <tr><td class="mono">credit-scoring · decisoes_ia</td><td>hard delete</td><td class="num">8.120</td><td class="hash">a3f19c2b…</td><td class="hash">7e9f1a3b…</td><td><span class="pill ok">verificado</span></td></tr>
+              <tr><td class="mono">credit-scoring · historico_compras</td><td>cripto-shredding</td><td class="num">6.301</td><td class="hash">b5c7d9e1…</td><td class="hash">1e3f5a7b…</td><td><span class="pill ok">verificado</span></td></tr>
+              <tr><td class="mono">onboarding · biometria_facial</td><td>cripto-shredding</td><td class="num">411</td><td class="hash">d7e9f1a3…</td><td class="hash">3a5b7c9d…</td><td><span class="pill ok">verificado</span></td></tr>
+              <tr><td class="mono">analytics · eventos_brutos</td><td>compactação de log</td><td class="num">3.600</td><td class="hash">f1a3b5c7…</td><td class="hash">5c7d9e1f…</td><td><span class="pill neutral">pendente</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn">Gerar relatório de expurgo (PDF)</button>
+          <span class="hash">hash do último relatório: c1d3e5f7a9b1c3d5…</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Audit trail</h3><span class="hint">append-only · cada linha sela a anterior</span></div>
+        <div class="row" style="margin-bottom:12px">
+          <input type="search" placeholder="Filtrar por ator, ação ou recurso…" style="flex:1;min-width:200px">
+          <select style="width:auto"><option>Todas as ações</option><option>CAMPO_REVELADO</option><option>EXPURGO_EXECUTADO</option><option>RIPD_APROVADO</option></select>
+          <button class="btn">Exportar CSV</button>
+        </div>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Quando</th><th>Quem</th><th>Ação</th><th>Recurso</th><th>Finalidade</th><th>Hash</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">09:12:04</td><td>Marcela Dias <span class="role-tag">dpo</span></td><td>CAMPO_REVELADO</td><td class="mono">campo/cpf</td><td>atendimento</td><td class="hash">4f2a…c19b</td></tr>
+              <tr><td class="mono">09:11:58</td><td>Marcela Dias <span class="role-tag">dpo</span></td><td>TITULAR_CONSULTADO</td><td class="mono">solicitacao/2026-0731</td><td>atendimento</td><td class="hash">8c07…21ee</td></tr>
+              <tr style="background:var(--crit-soft)"><td class="mono">08:47:11</td><td>Pedro Lima <span class="role-tag">produto</span></td><td>CAMPO_REVELADO</td><td class="mono">campo/renda</td><td><span class="pill crit">negado — sem finalidade</span></td><td class="hash">1b93…7d40</td></tr>
+              <tr><td class="mono">03:00:12</td><td>airflow-svc <span class="role-tag">system</span></td><td>EXPURGO_EXECUTADO</td><td class="mono">expurgo_run/2026-07-28</td><td>—</td><td class="hash">e5d1…9a02</td></tr>
+              <tr><td class="mono">ontem 17:22</td><td>Maria Souza <span class="role-tag">eng</span></td><td>RIPD_SUBMETIDO</td><td class="mono">ripd/RIPD-2026-014</td><td>—</td><td class="hash">77bc…3f81</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================================================================
+     T7 — CHAVES E CRIPTOGRAFIA
+     ================================================================== -->
+<section class="screen" id="t7">
+  <div class="head">
+    <div class="eyebrow"><span class="src">kms-rotation.yml</span><span class="src">pseudonymizer.ts</span></div>
+    <h1>Chaves e criptografia</h1>
+    <p>Chave sem rotação é senha eterna. Esta tela mostra o ciclo em curso, quem depende de cada chave e onde destruir a chave equivale a destruir o dado.</p>
+    <div class="role-note" id="note-t7"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Rotação em curso — <span class="mono">credito_pii</span></h3><span class="hint">v3 → v4 · iniciada há 6 dias</span></div>
+    <div class="pipe">
+      <div class="pipe-step done"><h5>1 · Gerar chave</h5><p>v4 criada em us-east-1</p><span class="pill ok" style="margin-top:7px">concluída</span></div>
+      <div class="pipe-step done"><h5>2 · Parameter Store</h5><p>SecureString atualizada</p><span class="pill ok" style="margin-top:7px">concluída</span></div>
+      <div class="pipe-step done"><h5>3 · Canary 5%</h5><p>48 h sem erro de decrypt</p><span class="pill ok" style="margin-top:7px">concluída</span></div>
+      <div class="pipe-step now"><h5>4 · Recriptografar</h5><p>1.187.402 de 1.873.900</p><div class="meter" style="margin-top:7px"><i style="width:63.4%"></i></div><span class="pill neutral" style="margin-top:7px">63,4%</span></div>
+      <div class="pipe-step"><h5>5 · Revogar antiga</h5><p>30 dias após a re-encriptação</p><span class="pill neutral" style="margin-top:7px">agendada</span></div>
+    </div>
+  </div>
+
+  <div class="grid g-2-1" style="align-items:start;margin-top:14px">
+    <div class="stack">
+      <div class="card">
+        <div class="card-head"><h3>Chaves</h3><span class="hint">uma única ativa por finalidade</span></div>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Alias</th><th>Finalidade</th><th>Status</th><th>Criada</th><th>Rotação prevista</th><th>Cripto-shredding</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">alias/credit-pii-v3</td><td>credito_pii</td><td><span class="pill ok">ativa</span></td><td class="num">80 d</td><td class="num" style="color:var(--warn)">em 10 dias</td><td><span class="pill ok">sim</span></td></tr>
+              <tr><td class="mono">alias/credit-pii-v4</td><td>credito_pii_next</td><td><span class="pill warn">canary</span></td><td class="num">6 d</td><td class="num">em 84 dias</td><td><span class="pill ok">sim</span></td></tr>
+              <tr><td class="mono">alias/onboarding-bio-v2</td><td>biometria</td><td><span class="pill ok">ativa</span></td><td class="num">40 d</td><td class="num">em 50 dias</td><td><span class="pill ok">sim</span></td></tr>
+              <tr><td class="mono">alias/backup-rds-v1</td><td>backup</td><td><span class="pill ok">ativa</span></td><td class="num">200 d</td><td class="num" style="color:var(--crit)">em 5 dias</td><td><span class="pill crit">não</span></td></tr>
+              <tr style="opacity:.6"><td class="mono">alias/credit-pii-v2</td><td>credito_pii_legado</td><td><span class="pill neutral">revogada</span></td><td class="num">400 d</td><td class="num">—</td><td><span class="pill neutral">n/a</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Log de acesso às chaves</h3><span class="hint">espelho do CloudTrail</span></div>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Quando</th><th>Principal</th><th>Operação</th><th>Finalidade</th><th>Origem</th><th></th></tr></thead>
+            <tbody>
+              <tr><td class="mono">há 20 min</td><td class="mono" style="font-size:11.5px">role/scoring-svc</td><td>Decrypt</td><td>credito_pii</td><td class="mono">10.4.2.11</td><td><span class="pill ok">autorizado</span></td></tr>
+              <tr><td class="mono">há 35 min</td><td class="mono" style="font-size:11.5px">role/scoring-svc</td><td>GenerateDataKey</td><td>credito_pii</td><td class="mono">10.4.2.11</td><td><span class="pill ok">autorizado</span></td></tr>
+              <tr style="background:var(--crit-soft)"><td class="mono">há 2 h</td><td class="mono" style="font-size:11.5px">user/estagiario.dev</td><td>Decrypt</td><td>biometria</td><td class="mono">189.22.7.90</td><td><span class="pill crit">negado</span></td></tr>
+              <tr><td class="mono">há 5 h</td><td class="mono" style="font-size:11.5px">role/rds-backup</td><td>Encrypt</td><td>backup</td><td class="mono">10.4.9.3</td><td><span class="pill ok">autorizado</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note crit" style="margin-top:12px">
+          A tentativa negada partiu de fora da VPN corporativa e mirava a chave de <b>biometria</b> — dado sensível.
+          O alerta já foi para o time de segurança; a conta segue ativa e ainda não houve revisão de acesso.
+        </p>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="card">
+        <div class="card-head"><h3>Quem depende de cada chave</h3></div>
+        <svg class="chart" id="keyTree" viewBox="0 0 330 250" role="img" aria-label="Árvore de dependências das chaves"></svg>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Cripto-shredding</h3><span class="hint">destruir a chave = destruir o dado</span></div>
+        <dl class="kv">
+          <dt>clientes</dt><dd><span class="pill ok">suportado</span> DEK por registro</dd>
+          <dt>decisoes_ia</dt><dd><span class="pill ok">suportado</span> DEK por registro</dd>
+          <dt>cadastros</dt><dd><span class="pill ok">suportado</span> DEK por titular</dd>
+          <dt>eventos_brutos</dt><dd><span class="pill crit">não suportado</span> exige hard delete</dd>
+          <dt>backup RDS</dt><dd><span class="pill crit">não suportado</span> SSE-KMS pendente</dd>
+        </dl>
+        <p class="note crit" style="margin-top:12px">O snapshot de backup ainda usa chave gerenciada pela AWS. Enquanto isso valer, uma restauração devolve dados já eliminados — é o risco R10.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================================================================
+     T8 — EDITOR DE LIA
+     ================================================================== -->
+<section class="screen" id="t8">
+  <div class="head">
+    <div class="eyebrow"><span class="src">LIA.md</span><span class="src">Art. 7º, IX</span></div>
+    <h1>Editor de LIA</h1>
+    <p>Legítimo interesse não se afirma, se demonstra. Três passos, evidência anexada e assinatura do DPO — sem isso o catálogo recusa a base legal.</p>
+    <div class="role-note" id="note-t8"></div>
+  </div>
+
+  <div class="grid g-2-1" style="align-items:start">
+    <div class="card">
+      <div class="card-head"><h3>LIA-SCORING-001</h3><span class="pill ok">vigente até 01/02/2027</span></div>
+
+      <div class="stepper" style="margin-top:6px">
+        <div class="step done">
+          <div class="step-n">1</div>
+          <div>
+            <h4>Finalidade legítima</h4>
+            <div class="step-desc">O interesse precisa ser real, presente e específico — não uma conveniência futura.</div>
+            <div class="grid g2" style="gap:11px">
+              <div class="field"><label for="liaCat">Categoria</label>
+                <select id="liaCat"><option>Análise de crédito</option><option>Prevenção de fraude</option><option>Segurança da informação</option><option>Melhoria de produto</option><option>Marketing direto</option></select></div>
+              <div class="field"><label for="liaExp">Expectativa do titular</label>
+                <select id="liaExp"><option>Média — declarado no aviso de privacidade</option><option>Alta — decorre diretamente do serviço</option><option>Baixa — exigiria comunicação ativa</option></select></div>
+            </div>
+            <div class="field" style="margin-top:11px"><label for="liaFin">Descrição</label>
+              <textarea id="liaFin" readonly>Elevar a acurácia do scoring para reduzir recusa indevida de crédito a titulares com histórico de pagamento consistente.</textarea></div>
+          </div>
+        </div>
+
+        <div class="step done">
+          <div class="step-n">2</div>
+          <div>
+            <h4>Necessidade</h4>
+            <div class="step-desc">Cada alternativa menos invasiva precisa ser respondida. "Não aplicável" também exige justificativa.</div>
+            <div id="liaChecklist"></div>
+          </div>
+        </div>
+
+        <div class="step done">
+          <div class="step-n">3</div>
+          <div>
+            <h4>Balanceamento</h4>
+            <div class="step-desc">Benefício para o controlador × dano ao titular. Arraste o controle para reposicionar.</div>
+            <div class="grid g2" style="gap:18px;align-items:start">
+              <div>
+                <div class="bal" id="balMatrix"></div>
+                <div class="row" style="justify-content:space-between;margin-top:6px;font-size:10.5px;color:var(--text-3)"><span>← menor dano</span><span>maior dano →</span></div>
+              </div>
+              <div>
+                <div class="field"><label for="balSlider">Posição do risco</label>
+                  <input type="range" id="balSlider" min="1" max="9" value="2" style="width:100%">
+                </div>
+                <div class="note" id="balVerdict" style="margin-top:10px"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="step done">
+          <div class="step-n">4</div>
+          <div>
+            <h4>Transparência e oposição</h4>
+            <div class="step-desc">Onde o titular vê isso e como ele se opõe — em um clique, não em um formulário.</div>
+            <dl class="kv">
+              <dt>Onde aparece</dt><dd>Aviso de privacidade, seção 4 "Como decidimos seu crédito", e tela de resultado da proposta.</dd>
+              <dt>Canal de oposição</dt><dd class="mono" style="font-size:12px">POST /api/v1/titulares/me/oposicao?lia=LIA-SCORING-001</dd>
+              <dt>Oposições no mês</dt><dd>4 · todas atendidas em até 48 h</dd>
+            </dl>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-n">5</div>
+          <div>
+            <h4>Evidências</h4>
+            <div class="step-desc">O que sustenta as respostas acima — prints de configuração, log redigido, política de retenção.</div>
+            <div class="drop">Arraste arquivos ou <span style="color:var(--accent);font-weight:600">selecione</span><br><span style="font-size:11.5px;color:var(--text-3)">o hash de cada arquivo é gravado junto</span></div>
+            <div class="tw" style="margin-top:11px"><table>
+              <thead><tr><th>Arquivo</th><th>Tipo</th><th>Hash</th><th>Enviado</th></tr></thead>
+              <tbody>
+                <tr><td class="mono">lia-001-log.txt</td><td>log redigido</td><td class="hash">3a5b7c9d…</td><td class="num">12/02</td></tr>
+                <tr><td class="mono">lia-001-ttl.sql</td><td>política de retenção</td><td class="hash">5c7d9e1f…</td><td class="num">12/02</td></tr>
+              </tbody>
+            </table></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="border-top:1px solid var(--line);padding-top:14px">
+        <button class="btn primary" id="genLia">Gerar LIA.md assinado</button>
+        <span class="hash" id="liaStamp">último documento: sha256 7c1f0a9b3d5e7f9a… · assinado por @dpo-marcela em 12/02/2026</span>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="card">
+        <div class="card-head"><h3>Conclusão</h3></div>
+        <div class="banner ok" style="padding:12px 14px">
+          <span class="mark">✓</span>
+          <div><h4 style="font-size:14px">Sustenta com mitigação</h4><p style="font-size:12.5px">O interesse prevalece desde que a pseudonimização e a oposição em um clique permaneçam ativas.</p></div>
+        </div>
+        <p class="note crit" style="margin-top:12px">Legítimo interesse não sustenta dado sensível (Art. 11). Se um campo marcado como sensível for vinculado a esta LIA, o catálogo rejeita a gravação.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Datasets vinculados</h3><span class="hint">quem depende desta LIA</span></div>
+        <dl class="kv">
+          <dt class="mono">credit-scoring</dt><dd>clientes.historico_compras</dd>
+          <dt>Campos</dt><dd>1 campo em 1 dataset</dd>
+          <dt>Se vencer</dt><dd><span class="pill crit">o campo perde base legal</span> e o gate de CI passa a bloquear o repositório</dd>
+        </dl>
+        <div class="row" style="margin-top:12px"><button class="btn" data-goto="t2">Ver no catálogo →</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Ciclo de revisão</h3></div>
+        <dl class="kv">
+          <dt>Assinada</dt><dd>12/02/2026 · @dpo-marcela</dd>
+          <dt>Vence em</dt><dd>01/02/2027 · <span class="pill neutral">faltam 189 dias</span></dd>
+          <dt>Aviso</dt><dd>60 dias antes, para DPO e dono do dataset</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</section>
+    </main>
+  </div>
+</div>
+
+<!-- =================== MODAIS =================== -->
+<dialog id="dlgReveal">
+  <form method="dialog">
+    <div class="dlg-head"><h3>Revelar dado pessoal</h3></div>
+    <div class="dlg-body">
+      <div class="note warn">A revelação é registrada no audit trail com seu nome, a finalidade e os campos efetivamente exibidos. O valor volta a ficar mascarado em 60 segundos.</div>
+      <div class="field">
+        <label for="revPurpose">Finalidade do acesso</label>
+        <select id="revPurpose" required>
+          <option value="">Selecione…</option>
+          <option>atendimento — responder solicitação do titular</option>
+          <option>cobranca — negociação de dívida</option>
+          <option>auditoria — verificação de conformidade</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="revJust">Justificativa (mínimo 20 caracteres)</label>
+        <textarea id="revJust" minlength="20" required placeholder="Ex.: confirmação de identidade para o protocolo 2026-0731"></textarea>
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <button class="btn" value="cancel" formnovalidate>Cancelar</button>
+      <button class="btn primary" id="revConfirm" value="ok">Revelar e registrar</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgShield">
+  <div class="dlg-head"><h3>Por que tudo começa mascarado</h3></div>
+  <div class="dlg-body">
+    <p style="margin:0;color:var(--text-2)">O mascaramento não é uma preferência de exibição — é o estado padrão do sistema. Não existe um botão que o desliga para a sessão inteira.</p>
+    <dl class="kv">
+      <dt>Padrão</dt><dd>Todo campo pessoal chega mascarado, inclusive para o DPO.</dd>
+      <dt>Revelar</dt><dd>Exige finalidade declarada e justificativa; vale por 60 s e para um campo só.</dd>
+      <dt>Registro</dt><dd>A tentativa é gravada antes da resposta. Se o log falha, a revelação falha.</dd>
+      <dt>Produto</dt><dd>O papel Produto não recebe a opção de revelar — o botão não existe na tela.</dd>
+    </dl>
+  </div>
+  <div class="dlg-foot"><button class="btn primary" onclick="document.getElementById('dlgShield').close()">Entendi</button></div>
+</dialog>
+
+<dialog id="dlgRisk">
+  <form method="dialog">
+    <div class="dlg-head"><h3 id="riskTitle">Reclassificar risco</h3></div>
+    <div class="dlg-body">
+      <div class="note">Mudar a posição de um risco altera a prioridade do programa. O histórico é imutável: a justificativa fica anexada para sempre.</div>
+      <p id="riskDelta" class="mono" style="margin:0;font-size:12.5px"></p>
+      <div class="field">
+        <label for="riskJust">Justificativa da nova classificação (mínimo 20 caracteres)</label>
+        <textarea id="riskJust" minlength="20" required placeholder="Ex.: pseudonimização HMAC em produção desde 04/08 reduz a probabilidade de exposição."></textarea>
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <button class="btn" value="cancel" formnovalidate>Descartar mudança</button>
+      <button class="btn primary" value="ok">Registrar reclassificação</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+/* ===================================================================
+   Estado e dados de demonstração (espelham db/seed.sql)
+   =================================================================== */
+const RISKS = [
+  { id:'R1',  desc:'Vazamento de CPF via prompt do LLM',        p:4, i:5, dano:'material',      esforco:1.0,  dono:'@eng-maria',    dominio:'Engenharia', prazo:'15/08', reav:'15/11', tipo:'Mitigar',  status:'em tratamento', trat:'Pseudonimização HMAC pré-prompt + SCC com a OpenAI', danoTxt:'Crédito negado indevidamente e exposição do documento fora do perímetro' },
+  { id:'R2',  desc:'Decisão automatizada sem canal de revisão', p:3, i:5, dano:'discriminacao', esforco:2.0,  dono:'@dpo-marcela',  dominio:'DPO',        prazo:'29/08', reav:'29/11', tipo:'Mitigar',  status:'em tratamento', trat:'Endpoint /revisao + teste de disparidade no CI',      danoTxt:'Discriminação algorítmica sem via de contestação (Art. 20)' },
+  { id:'R3',  desc:'Transferência internacional sem SCC',       p:2, i:5, dano:'perda',         esforco:0.25, dono:'@juridico-ana', dominio:'Jurídico',   prazo:'08/08', reav:'08/11', tipo:'Mitigar',  status:'mitigado',      trat:'Contrato DPA + cláusulas-padrão da ANPD',            danoTxt:'Dado sai do país sem mecanismo do Art. 33' },
+  { id:'R4',  desc:'Retenção além do necessário',               p:4, i:3, dano:'perda',         esforco:1.0,  dono:'@sre-carlos',   dominio:'SRE',        prazo:'15/08', reav:'15/11', tipo:'Mitigar',  status:'mitigado',      trat:'TTL policies + job de expurgo diário',               danoTxt:'Acúmulo de PII sem finalidade ativa' },
+  { id:'R5',  desc:'PII em log de produção',                    p:5, i:3, dano:'perda',         esforco:0.5,  dono:'@sre-lucas',    dominio:'SRE',        prazo:'01/08', reav:'01/11', tipo:'Mitigar',  status:'mitigado',      trat:'Middleware de redação + redator no Fluentd',         danoTxt:'Exposição do titular em qualquer incidente de log' },
+  { id:'R6',  desc:'Tracking de terceiro ligado por padrão',    p:3, i:4, dano:'perda',         esforco:1.0,  dono:'@eng-pedro',    dominio:'Engenharia', prazo:'22/08', reav:'22/11', tipo:'Mitigar',  status:'em tratamento', trat:'Feature flag default false + gate no CI',            danoTxt:'Rastreamento sem consentimento livre e informado' },
+  { id:'R7',  desc:'Legítimo interesse sem LIA documentada',    p:4, i:2, dano:'perda',         esforco:0.5,  dono:'@dpo-marcela',  dominio:'DPO',        prazo:'15/08', reav:'15/11', tipo:'Mitigar',  status:'mitigado',      trat:'Preencher e assinar LIA-SCORING-001',                danoTxt:'Tratamento sem balanceamento demonstrável' },
+  { id:'R8',  desc:'Ausência de RLS no banco de clientes',      p:2, i:5, dano:'material',      esforco:2.0,  dono:'@seg-rita',     dominio:'Segurança',  prazo:'29/08', reav:'29/11', tipo:'Mitigar',  status:'em tratamento', trat:'RLS por tenant + RBAC por finalidade',               danoTxt:'Conta comprometida acessa a base inteira' },
+  { id:'R9',  desc:'Revogação sem cascata de eliminação',       p:3, i:4, dano:'perda',         esforco:2.0,  dono:'@eng-maria',    dominio:'Engenharia', prazo:'22/08', reav:'22/11', tipo:'Mitigar',  status:'aberto',        trat:'Job de eliminação por escopo + webhook a parceiros', danoTxt:'Titular revoga e o dado permanece nos sistemas a jusante' },
+  { id:'R10', desc:'Backup sem criptografia gerenciada',        p:1, i:5, dano:'perda',         esforco:1.0,  dono:'@sre-carlos',   dominio:'SRE',        prazo:'08/08', reav:'08/11', tipo:'Mitigar',  status:'mitigado',      trat:'Habilitar SSE-KMS nos snapshots do RDS',             danoTxt:'Perda irreversível e exposição do snapshot' }
+];
+const DANO_COR = { material: 'var(--crit)', discriminacao: 'var(--sens)', perda: 'var(--warn)' };
+
+const CAMPOS = [
+  { n:'cpf',               sis:'credit-scoring', ds:'clientes',    tipo:'hash',          cat:'pessoal',        sens:false, fin:'Nota fiscal e identificação',  base:'execucao_contrato', ret:'5 anos',   comp:'—', intl:false },
+  { n:'renda',             sis:'credit-scoring', ds:'clientes',    tipo:'criptografado', cat:'pessoal',        sens:false, fin:'Capacidade de pagamento',     base:'execucao_contrato', ret:'2 anos',   comp:'—', intl:false },
+  { n:'score_serasa',      sis:'credit-scoring', ds:'clientes',    tipo:'criptografado', cat:'pessoal',        sens:false, fin:'Risco de inadimplência',      base:'protecao_credito',  ret:'90 dias',  comp:'Serasa', intl:false },
+  { n:'historico_compras', sis:'credit-scoring', ds:'clientes',    tipo:'hmac',          cat:'pseudonimizado', sens:false, fin:'Enriquecimento do modelo',    base:'legitimo_interesse',ret:'180 dias', comp:'OpenAI', intl:true },
+  { n:'shap_values',       sis:'credit-scoring', ds:'decisoes_ia', tipo:'agregado',      cat:'anonimizado',    sens:false, fin:'Explicabilidade (Art. 20)',   base:'protecao_credito',  ret:'90 dias',  comp:'—', intl:false },
+  { n:'email',             sis:'onboarding',     ds:'cadastros',   tipo:'hmac',          cat:'pseudonimizado', sens:false, fin:'Comunicação transacional',    base:'execucao_contrato', ret:'até revogação', comp:'SendGrid', intl:true },
+  { n:'biometria_facial',  sis:'onboarding',     ds:'cadastros',   tipo:'criptografado', cat:'sensivel',       sens:true,  fin:'Prova de vida no onboarding', base:'consentimento',     ret:'30 dias',  comp:'—', intl:false }
+];
+const ICONE_TIPO = { hash:'🔒', hmac:'🎭', bruto:'📷', criptografado:'🔐', agregado:'📊' };
+
+const LINDDUN = [
+  { k:'location',     nome:'Location',        canon:'Identifiability por geolocalização', on:false, mit:'Truncar coordenadas para o centroide do município antes de qualquer persistência.' },
+  { k:'inference',    nome:'Inference',       canon:'Detectability',                      on:true,  mit:'Remover features proxy (CEP, nome da mãe, canal de atendimento) do conjunto de treino.' },
+  { k:'disclosure',   nome:'Disclosure',      canon:'Disclosure of information',          on:true,  mit:'DTO por escopo com allowlist de campos; nenhuma entidade do ORM é serializada direta.' },
+  { k:'discrimina',   nome:'Discrimination',  canon:'Non-compliance (Art. 6º, IX)',       on:true,  mit:'Teste de disparate impact com limiar 0,8–1,2 bloqueando o release do modelo.' },
+  { k:'unauthorized', nome:'Unauthorized',    canon:'Linkability + Identifiability',      on:true,  mit:'Autorização por objeto com checagem de posse; 404 uniforme em vez de 403.' },
+  { k:'nonrepud',     nome:'Non-repudiation', canon:'Non-repudiation',                    on:true,  mit:'audit_log append-only com hash encadeado e finalidade obrigatória por acesso.' }
+];
+
+const LIA_ALT = [
+  { a:'Anonimização',    s:'rejeitado',     j:'A agregação com k-anonimato destrói o sinal individual: queda de 31 p.p. de AUC no teste de jul/2026.' },
+  { a:'Pseudonimização', s:'atendido',      j:'CPF vira token HMAC-SHA256 com chave no KMS antes de qualquer uso analítico ou envio ao LLM.' },
+  { a:'Escopo menor',    s:'atendido',      j:'Removidas as features cep, nome_mae e canal_atendimento por serem proxies discriminatórios.' },
+  { a:'Retenção menor',  s:'atendido',      j:'Janela reduzida de 24 para 6 meses de histórico, com perda de apenas 1,2 p.p. de AUC.' },
+  { a:'Agregação',       s:'nao_aplicavel', j:'A decisão é individual por titular; dado agregado não sustenta a finalidade.' },
+  { a:'Consentimento',   s:'rejeitado',     j:'Condicionaria a análise de crédito à aceitação, tornando o consentimento não livre.' }
+];
+
+const RACI = [
+  ['Definição de base legal', 'A','C','I','I','C','I'],
+  ['LINDDUN / threat model',  'C','I','C','A','I','I'],
+  ['LIA',                     'A','C','I','I','C','I'],
+  ['SCC / DPA com terceiros', 'C','A','C','I','I','I'],
+  ['Controle técnico',        'I','I','C','A','I','C'],
+  ['Resposta a incidente',    'C','C','A','C','I','I'],
+  ['Atendimento a titular',   'A','I','I','C','I','C']
+];
+
+const NOTAS = {
+  t1: { eng:'Comece pelos PRs bloqueados — cada linha traz o arquivo, a regra e a correção. As métricas do topo são consequência do que a esteira deixa passar.',
+        dpo:'O scorecard e o mapa de calor são o material do comitê. Cada número vem de um snapshot imutável: dá para reproduzir o que você apresentou mês passado.',
+        produto:'Use o mapa de calor para negociar prazo: bolhas à esquerda custam menos de uma sprint e derrubam risco alto.' },
+  t2: { eng:'O catálogo é lido do seu YAML. Se um campo aparece aqui sem base legal, o gate barra o próximo PR do repositório.',
+        dpo:'Este é o ROPA que você entrega em fiscalização. Filtre por transferência internacional para revisar os mecanismos do Art. 33.',
+        produto:'Antes de pedir um campo novo, procure se ele já existe: campo repetido é risco duplicado sem valor novo.' },
+  t3: { eng:'A triagem já apontou o que travou. Preencha com evidência técnica — schema, log, teste — e o RIPD.md volta como commit no seu PR.',
+        dpo:'Você aprova aqui e o status check no GitHub muda sozinho. A aprovação fica assinada com o hash do documento.',
+        produto:'O RIPD define o que a feature pode fazer. Ler as recomendações P0 evita descobrir o limite no dia do lançamento.' },
+  t4: { eng:'Cada aba corresponde a um endpoint com prazo e nível de autenticação. Direito sem rota aqui é direito que não existe.',
+        dpo:'O cronômetro é o seu radar: a menos de 24 h do prazo a plataforma te avisa antes de o titular cobrar.',
+        produto:'Você acompanha volume e prazo, mas não recebe a opção de revelar dado de titular — o botão não fica escondido, ele não é renderizado.' },
+  t5: { eng:'Risco com dono de engenharia vira tarefa. Score alto com esforço baixo é o que entra na sprint primeiro.',
+        dpo:'Arrastar uma bolha exige justificativa e fica no histórico. É assim que você defende a priorização meses depois.',
+        produto:'O RACI mostra quem decide o quê. Se um processo trava, a pessoa accountable está nesta tabela.' },
+  t6: { eng:'Se um lote falha, o registro traz a tabela e o hash. A reexecução é idempotente: o par pré/pós prova o que já foi eliminado.',
+        dpo:'É esta tela que responde "quem garante que foi apagado". O relatório em PDF sai com hash próprio para verificação futura.',
+        produto:'O volume de expurgo mostra o custo de guardar dado: cada linha aqui foi coletada um dia sem prazo definido.' },
+  t7: { eng:'A etapa 4 é a que pode travar deploy: enquanto a re-encriptação roda, os dois aliases precisam continuar válidos.',
+        dpo:'Cripto-shredding é o que permite cumprir eliminação em base imutável. Onde está "não suportado", só resta hard delete.',
+        produto:'Rotação de chave não muda funcionalidade, mas a janela de canary pede atenção em lançamentos na mesma semana.' },
+  t8: { eng:'Sem LIA vigente o campo de legítimo interesse é recusado na gravação do catálogo — não é aviso, é erro.',
+        dpo:'Os três passos são a prova que a ANPD pede. O documento sai com hash e a sua assinatura.',
+        produto:'Se o balanceamento não sustenta, a saída não é insistir: é reduzir escopo ou trocar a base legal.' }
+};
+
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const el = (tag, cls, html) => { const n = document.createElement(tag); if (cls) n.className = cls; if (html != null) n.innerHTML = html; return n; };
+const svgEl = (t, attrs = {}) => { const n = document.createElementNS('http://www.w3.org/2000/svg', t); for (const k in attrs) n.setAttribute(k, attrs[k]); return n; };
+
+/* ===================== Navegação e papéis ===================== */
+function irPara(id) {
+  $$('.screen').forEach(s => s.dataset.active = String(s.id === id));
+  $$('.nav').forEach(b => b.setAttribute('aria-current', String(b.dataset.goto === id)));
+  window.scrollTo({ top: 0, behavior: 'instant' });
+}
+document.addEventListener('click', e => {
+  const alvo = e.target.closest('[data-goto]');
+  if (alvo) irPara(alvo.dataset.goto);
+});
+
+let papel = 'eng';
+function aplicarPapel(p) {
+  papel = p;
+  document.body.dataset.role = p;
+  $$('#roles button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.role === p)));
+  for (const tela in NOTAS) {
+    const alvo = $('#note-' + tela);
+    if (alvo) alvo.innerHTML = '<b>' + ({ eng:'Engenharia', dpo:'DPO', produto:'Produto' })[p] + '</b> · ' + NOTAS[tela][p];
+  }
+}
+$('#roles').addEventListener('click', e => { const b = e.target.closest('button'); if (b) aplicarPapel(b.dataset.role); });
+
+$('#themeBtn').addEventListener('click', () => {
+  const escuro = getComputedStyle(document.body).backgroundColor.match(/\d+/g).map(Number)[0] < 100;
+  document.documentElement.dataset.theme = escuro ? 'light' : 'dark';
+});
+$('#shieldBtn').addEventListener('click', () => $('#dlgShield').showModal());
+
+/* ===================== Mascaramento com registro ===================== */
+let alvoRevelacao = null;
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.reveal');
+  if (!btn) return;
+  alvoRevelacao = btn.closest('.masked');
+  $('#revPurpose').value = ''; $('#revJust').value = '';
+  $('#dlgReveal').showModal();
+});
+$('#dlgReveal').addEventListener('close', function () {
+  if (this.returnValue !== 'ok' || !alvoRevelacao) return;
+  const caixa = alvoRevelacao, valor = caixa.dataset.value || '—';
+  const pontos = caixa.querySelector('.dots'), original = pontos.textContent;
+  const btn = caixa.querySelector('.reveal');
+  caixa.classList.add('open');
+  pontos.textContent = valor;
+  btn.style.display = 'none';
+  const relogio = el('span', 'countdown');
+  caixa.appendChild(relogio);
+  let resta = 60;
+  relogio.textContent = resta + 's';
+  const t = setInterval(() => {
+    resta -= 1;
+    relogio.textContent = resta + 's';
+    if (resta <= 0) {
+      clearInterval(t);
+      caixa.classList.remove('open');
+      pontos.textContent = original;
+      relogio.remove();
+      btn.style.display = '';
+    }
+  }, 1000);
+  alvoRevelacao = null;
+});
+
+/* ===================== T1 · Scorecard NIST ===================== */
+const MATURIDADE = [
+  { d:'Governar',    s:3, ant:2, ev:['RACI publicado e revisado no comitê de julho','Ata mensal com decisões rastreadas'] },
+  { d:'Identificar', s:4, ant:3, ev:['ROPA gerado do catálogo em 12 de 14 sistemas','Linhagem registrada em 2 pipelines'] },
+  { d:'Controlar',   s:3, ant:3, ev:['TTL em 83 de 88 datasets','RLS ainda pendente no banco core (risco R8)'] },
+  { d:'Comunicar',   s:2, ant:2, ev:['Portal de direitos em produção','Aviso de privacidade sem versionamento — lacuna aberta'] },
+  { d:'Proteger',    s:3, ant:2, ev:['Envelope encryption com DEK por registro','Rotação trimestral automatizada no CI'] }
+];
+(function scorecard() {
+  const raiz = $('#scorecard');
+  MATURIDADE.forEach((m, idx) => {
+    const linha = el('button', 'score-row');
+    linha.setAttribute('aria-expanded', 'false');
+    const delta = m.s - m.ant;
+    linha.innerHTML =
+      '<span style="font-size:13px">' + m.d + '</span>' +
+      '<span class="pips">' + [1,2,3,4,5].map(n => '<i class="pip' + (n <= m.s ? ' on' : '') + '"></i>').join('') + '</span>' +
+      '<span class="mono" style="font-size:12px">' + m.s.toFixed(1) +
+      (delta > 0 ? ' <span class="trend up">↑</span>' : delta < 0 ? ' <span class="trend down">↓</span>' : ' <span class="trend flat">–</span>') + '</span>';
+    const det = el('div', 'score-detail', '<ul>' + m.ev.map(e => '<li>' + e + '</li>').join('') + '</ul>');
+    det.hidden = true;
+    linha.addEventListener('click', () => {
+      const aberto = linha.getAttribute('aria-expanded') === 'true';
+      linha.setAttribute('aria-expanded', String(!aberto));
+      det.hidden = aberto;
+    });
+    raiz.append(linha, det);
+  });
+})();
+
+/* ===================== T1 · Dispersão risco × esforço ===================== */
+(function scatter() {
+  const svg = $('#riskScatter'), W = 620, H = 300, ml = 46, mb = 36, mt = 14, mr = 14;
+  const x = v => ml + (v / 2.25) * (W - ml - mr);
+  const y = v => H - mb - (v / 25) * (H - mb - mt);
+
+  [0, 5, 10, 15, 20, 25].forEach(v => {
+    svg.append(svgEl('line', { x1: ml, x2: W - mr, y1: y(v), y2: y(v), class: 'grid-line' }));
+    const t = svgEl('text', { x: ml - 8, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 10 });
+    t.textContent = v; svg.append(t);
+  });
+  [0.5, 1, 1.5, 2].forEach(v => {
+    const t = svgEl('text', { x: x(v), y: H - mb + 16, 'text-anchor': 'middle', 'font-size': 10 });
+    t.textContent = v + ' sp'; svg.append(t);
+  });
+  const rot = svgEl('text', { x: 12, y: H / 2, 'font-size': 10, transform: 'rotate(-90 12 ' + H / 2 + ')', 'text-anchor': 'middle' });
+  rot.textContent = 'score (P × I)'; svg.append(rot);
+  const xl = svgEl('text', { x: (W + ml) / 2, y: H - 4, 'font-size': 10, 'text-anchor': 'middle' });
+  xl.textContent = 'esforço estimado'; svg.append(xl);
+
+  const faixa = svgEl('rect', { x: ml, y: y(25), width: x(1.05) - ml, height: y(14) - y(25), fill: 'var(--crit)', opacity: .07 });
+  svg.append(faixa);
+  const cap = svgEl('text', { x: ml + 8, y: y(24) + 4, 'font-size': 9.5, fill: 'var(--crit)' });
+  cap.textContent = 'alto impacto, baixo esforço — resolver primeiro'; svg.append(cap);
+
+  // Posiciona e resolve sobreposição deslocando no eixo do esforço,
+  // que é estimativa — nunca no eixo do score, que é o número que importa.
+  const pts = RISKS.map(r => ({
+    r, cx: x(r.esforco), cy: y(r.p * r.i),
+    raio: 10 + (r.status === 'aberto' ? 4 : r.status === 'em tratamento' ? 2 : 0)
+  }));
+  for (let volta = 0; volta < 12; volta++) {
+    let mexeu = false;
+    for (let a = 0; a < pts.length; a++) for (let b = a + 1; b < pts.length; b++) {
+      const A = pts[a], B = pts[b];
+      const dx = B.cx - A.cx, dy = B.cy - A.cy;
+      const dist = Math.hypot(dx, dy), min = A.raio + B.raio + 3;
+      if (dist < min) {
+        const empurra = (min - dist) / 2 + 0.5;
+        const sinal = dx === 0 ? (a % 2 ? 1 : -1) : Math.sign(dx);
+        A.cx -= sinal * empurra; B.cx += sinal * empurra;
+        mexeu = true;
+      }
+    }
+    if (!mexeu) break;
+  }
+  pts.forEach(({ r, cx, cy, raio }) => {
+    const g = svgEl('g', { class: 'bub' });
+    g.append(svgEl('circle', { cx, cy, r: raio, fill: DANO_COR[r.dano], opacity: r.status === 'mitigado' ? .38 : .88 }));
+    const t = svgEl('text', { x: cx, y: cy + 3.5, class: 'bub-label', 'text-anchor': 'middle' });
+    t.textContent = r.id; g.append(t);
+    const tip = svgEl('title'); tip.textContent = r.id + ' · ' + r.desc + ' · score ' + (r.p * r.i) + ' · ' + r.status;
+    g.append(tip);
+    g.addEventListener('click', () => { irPara('t5'); selecionarRisco(r.id); });
+    svg.append(g);
+  });
+})();
+
+/* ===================== T2 · Catálogo ===================== */
+function renderCatalogo() {
+  const base = $('#f-base').value, sens = $('#f-sens').value, intl = $('#f-int').value, ret = $('#f-ret').value;
+  const dias = t => t.includes('revogação') ? 9999 : parseInt(t) * (t.includes('ano') ? 365 : 1);
+  const linhas = CAMPOS.filter(c =>
+    (base === 'Todas' || c.base === base) &&
+    (sens === 'Todos' || (sens === 'Somente sensíveis' ? c.sens : !c.sens)) &&
+    (intl === 'Todas' || (intl === 'Somente internacional' ? c.intl : !c.intl)) &&
+    (ret === 'Qualquer' ||
+      (ret === 'Até 90 dias' && dias(c.ret) <= 90) ||
+      (ret === 'Até 1 ano' && dias(c.ret) <= 365) ||
+      (ret === 'Acima de 1 ano' && dias(c.ret) > 365 && dias(c.ret) < 9999) ||
+      (ret === 'Indeterminada' && dias(c.ret) === 9999))
+  );
+  $('#catTable tbody').innerHTML = linhas.map(c => `
+    <tr>
+      <td>
+        <span class="mono">${c.n}</span>
+        ${c.sens ? ' <span class="pill sens">🔒 sensível</span>' : ''}
+        <br><span style="font-size:11px;color:var(--text-3)">${c.sis} · ${c.ds} · ${c.cat}</span>
+      </td>
+      <td style="white-space:nowrap">${ICONE_TIPO[c.tipo]} ${c.tipo}</td>
+      <td>${c.fin}</td>
+      <td><span class="mono" style="font-size:11px">${c.base}</span>${c.base === 'legitimo_interesse' ? '<br><span class="pill ok">LIA-SCORING-001</span>' : ''}</td>
+      <td class="num" style="white-space:nowrap">${c.ret}</td>
+      <td>${c.comp === '—' ? '<span style="color:var(--text-3)">—</span>' : (c.intl ? '<span class="pill warn">🌎 ' + c.comp + '</span>' : '<span class="pill neutral">' + c.comp + '</span>')}</td>
+    </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text-3);padding:22px">Nenhum campo com esses filtros.</td></tr>';
+  const sistemas = new Set(linhas.map(c => c.sis)).size;
+  $('#catCount').textContent = linhas.length + ' campo' + (linhas.length === 1 ? '' : 's') + ' · ' + sistemas + ' sistema' + (sistemas === 1 ? '' : 's');
+}
+['#f-base', '#f-sens', '#f-int', '#f-ret'].forEach(s => $(s).addEventListener('change', renderCatalogo));
+renderCatalogo();
+
+/* ===================== Diagramas de fluxo ===================== */
+function fluxo(svg, etapas, W, H) {
+  const larg = (W - 20) / etapas.length, alt = 54, y = (H - alt) / 2 - 6;
+  etapas.forEach((e, i) => {
+    const x = 10 + i * larg;
+    svg.append(svgEl('rect', { x: x + 5, y, width: larg - 26, height: alt, rx: 5,
+      fill: e.dest ? 'var(--warn-soft)' : 'var(--surface-2)',
+      stroke: e.dest ? 'var(--warn)' : 'var(--line)' }));
+    const t1 = svgEl('text', { x: x + 5 + (larg - 26) / 2, y: y + 21, 'text-anchor': 'middle', 'font-size': 11.5, 'font-weight': 600, fill: 'var(--text)' });
+    t1.textContent = e.t; svg.append(t1);
+    const t2 = svgEl('text', { x: x + 5 + (larg - 26) / 2, y: y + 38, 'text-anchor': 'middle', 'font-size': 10 });
+    t2.textContent = e.s; svg.append(t2);
+    if (i < etapas.length - 1) {
+      svg.append(svgEl('path', { d: 'M' + (x + larg - 19) + ' ' + (y + alt / 2) + ' L' + (x + larg + 2) + ' ' + (y + alt / 2),
+        stroke: 'var(--line-strong)', 'stroke-width': 1.5, 'marker-end': 'url(#arw)' }));
+    }
+  });
+  const defs = svgEl('defs');
+  const m = svgEl('marker', { id: 'arw', markerWidth: 7, markerHeight: 7, refX: 6, refY: 3, orient: 'auto' });
+  m.append(svgEl('path', { d: 'M0,0 L6,3 L0,6 Z', fill: 'var(--line-strong)' }));
+  defs.append(m); svg.append(defs);
+}
+fluxo($('#flowDiagram'), [
+  { t:'Formulário', s:'coleta com máscara' },
+  { t:'API', s:'POST · nunca na URL' },
+  { t:'PostgreSQL', s:'hash SHA-256 + sal' },
+  { t:'OpenAI', s:'pseudônimo HMAC', dest:true },
+  { t:'Data lake', s:'zona confiável' },
+  { t:'Expurgo', s:'5 anos · hash pré/pós' }
+], 900, 150);
+
+fluxo($('#ripdFlow'), [
+  { t:'Proposta', s:'renda, CPF' },
+  { t:'Pseudonimizador', s:'HMAC + KMS' },
+  { t:'gpt-4o', s:'EUA · SCC', dest:true },
+  { t:'Decisão', s:'SHAP registrado' },
+  { t:'Revisão', s:'humano reverte' }
+], 760, 90);
+
+/* ===================== T3 · LINDDUN ===================== */
+function renderLinddun() {
+  $('#linddun').innerHTML = LINDDUN.map((c, i) => `
+    <label class="ck" style="cursor:pointer">
+      <span>
+        <span class="ck-name">${c.nome}</span>
+        <span class="ck-just">≡ ${c.canon}</span>
+      </span>
+      <span class="toggle"><input type="checkbox" data-ld="${i}" ${c.on ? 'checked' : ''}><span class="track"></span></span>
+    </label>`).join('');
+  $('#mitigacoes').innerHTML = LINDDUN.filter(c => c.on).map(c =>
+    '<li><b>' + c.nome + '</b> — ' + c.mit + '</li>').join('') ||
+    '<li style="color:var(--text-3)">Nenhuma categoria ativa. Um threat model vazio não passa no gate de arquitetura.</li>';
+}
+$('#linddun').addEventListener('change', e => {
+  const i = e.target.dataset.ld;
+  if (i == null) return;
+  LINDDUN[i].on = e.target.checked;
+  renderLinddun();
+});
+renderLinddun();
+
+$('#genRipd').addEventListener('click', function () {
+  this.textContent = 'RIPD.md commitado no PR #1234 ✓';
+  this.disabled = true;
+});
+
+/* ===================== T4 · Abas ===================== */
+$$('.tab').forEach(t => t.addEventListener('click', () => {
+  const raiz = t.closest('.card');
+  $$('.tab', raiz).forEach(o => o.setAttribute('aria-selected', String(o === t)));
+  $$('[data-panel]', raiz).forEach(p => p.hidden = p.dataset.panel !== t.dataset.tab);
+}));
+
+/* ===================== T5 · Matriz 5×5 arrastável ===================== */
+const M = { W:560, H:430, ml:52, mb:46, mt:12, mr:12 };
+M.cw = (M.W - M.ml - M.mr) / 5;
+M.ch = (M.H - M.mt - M.mb) / 5;
+const mx = p => M.ml + (p - 0.5) * M.cw;
+const my = i => M.H - M.mb - (i - 0.5) * M.ch;
+let riscoSel = 'R1', arrastando = null;
+
+function renderMatriz() {
+  const svg = $('#riskMatrix');
+  svg.innerHTML = '';
+  for (let p = 1; p <= 5; p++) for (let i = 1; i <= 5; i++) {
+    const s = p * i;
+    svg.append(svgEl('rect', {
+      x: M.ml + (p - 1) * M.cw, y: M.H - M.mb - i * M.ch, width: M.cw, height: M.ch,
+      fill: s >= 15 ? 'var(--crit)' : s >= 8 ? 'var(--warn)' : 'var(--ok)',
+      opacity: .1, stroke: 'var(--line)'
+    }));
+  }
+  for (let n = 1; n <= 5; n++) {
+    const tx = svgEl('text', { x: mx(n), y: M.H - M.mb + 17, 'text-anchor': 'middle', 'font-size': 11 });
+    tx.textContent = n; svg.append(tx);
+    const ty = svgEl('text', { x: M.ml - 12, y: my(n) + 4, 'text-anchor': 'end', 'font-size': 11 });
+    ty.textContent = n; svg.append(ty);
+  }
+  const lx = svgEl('text', { x: (M.ml + M.W) / 2, y: M.H - 8, 'text-anchor': 'middle', 'font-size': 11 });
+  lx.textContent = 'probabilidade →'; svg.append(lx);
+  const ly = svgEl('text', { x: 16, y: (M.H - M.mb + M.mt) / 2, 'font-size': 11, 'text-anchor': 'middle',
+    transform: 'rotate(-90 16 ' + (M.H - M.mb + M.mt) / 2 + ')' });
+  ly.textContent = 'impacto →'; svg.append(ly);
+
+  RISKS.forEach(r => {
+    const g = svgEl('g', { class: 'bub' + (r.id === riscoSel ? ' sel' : ''), 'data-r': r.id });
+    const desloc = RISKS.filter(o => o.p === r.p && o.i === r.i);
+    const k = desloc.indexOf(r), off = desloc.length > 1 ? (k - (desloc.length - 1) / 2) * 34 : 0;
+    g.append(svgEl('circle', { cx: mx(r.p) + off, cy: my(r.i), r: 15, fill: DANO_COR[r.dano],
+      opacity: r.status === 'mitigado' ? .42 : .9 }));
+    const t = svgEl('text', { x: mx(r.p) + off, y: my(r.i) + 4, class: 'bub-label', 'text-anchor': 'middle' });
+    t.textContent = r.id; g.append(t);
+    const tip = svgEl('title'); tip.textContent = r.desc; g.append(tip);
+    svg.append(g);
+  });
+}
+
+function selecionarRisco(id) {
+  riscoSel = id;
+  const r = RISKS.find(x => x.id === id);
+  $('#rdTitle').textContent = r.id + ' · ' + r.desc;
+  $('#rdBody').innerHTML = `
+    <dt>Score</dt><dd><b class="mono">${r.p * r.i}</b> <span style="color:var(--text-3)">(P ${r.p} × I ${r.i})</span></dd>
+    <dt>Dano ao titular</dt><dd>${r.danoTxt}</dd>
+    <dt>Tratamento</dt><dd>${r.trat}</dd>
+    <dt>Tipo</dt><dd>${r.tipo}</dd>
+    <dt>Dono</dt><dd class="mono">${r.dono} · ${r.dominio}</dd>
+    <dt>Prazo</dt><dd>${r.prazo} · reavaliar em ${r.reav}</dd>
+    <dt>Status</dt><dd><span class="pill ${r.status === 'mitigado' ? 'ok' : r.status === 'aberto' ? 'crit' : 'warn'}">${r.status}</span></dd>`;
+  renderMatriz();
+}
+
+(function arrasto() {
+  const svg = $('#riskMatrix');
+  const paraSvg = e => {
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  };
+  svg.addEventListener('pointerdown', e => {
+    const g = e.target.closest('.bub');
+    if (!g) return;
+    const r = RISKS.find(x => x.id === g.dataset.r);
+    selecionarRisco(r.id);
+    arrastando = { r, p0: r.p, i0: r.i };
+    svg.setPointerCapture(e.pointerId);
+  });
+  svg.addEventListener('pointermove', e => {
+    if (!arrastando) return;
+    const pt = paraSvg(e);
+    const p = Math.min(5, Math.max(1, Math.ceil((pt.x - M.ml) / M.cw)));
+    const i = Math.min(5, Math.max(1, Math.ceil((M.H - M.mb - pt.y) / M.ch)));
+    if (p !== arrastando.r.p || i !== arrastando.r.i) {
+      arrastando.r.p = p; arrastando.r.i = i;
+      renderMatriz();
+    }
+  });
+  svg.addEventListener('pointerup', e => {
+    if (!arrastando) return;
+    const a = arrastando; arrastando = null;
+    svg.releasePointerCapture(e.pointerId);
+    if (a.r.p === a.p0 && a.r.i === a.i0) return;
+    $('#riskTitle').textContent = 'Reclassificar ' + a.r.id;
+    $('#riskDelta').textContent =
+      'P ' + a.p0 + ' → ' + a.r.p + '   ·   I ' + a.i0 + ' → ' + a.r.i +
+      '   ·   score ' + (a.p0 * a.i0) + ' → ' + (a.r.p * a.r.i);
+    $('#riskJust').value = '';
+    const dlg = $('#dlgRisk');
+    dlg.showModal();
+    dlg.addEventListener('close', function fim() {
+      dlg.removeEventListener('close', fim);
+      if (dlg.returnValue !== 'ok') { a.r.p = a.p0; a.r.i = a.i0; }
+      renderMatriz(); selecionarRisco(a.r.id); renderDominios();
+    });
+  });
+})();
+
+function renderDominios() {
+  const dom = {};
+  RISKS.forEach(r => {
+    dom[r.dominio] = dom[r.dominio] || { total: 0, soma: 0, crit: 0 };
+    dom[r.dominio].total++; dom[r.dominio].soma += r.p * r.i;
+    if (r.p * r.i >= 15) dom[r.dominio].crit++;
+  });
+  const maior = Math.max(...Object.values(dom).map(d => d.soma));
+  $('#domainHeat').innerHTML = Object.entries(dom)
+    .sort((a, b) => b[1].soma - a[1].soma)
+    .map(([nome, d]) => `
+      <div>
+        <div class="row" style="justify-content:space-between;font-size:12.5px">
+          <span>${nome} ${d.crit ? '<span class="pill crit">' + d.crit + ' crítico' + (d.crit > 1 ? 's' : '') + '</span>' : ''}</span>
+          <span class="mono">${d.soma}</span>
+        </div>
+        <div class="meter"><i class="${d.crit ? 'crit' : ''}" style="width:${(d.soma / maior) * 100}%"></i></div>
+      </div>`).join('');
+}
+
+$('#raciTable tbody').innerHTML = RACI.map(l => '<tr><td>' + l[0] + '</td>' +
+  l.slice(1).map(c => '<td><span class="letter ' + c + '">' + c + '</span></td>').join('') + '</tr>').join('');
+
+renderMatriz(); selecionarRisco('R1'); renderDominios();
+
+/* ===================== T6 · Calendário e integridade ===================== */
+(function calendario() {
+  const raiz = $('#calendar');
+  ['D','S','T','Q','Q','S','S'].forEach(d => raiz.append(el('div', 'cal-h', d)));
+  for (let i = 0; i < 3; i++) raiz.append(el('div', 'cal-d empty'));
+  for (let d = 1; d <= 31; d++) {
+    const c = el('div', 'cal-d', String(d));
+    if (d <= 28) {
+      const vol = 9000 + ((d * 2731) % 11000);
+      c.dataset.vol = vol;
+      c.title = d + '/07 · ' + vol.toLocaleString('pt-BR') + ' registros eliminados';
+      c.style.background = 'color-mix(in srgb, var(--accent) ' + (8 + (vol / 20000) * 26) + '%, transparent)';
+      if (d === 26) { c.classList.add('miss'); c.style.background = ''; c.title = '26/07 · job falhou — reexecutado em 27/07'; }
+      if (d === 28) c.classList.add('sel');
+    } else { c.style.color = 'var(--text-3)'; c.title = 'ainda não executado'; }
+    raiz.append(c);
+  }
+})();
+
+$('#verifyBtn').addEventListener('click', function () {
+  const b = this;
+  b.disabled = true; b.textContent = 'Recalculando cadeia…';
+  setTimeout(() => {
+    b.disabled = false; b.textContent = 'Verificar integridade';
+    $('#chainStamp').textContent = '7 blocos recalculados agora · nenhum divergente';
+    const linha = $('#purgeRows').rows[3];
+    linha.cells[5].innerHTML = '<span class="pill ok">verificado</span>';
+    const m = $('#t6 .meter i');
+    if (m) { m.style.width = '100%'; m.className = 'ok'; }
+  }, 900);
+});
+
+/* ===================== T7 · Árvore de dependências ===================== */
+(function arvore() {
+  const svg = $('#keyTree');
+  const nos = [
+    { x:20,  y:34,  w:150, t:'alias/credit-pii-v3', s:'ativa', cor:'var(--ok)' },
+    { x:20,  y:150, w:150, t:'alias/onboarding-bio-v2', s:'ativa', cor:'var(--ok)' },
+    { x:200, y:12,  w:112, t:'clientes', s:'42k/dia' },
+    { x:200, y:56,  w:112, t:'decisoes_ia', s:'42k/dia' },
+    { x:200, y:150, w:112, t:'cadastros', s:'9,8k/dia' }
+  ];
+  [[0, 2], [0, 3], [1, 4]].forEach(([a, b]) => {
+    const A = nos[a], B = nos[b];
+    svg.append(svgEl('path', {
+      d: 'M' + (A.x + A.w) + ' ' + (A.y + 17) + ' C' + (A.x + A.w + 16) + ' ' + (A.y + 17) + ' ' + (B.x - 16) + ' ' + (B.y + 17) + ' ' + B.x + ' ' + (B.y + 17),
+      fill: 'none', stroke: 'var(--line-strong)', 'stroke-width': 1.3
+    }));
+  });
+  nos.forEach(n => {
+    svg.append(svgEl('rect', { x: n.x, y: n.y, width: n.w, height: 34, rx: 4,
+      fill: n.cor ? 'var(--accent-soft)' : 'var(--surface-2)', stroke: n.cor || 'var(--line)' }));
+    const t = svgEl('text', { x: n.x + 9, y: n.y + 15, 'font-size': 10.5, fill: 'var(--text)', 'font-weight': 600 });
+    t.textContent = n.t; svg.append(t);
+    const s = svgEl('text', { x: n.x + 9, y: n.y + 27, 'font-size': 9.5 });
+    s.textContent = n.s; svg.append(s);
+  });
+  const nota = svgEl('text', { x: 20, y: 218, 'font-size': 10 });
+  nota.textContent = 'Destruir a chave torna o dataset ilegível —'; svg.append(nota);
+  const nota2 = svgEl('text', { x: 20, y: 232, 'font-size': 10 });
+  nota2.textContent = 'é a eliminação em base imutável.'; svg.append(nota2);
+})();
+
+/* ===================== T8 · LIA ===================== */
+$('#liaChecklist').innerHTML = LIA_ALT.map(a => {
+  const cor = a.s === 'atendido' ? 'ok' : a.s === 'rejeitado' ? 'crit' : 'neutral';
+  const rot = a.s === 'nao_aplicavel' ? 'não aplicável' : a.s;
+  return `<div class="ck">
+    <span><span class="ck-name">${a.a}</span><span class="ck-just">${a.j}</span></span>
+    <span class="pill ${cor}">${rot}</span>
+  </div>`;
+}).join('');
+
+(function balanceamento() {
+  const grade = $('#balMatrix'), slider = $('#balSlider'), verdict = $('#balVerdict');
+  function pintar() {
+    const v = +slider.value;
+    grade.innerHTML = '';
+    for (let idx = 1; idx <= 9; idx++) {
+      const linha = Math.ceil(idx / 3), col = ((idx - 1) % 3) + 1;
+      const beneficio = 4 - linha, dano = col, dif = beneficio - dano;
+      const c = el('div', 'bal-cell bal-' + (dif >= 2 ? 1 : dif >= 0 ? 2 : 3) + (idx === v ? ' on' : ''),
+        idx === v ? 'aqui' : '');
+      c.title = 'benefício ' + beneficio + ' × dano ' + dano;
+      grade.append(c);
+    }
+    const linha = Math.ceil(v / 3), col = ((v - 1) % 3) + 1;
+    const beneficio = 4 - linha, dano = col, dif = beneficio - dano;
+    verdict.className = 'note ' + (dif >= 2 ? '' : dif >= 0 ? 'warn' : 'crit');
+    verdict.innerHTML = dif >= 2
+      ? '<b>Sustenta.</b> O benefício supera o impacto com folga; mantenha a transparência e o canal de oposição.'
+      : dif >= 0
+        ? '<b>Sustenta com mitigação.</b> Só se pseudonimização, retenção curta e oposição em um clique continuarem ativas — é a posição atual desta LIA.'
+        : '<b>Não sustenta.</b> O dano ao titular supera o benefício. Reduza escopo, encurte a retenção ou troque a base legal.';
+  }
+  slider.addEventListener('input', pintar);
+  pintar();
+})();
+
+$('#genLia').addEventListener('click', function () {
+  this.textContent = 'LIA.md gerado e assinado ✓';
+  this.disabled = true;
+  $('#liaStamp').textContent = 'documento: sha256 ' + Math.random().toString(16).slice(2, 18) + '… · assinado agora por @dpo-marcela';
+});
+
+aplicarPapel('eng');
+</script>
