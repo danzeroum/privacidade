@@ -47,10 +47,36 @@ interface Estado {
 
 let seqAviso = 1;
 
+/**
+ * T5-02 — um banco por cenário, criado na primeira visita e mantido depois.
+ *
+ * Antes, `setCenario` recriava o `BancoMock` e apagava as reclassificações que
+ * a própria tela chama de imutáveis: o card dizia uma coisa e a barra superior
+ * fazia outra. A alternativa mais barata seria confirmar antes de descartar,
+ * mas ela ensina exatamente o contrário do que o produto defende — que registro
+ * imutável some se você clicar em OK. Aqui nada é descartável, nem com
+ * confirmação: trocar de cenário e voltar reencontra o histórico e o trail
+ * daquele cenário.
+ *
+ * O custo é segurar N bancos vivos. São três cenários de dado sintético; com
+ * dado real esta não seria a escolha.
+ */
+const BANCOS = new Map<string, BancoMock>();
+const bancoDe = (id: string): BancoMock => {
+  const existente = BANCOS.get(id);
+  if (existente) return existente;
+  const novo = new BancoMock(id);
+  BANCOS.set(id, novo);
+  return novo;
+};
+
+/** Só para os testes: cada caso começa com bancos limpos. */
+export const limparBancosDaSessao = () => BANCOS.clear();
+
 export const useSessao = create<Estado>((set, get) => ({
   papel: 'engenharia',
   cenarioId: CENARIO_PADRAO,
-  banco: new BancoMock(CENARIO_PADRAO),
+  banco: bancoDe(CENARIO_PADRAO),
   versao: 0,
   avisos: [],
   protocoloSelecionado: null,
@@ -58,9 +84,12 @@ export const useSessao = create<Estado>((set, get) => ({
   setPapel: (papel) => set({ papel }),
 
   // O protocolo é de outro cenário: mantê-lo faria a revelação registrar um
-  // atendimento que não existe mais.
+  // atendimento que não existe mais. O banco, esse, volta como estava.
   setCenario: (cenarioId) =>
-    set({ cenarioId, banco: new BancoMock(cenarioId), versao: 0, avisos: [], protocoloSelecionado: null }),
+    set((s) => ({
+      cenarioId, banco: bancoDe(cenarioId), versao: s.versao + 1,
+      avisos: [], protocoloSelecionado: null,
+    })),
 
   setProtocolo: (protocoloSelecionado) => set({ protocoloSelecionado }),
 

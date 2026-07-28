@@ -5,10 +5,12 @@ import { request } from '../src/mock/api';
 import { pode } from '../src/mock/permissoes';
 import { POLITICAS, POLITICA_PADRAO, politicaDe } from '../src/mock/politicas';
 import { CampoPII } from '../src/ui/primitivos';
+import { MemoryRouter } from 'react-router-dom';
 import T2 from '../src/screens/T2';
+import T5 from '../src/screens/T5';
 import T4 from '../src/screens/T4';
 import T6 from '../src/screens/T6';
-import { useSessao } from '../src/store/sessao';
+import { useSessao, limparBancosDaSessao } from '../src/store/sessao';
 import { sha256, hashCpf } from '../src/lib/sha256';
 import type { Papel } from '../src/mock/types';
 
@@ -18,8 +20,8 @@ beforeEach(() => {
   cleanup();
 });
 
-const chamar = (papel: Papel, req: Partial<Parameters<typeof request>[1]> & { metodo: 'GET' | 'POST' | 'PATCH' | 'DELETE'; caminho: string }) =>
-  request(banco, { papel, ator: 'teste', ...req });
+const chamar = <T = unknown,>(papel: Papel, req: Partial<Parameters<typeof request>[1]> & { metodo: 'GET' | 'POST' | 'PATCH' | 'DELETE'; caminho: string }) =>
+  request<T>(banco, { papel, ator: 'teste', ...req });
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe('Regra 1 — legítimo interesse não cobre dado sensível (Art. 11)', () => {
@@ -773,5 +775,266 @@ describe('T4-05 — "atendidas no SLA" mede SLA', () => {
     });
     // s2 vence em 19 h: concluída agora, está no prazo.
     expect(s2.concluidaEmMs!).toBeLessThanOrEqual(s2.prazoLimiteMs);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PR 3 — Acessibilidade da ação (T5) e rastro da auditoria (T6)
+// ═════════════════════════════════════════════════════════════════════════════
+
+const PAPEIS_TODOS: Papel[] = ['engenharia', 'dpo', 'produto', 'seguranca', 'auditor'];
+
+describe('T6-01 — verificar integridade deixa rastro de quem verificou', () => {
+  it('grava INTEGRIDADE_VERIFICADA antes de devolver o resultado', () => {
+    const antes = banco.auditoria.length;
+    const res = chamar('auditor', { metodo: 'POST', caminho: '/v1/audit/verificar' });
+    expect(res.status).toBe(200);
+    expect(banco.auditoria.length).toBe(antes + 1);
+
+    const registro = banco.auditoria.at(-1)!;
+    expect(registro.acao).toBe('INTEGRIDADE_VERIFICADA');
+    expect(registro.atorPapel).toBe('auditor');
+    // O registro entrou na cadeia antes da leitura: o resultado já o conta.
+    expect((res.body as { blocos: number }).blocos).toBe(antes + 1);
+  });
+
+  it('se o audit trail falha, a verificação falha e nenhum veredito sai', () => {
+    banco.simularFalhaDeLog = true;
+    const res = chamar('auditor', { metodo: 'POST', caminho: '/v1/audit/verificar' });
+    expect(res.status).toBe(503);
+    expect(res.body).not.toHaveProperty('integro');
+  });
+
+  it('verificar duas vezes devolve contagens diferentes — e a cadeia segue íntegra', () => {
+    const primeira = chamar<{ blocos: number; integro: boolean }>('auditor', {
+      metodo: 'POST', caminho: '/v1/audit/verificar',
+    });
+    const segunda = chamar<{ blocos: number; integro: boolean }>('auditor', {
+      metodo: 'POST', caminho: '/v1/audit/verificar',
+    });
+    // Efeito deliberado do T6-01: a primeira verificação entrou na cadeia.
+    expect(segunda.body.blocos).toBe(primeira.body.blocos + 1);
+    expect(primeira.body.integro).toBe(true);
+    expect(segunda.body.integro).toBe(true);
+  });
+
+  it('todos os cinco papéis verificam — o auditor externo inclusive', () => {
+    for (const p of PAPEIS_TODOS) {
+      expect(pode(p, 'verificar_integridade'), p).toBe(true);
+      const b = new BancoMock('banco');
+      expect(request(b, { papel: p, ator: 'teste', metodo: 'POST', caminho: '/v1/audit/verificar' }).status, p).toBe(200);
+    }
+  });
+
+  it('verificar continua leitura: não exige escrever, e a política diz isso', () => {
+    // Invariante: se alguém mover a rota para `escrita`, o auditor perde o ato
+    // que sustenta o parecer dele — e este teste falha antes disso chegar longe.
+    const politica = politicaDe('POST', 'audit/verificar')!;
+    expect(politica.tipo).toBe('leitura');
+    expect(politica.acao).toBe('verificar_integridade');
+    expect(pode('auditor', 'escrever')).toBe(false);
+  });
+
+  it('o banco sabe dizer quem verificou por último, lido do próprio trail', () => {
+    // A semente já traz uma verificação de Rita Nunes: o card nunca nasce vazio.
+    expect(banco.ultimaVerificacao()?.ator).toBe('Rita Nunes');
+    chamar('seguranca', { metodo: 'POST', caminho: '/v1/audit/verificar' });
+    // Derivado do trail, não de um campo paralelo: a última passa a ser a nova.
+    const ultima = banco.ultimaVerificacao()!;
+    expect(ultima.ator).toBe('teste');
+    expect(ultima.id).toBe(banco.auditoria.at(-1)!.id);
+  });
+});
+
+describe('C-06 — exportar o audit trail é um acesso, e fica registrado', () => {
+  it('papel sem exportar_auditoria recebe 403 e nenhum CSV', () => {
+    expect(pode('engenharia', 'exportar_auditoria')).toBe(false);
+    const res = chamar('engenharia', { metodo: 'POST', caminho: '/v1/audit/exportar' });
+    expect(res.status).toBe(403);
+    expect(res.body).not.toHaveProperty('csv');
+  });
+
+  it('o registro entra antes de o arquivo existir, e a si mesmo não conta', () => {
+    const antes = banco.auditoria.length;
+    const res = chamar<{ csv: string; linhas: number }>('dpo', {
+      metodo: 'POST', caminho: '/v1/audit/exportar',
+    });
+    expect(res.status).toBe(200);
+    expect(banco.auditoria.length).toBe(antes + 1);
+    // O CSV foi montado depois do append: a linha da própria exportação está nele.
+    expect(res.body.linhas).toBe(antes + 1);
+    expect(res.body.csv).toContain('AUDIT_EXPORTADO');
+  });
+
+  it('a exportação filtrada e a completa são atos distintos no trail', () => {
+    chamar('dpo', { metodo: 'POST', caminho: '/v1/audit/exportar', body: { filtro: 'EXPURGO' } });
+    const filtrada = banco.auditoria.at(-1)!;
+    expect(filtrada.acao).toBe('AUDIT_EXPORTADO');
+    expect(filtrada.recursoId).toBe('filtro:EXPURGO');
+    expect(filtrada.campos.some((c) => c.startsWith('linhas='))).toBe(true);
+    expect(filtrada.campos).toContain('papel=dpo');
+
+    chamar('dpo', { metodo: 'POST', caminho: '/v1/audit/exportar' });
+    expect(banco.auditoria.at(-1)!.recursoId).toBe('trail_completo');
+  });
+
+  it('se o audit trail falha, nada é exportado', () => {
+    banco.simularFalhaDeLog = true;
+    const res = chamar('dpo', { metodo: 'POST', caminho: '/v1/audit/exportar' });
+    expect(res.status).toBe(503);
+    expect(res.body).not.toHaveProperty('csv');
+  });
+
+  it('o CSV carrega o hash do próprio conteúdo no rodapé', () => {
+    const res = chamar<{ csv: string; hashArquivo: string; linhas: number }>('dpo', {
+      metodo: 'POST', caminho: '/v1/audit/exportar',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.csv).toContain(`# sha256=${res.body.hashArquivo}`);
+    // O hash é do conteúdo, não do arquivo com rodapé: quem confere em 2029
+    // recalcula sobre as linhas e chega ao mesmo valor.
+    const conteudo = res.body.csv.split('\n').filter((l) => !l.startsWith('#')).join('\n');
+    expect(sha256(conteudo)).toBe(res.body.hashArquivo);
+  });
+
+  it('anti-enumeração vale no export: papel não confiável não recebe o total', () => {
+    const doAuditor = chamar<{ totalNoTrail?: number; linhas: number }>('auditor', {
+      metodo: 'POST', caminho: '/v1/audit/exportar', body: { filtro: 'EXPURGO' },
+    });
+    expect(doAuditor.status).toBe(200);
+    expect(pode('auditor', 'ver_total_itens')).toBe(false);
+    expect(doAuditor.body.totalNoTrail).toBeUndefined();
+    expect(doAuditor.body.linhas).toBeGreaterThan(0);
+
+    const doDpo = chamar<{ totalNoTrail?: number }>('dpo', { metodo: 'POST', caminho: '/v1/audit/exportar' });
+    expect(doDpo.body.totalNoTrail).toBe(banco.auditoria.length);
+  });
+});
+
+describe('T5-01 — reclassificar sem arrasto', () => {
+  beforeEach(() => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+  });
+
+  it('a matriz é grade com 25 células e um botão por risco', () => {
+    render(<MemoryRouter><T5 /></MemoryRouter>);
+    expect(screen.getAllByRole('gridcell')).toHaveLength(25);
+    const b = useSessao.getState().banco;
+    for (const r of b.cenario.riscos) {
+      expect(screen.getByRole('button', { name: new RegExp(`^${r.codigo}:`) })).toBeInTheDocument();
+    }
+  });
+
+  it('o nome acessível traz descrição, P, I e score — não só a letra', () => {
+    render(<MemoryRouter><T5 /></MemoryRouter>);
+    const b = useSessao.getState().banco;
+    const r = b.cenario.riscos[0];
+    const botao = screen.getByRole('button', { name: new RegExp(`^${r.codigo}:`) });
+    expect(botao.getAttribute('aria-label')).toContain(r.descricao);
+    expect(botao.getAttribute('aria-label')).toContain(`score ${r.probabilidade * r.impacto}`);
+  });
+
+  it('as setas ajustam sem aplicar: nada é gravado até a justificativa', () => {
+    render(<MemoryRouter><T5 /></MemoryRouter>);
+    const b = useSessao.getState().banco;
+    const r = b.cenario.riscos[0];
+    const antesP = r.probabilidade;
+    const antesLog = b.auditoria.length;
+
+    const botao = screen.getByRole('button', { name: new RegExp(`^${r.codigo}:`) });
+    fireEvent.click(botao);
+    fireEvent.keyDown(botao, { key: 'ArrowRight' });
+
+    // A prévia aparece…
+    expect(screen.getByText(/Registrar reclassificação/i)).toBeInTheDocument();
+    // …e o risco não mudou, nem o trail.
+    expect(b.cenario.riscos[0].probabilidade).toBe(antesP);
+    expect(b.auditoria.length).toBe(antesLog);
+    expect(b.reclassificacoes).toHaveLength(0);
+  });
+
+  it('aplicar pelo teclado passa pelo modal e exige justificativa', () => {
+    render(<MemoryRouter><T5 /></MemoryRouter>);
+    const b = useSessao.getState().banco;
+    const r = b.cenario.riscos[0];
+    const botao = screen.getByRole('button', { name: new RegExp(`^${r.codigo}:`) });
+    fireEvent.click(botao);
+    fireEvent.keyDown(botao, { key: 'ArrowUp' });
+    fireEvent.click(screen.getByRole('button', { name: /Registrar reclassificação/i }));
+
+    const confirmar = screen.getByRole('button', { name: /Registrar reclassificação/i });
+    expect(confirmar).toBeDisabled();
+    expect(b.reclassificacoes).toHaveLength(0);
+  });
+
+  it('quem não gerencia risco não recebe o controle de reclassificar', () => {
+    useSessao.setState({ papel: 'produto' });
+    render(<MemoryRouter><T5 /></MemoryRouter>);
+    expect(screen.queryByRole('button', { name: /Reclassificar P × I/i })).toBeNull();
+    expect(pode('produto', 'gerenciar_risco')).toBe(false);
+  });
+});
+
+describe('T5-02 — cada cenário guarda o próprio histórico', () => {
+  it('trocar de cenário e voltar reencontra as reclassificações', () => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'dpo', cenarioId: 'banco', versao: 0, avisos: [] });
+    const { setCenario, chamar: chamarNaSessao } = useSessao.getState();
+
+    setCenario('banco');
+    const primeiro = useSessao.getState().banco;
+    const risco = primeiro.cenario.riscos[0];
+    chamarNaSessao({
+      metodo: 'PATCH', caminho: `/v1/risks/${risco.codigo}`,
+      body: { probabilidade: 2, impacto: 2, justificativa: 'Pseudonimização em produção reduz a exposição.' },
+    });
+    expect(primeiro.reclassificacoes).toHaveLength(1);
+
+    setCenario('varejo');
+    expect(useSessao.getState().banco.reclassificacoes).toHaveLength(0);
+
+    setCenario('banco');
+    expect(useSessao.getState().banco).toBe(primeiro);
+    expect(useSessao.getState().banco.reclassificacoes).toHaveLength(1);
+  });
+
+  it('o trail de cada cenário também sobrevive à troca', () => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'auditor', cenarioId: 'banco', versao: 0, avisos: [] });
+    const { setCenario, chamar: chamarNaSessao } = useSessao.getState();
+
+    setCenario('banco');
+    chamarNaSessao({ metodo: 'POST', caminho: '/v1/audit/verificar' });
+    const comVerificacao = useSessao.getState().banco.auditoria.length;
+
+    setCenario('midia');
+    setCenario('banco');
+    expect(useSessao.getState().banco.auditoria.length).toBe(comVerificacao);
+    expect(useSessao.getState().banco.ultimaVerificacao()).not.toBeNull();
+  });
+});
+
+describe('T5-03 — só é botão a célula que a ação alcança', () => {
+  it('as letras do RACI não são mais botões', () => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    render(<MemoryRouter><T5 /></MemoryRouter>);
+    for (const letra of ['A', 'R', 'C', 'I']) {
+      expect(screen.queryByRole('button', { name: new RegExp(`^${letra}$`) })).toBeNull();
+    }
+  });
+
+  it('a demonstração da recusa é um controle só, e some para papel de leitura', () => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    const { unmount } = render(<MemoryRouter><T5 /></MemoryRouter>);
+    const doDpo = screen.getAllByRole('button', { name: /Tentar um segundo accountable/i });
+    expect(doDpo.length).toBe(useSessao.getState().banco.cenario.raci.length);
+    unmount();
+
+    useSessao.setState({ papel: 'auditor' });
+    render(<MemoryRouter><T5 /></MemoryRouter>);
+    expect(screen.queryByRole('button', { name: /Tentar um segundo accountable/i })).toBeNull();
   });
 });

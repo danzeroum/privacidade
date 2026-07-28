@@ -11,6 +11,7 @@ export default function T6() {
 
   const [integridade, setIntegridade] = useState<{ blocos: number; integro: boolean; primeiraDivergencia: number | null } | null>(null);
   const [filtro, setFiltro] = useState('');
+  const [exportado, setExportado] = useState<string | null>(null);
 
   const runs = banco.cenario.expurgos;
   const hoje = runs[0];
@@ -20,17 +21,40 @@ export default function T6() {
 
   const logs = banco.auditoria.filter((l) =>
     !filtro || [l.ator, l.acao, l.recursoId, l.finalidade ?? ''].join(' ').toLowerCase().includes(filtro.toLowerCase()));
+  const ultima = banco.ultimaVerificacao();
+
+  /**
+   * T6-03 — a marcação de divergência é aplicada sobre a lista **filtrada**.
+   * Com um filtro ativo, a cadeia quebrada podia ficar fora do recorte e a tela
+   * ficava verde por omissão: o oposto do que ela existe para fazer.
+   */
+  const divergenciaEscondida = Boolean(
+    integridade && !integridade.integro && integridade.primeiraDivergencia !== null
+    && !logs.some((l) => l.id >= (integridade.primeiraDivergencia as number)),
+  );
 
   const verificar = () => {
     const res = chamar<{ blocos: number; integro: boolean; primeiraDivergencia: number | null }>({
       metodo: 'POST', caminho: '/v1/audit/verificar',
     });
+    if (res.status !== 200) return;
     setIntegridade(res.body);
     avisar(res.body.integro ? 'ok' : 'negado',
       res.body.integro
         ? `${res.body.blocos} blocos recalculados: nenhum divergente.`
         : `Cadeia quebrada a partir do bloco ${res.body.primeiraDivergencia}.`,
-      'A verificação recomputa o hash de cada linha a partir da anterior.');
+      'A verificação recomputa o hash de cada linha a partir da anterior, e fica registrada no trail.');
+  };
+
+  // C-06 — o CSV agora vem da API, que já registrou a exportação antes de
+  // montá-lo. O navegador só entrega o arquivo.
+  const exportar = () => {
+    const res = chamar<{ csv: string; linhas: number; hashArquivo: string }>({
+      metodo: 'POST', caminho: '/v1/audit/exportar', body: { filtro },
+    });
+    if (res.status !== 200) return;
+    setExportado(`${res.body.linhas} linhas · sha256 ${curto(res.body.hashArquivo)}`);
+    baixarCsv(res.body.csv);
   };
 
   const forjar = () => {
@@ -57,7 +81,7 @@ export default function T6() {
           dpo: 'É esta tela que responde "quem garante que foi apagado". O relatório sai com hash próprio para verificação futura.',
           produto: 'O volume de expurgo mostra o custo de guardar dado: cada linha aqui foi coletada um dia sem prazo definido.',
           seguranca: 'O botão de forjar demonstra o cenário de DBA comprometido — e por que o hash encadeado é a defesa.',
-          auditor: 'Verificar integridade é leitura pura: recomputa a cadeia e compara. Pode rodar à vontade.',
+          auditor: 'Verificar a cadeia e exportar o trail são os seus atos, e os dois ficam registrados: cada verificação entra no log com o seu nome.',
         }}
       />
 
@@ -70,12 +94,13 @@ export default function T6() {
           sufixo={`/${hoje.entradas.length}`}
           barra={{ pct: (verificados / hoje.entradas.length) * 100, tom: verificados === hoje.entradas.length ? 'ok' : 'warn' }}
         />
+        {/* T6-01 — o card passa a dizer quem verificou e quando, lido do trail. */}
         <Kpi
           rotulo="Cadeia de auditoria"
           valor={integridade ? (integridade.integro ? 'íntegra' : 'quebrada') : 'não verificada'}
-          rodape={integridade
-            ? `${integridade.blocos} blocos${integridade.primeiraDivergencia ? ` · divergência no ${integridade.primeiraDivergencia}` : ''}`
-            : 'clique em verificar'}
+          rodape={ultima
+            ? `${integridade ? `${integridade.blocos} blocos · ` : ''}última verificação ${new Date(ultima.ocorridoEm).toLocaleTimeString('pt-BR')} por ${ultima.ator} · registrada no trail`
+            : 'nunca verificada nesta sessão'}
         />
       </div>
 
@@ -115,10 +140,14 @@ export default function T6() {
         </div>
 
         <div className="stack">
+          {/* T6-01 — o botão saiu do `<Permitido acao="rodar_expurgo">` cujos dois
+              ramos renderizavam o mesmo controle: não protegia nada e sugeria que
+              protegia. Quem decide agora é a ação `verificar_integridade`, que
+              todos os cinco papéis têm — o auditor externo inclusive. */}
           <Cartao
             titulo="Lotes de hoje"
             acao={
-              <Permitido acao="rodar_expurgo" alternativa={<button className="btn" onClick={verificar}>Verificar integridade</button>}>
+              <Permitido acao="verificar_integridade">
                 <button className="btn" onClick={verificar}>Verificar integridade</button>
               </Permitido>
             }
@@ -155,8 +184,26 @@ export default function T6() {
                 onChange={(e) => setFiltro(e.target.value)}
                 style={{ flex: 1, minWidth: 200 }}
               />
-              <button className="btn" onClick={() => exportarCsv(logs)}>Exportar CSV</button>
+              {/* C-06 — exportar o registro de acessos é, ele mesmo, um acesso. */}
+              <Permitido
+                acao="exportar_auditoria"
+                alternativa={<span className="hint">exportação restrita a quem presta contas</span>}
+              >
+                <button className="btn" onClick={exportar}>Exportar CSV assinado</button>
+              </Permitido>
             </div>
+            {exportado && (
+              <p className="hash" style={{ marginTop: -4, marginBottom: 10 }}>
+                exportado: {exportado} · o arquivo carrega o próprio hash, e a exportação ficou no trail
+              </p>
+            )}
+            {divergenciaEscondida && (
+              <p className="note crit" role="alert" style={{ marginBottom: 10 }}>
+                <b>O filtro está escondendo a divergência.</b> A cadeia está quebrada a partir do bloco
+                {' '}{integridade?.primeiraDivergencia}, que não aparece neste recorte.{' '}
+                <button className="reveal" onClick={() => setFiltro('')}>limpar filtro e mostrar</button>
+              </p>
+            )}
             <Tabela dense cabecalho={['#', 'Quando', 'Quem', 'Ação', 'Recurso', 'Finalidade', 'Hash']}>
               {logs.map((l) => {
                 const quebrado = integridade && !integridade.integro
@@ -175,7 +222,10 @@ export default function T6() {
               })}
             </Tabela>
             {integridade && !integridade.integro && (
-              <p className="note crit" style={{ marginTop: 12 }} role="alert">
+              // Um alerta por vez. Quando o filtro esconde a divergência, quem
+              // anuncia é o aviso acionável acima; este continua como
+              // explicação, e dois alertas simultâneos não disputam a leitura.
+              <p className="note crit" style={{ marginTop: 12 }} role={divergenciaEscondida ? undefined : 'alert'}>
                 <b>Cadeia quebrada.</b> A adulteração no bloco {integridade.primeiraDivergencia} invalida ele
                 e todos os seguintes. É por isso que o hash é encadeado: mexer em uma linha exige refazer o resto,
                 e o hash anterior guardado fora da tabela denuncia a refação.
@@ -214,9 +264,12 @@ export default function T6() {
   );
 }
 
-function exportarCsv(linhas: { id: number; ocorridoEm: string; ator: string; acao: string; recursoId: string; hash: string }[]) {
-  const csv = ['id,ocorrido_em,ator,acao,recurso,hash',
-    ...linhas.map((l) => [l.id, l.ocorridoEm, l.ator, l.acao, l.recursoId, l.hash].join(','))].join('\n');
+/**
+ * Só entrega o arquivo. Montar o CSV virou trabalho da API (C-06), porque é lá
+ * que a exportação é registrada e que a anti-enumeração da Regra 6 se aplica —
+ * montar no cliente deixava as duas coisas de fora.
+ */
+function baixarCsv(csv: string) {
   if (typeof URL.createObjectURL !== 'function') return;
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));

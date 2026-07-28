@@ -2,6 +2,7 @@ import { BancoMock, FalhaDeAuditoria, LogImutavel } from './db';
 import { pode } from './permissoes';
 import { POLITICA_PADRAO, politicaDe } from './politicas';
 import { redigir } from '../lib/redator';
+import { sha256 } from '../lib/sha256';
 import { BASES_PARA_SENSIVEL } from './types';
 import type {
   BaseLegal, Campo, Categoria, DesfechoSolicitacao, Finalidade, Mecanismo, Papel,
@@ -49,11 +50,11 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
    * Duas consequências que valem nomear:
    *
    * `POST /v1/audit/verificar` é `leitura` porque recomputa hashes e compara,
-   * sem mudar uma linha. Decisão registrada para o PR 3: quando ela passar a
-   * gravar `INTEGRIDADE_VERIFICADA` (T6-01), o registro é consequência do
-   * sistema, não escalada do ator — ganha a ação própria
-   * `verificar_integridade`, concedida a todos os papéis de leitura, e **não**
-   * volta para dentro de `escrever`.
+   * sem mudar uma linha. Desde o PR 3 ela grava `INTEGRIDADE_VERIFICADA`
+   * (T6-01) e **continua** leitura, com a ação própria `verificar_integridade`:
+   * o registro é consequência do sistema, não escalada do ator. Se tivesse
+   * virado escrita, o auditor externo perderia o ato que sustenta o parecer
+   * dele. `POST /v1/audit/exportar` segue o mesmo raciocínio (C-06).
    *
    * `POST /v1/titulares/buscar` é `escrita` (grava no trail antes de responder)
    * com `foraDeEscopo: '404_uniforme'`, porque um 403 ali confirmaria que a
@@ -77,9 +78,39 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
     return recusaDeEscopo();
   }
 
+  /**
+   * T6-01 — verificar deixa rastro de quem verificou.
+   *
+   * Sai antes do `switch` pelo mesmo motivo da busca: a política da rota já foi
+   * lida acima, e o corpo aqui é a operação, não um desvio da guarda.
+   *
+   * O registro vem **antes** do resultado, como manda a Regra 3. Efeito
+   * deliberado: duas verificações seguidas não devolvem o mesmo número de
+   * blocos, porque a primeira entrou na cadeia. Quem verificou é fato
+   * auditável — não é ruído a ser escondido.
+   */
   if (metodo === 'POST' && raiz === 'audit' && partes[1] === 'verificar') {
+    try {
+      banco.auditAppend({
+        ator, atorPapel: papel, acao: 'INTEGRIDADE_VERIFICADA',
+        recursoTipo: 'audit_log', recursoId: 'cadeia',
+      });
+    } catch (e) {
+      const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a verificação.';
+      return erro(503, msg, 'Verificação que não fica registrada não sustenta parecer nenhum.') as Res<T>;
+    }
     return ok(banco.auditVerificar()) as Res<T>;
   }
+
+  /**
+   * C-06 — exportar o trail é acesso a dado pessoal, e passa a ser tratado como
+   * tal. Antes, `exportarCsv()` rodava inteiro no navegador: qualquer papel
+   * levava o registro de acessos embora, sem deixar nada para trás.
+   */
+  if (metodo === 'POST' && raiz === 'audit' && partes[1] === 'exportar') {
+    return exportarAuditoria<T>(banco, req);
+  }
+
   if (metodo === 'POST' && raiz === 'titulares' && partes[1] === 'buscar') {
     return buscarTitular<T>(banco, req);
   }
@@ -582,6 +613,59 @@ function buscarTitular<T>(banco: BancoMock, req: Req): Res<T> {
   const titular = banco.cenario.titulares.find((t) => t.cpfHash === cpfHash);
   if (!titular) return naoEncontrado as Res<T>;
   return ok({ id: titular.id, pseudonimo: `hmac:${cpfHash.slice(0, 4)}…${cpfHash.slice(-4)}` }) as Res<T>;
+}
+
+/**
+ * C-06 — exportação do audit trail.
+ *
+ * Três decisões, todas do mesmo princípio de que o export é um ato e não um
+ * download:
+ *
+ * 1. **Grava antes de gerar.** Se o registro falha, o arquivo não existe.
+ * 2. **O registro guarda papel, filtro e contagem.** Exportar 4 linhas
+ *    filtradas e exportar 900 são atos diferentes, e o trail precisa
+ *    distinguir os dois — senão a evidência do export não sustenta pergunta
+ *    nenhuma seis meses depois.
+ * 3. **Mesma anti-enumeração das telas.** O papel sem `ver_total_itens` recebe
+ *    as linhas do recorte e nenhuma contagem do universo: `totalNoTrail` é
+ *    omitido, exatamente como `totalItems` no catálogo (Regra 6). Exportar não
+ *    é porta lateral para o total que a tela nega.
+ */
+function exportarAuditoria<T>(banco: BancoMock, req: Req): Res<T> {
+  const { papel, ator } = req;
+  const filtro = String((req.body as { filtro?: string } | undefined)?.filtro ?? '').trim();
+  const alvo = filtro
+    ? banco.auditoria.filter((l) => [l.ator, l.acao, l.recursoId, l.finalidade ?? '']
+      .join(' ').toLowerCase().includes(filtro.toLowerCase()))
+    : banco.auditoria;
+
+  try {
+    banco.auditAppend({
+      ator, atorPapel: papel, acao: 'AUDIT_EXPORTADO', recursoTipo: 'audit_log',
+      recursoId: filtro ? `filtro:${filtro}` : 'trail_completo',
+      campos: [`linhas=${alvo.length}`, `papel=${papel}`],
+    });
+  } catch (e) {
+    const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a exportação.';
+    return erro(503, msg, 'Sem registro não há exportação: o export é um acesso como outro qualquer.') as Res<T>;
+  }
+
+  const linhas = alvo.map((l) => [
+    l.id, l.ocorridoEm, l.ator, l.atorPapel, l.acao,
+    `${l.recursoTipo}/${l.recursoId}`, l.finalidade ?? '-', l.protocolo ?? '-', l.resultado, l.hash,
+  ].join(','));
+  const corpo = ['id,ocorrido_em,ator,papel,acao,recurso,finalidade,protocolo,resultado,hash', ...linhas].join('\n');
+  // O arquivo carrega o próprio hash: a auditoria de 2029 confere o CSV de 2026
+  // sem depender de quem o guardou.
+  const hashArquivo = sha256(corpo);
+  const csv = `${corpo}\n# linhas=${alvo.length} exportadas por ${ator} (${papel})\n# sha256=${hashArquivo}`;
+
+  const resposta: { csv: string; linhas: number; hashArquivo: string; totalNoTrail?: number } = {
+    csv, linhas: alvo.length, hashArquivo,
+  };
+  // REGRA 6 — a contagem do universo só vai para papel confiável.
+  if (pode(papel, 'ver_total_itens')) resposta.totalNoTrail = banco.auditoria.length;
+  return ok(resposta) as Res<T>;
 }
 
 /** A guarda recusou o pedido: registra sem deixar a negativa derrubar a resposta. */
