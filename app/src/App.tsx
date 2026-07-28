@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { HashRouter, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import './ui/estilos.css';
 import { useSessao } from './store/sessao';
 import { PAPEIS, TELAS_BLOQUEADAS } from './mock/permissoes';
+import type { Papel } from './mock/types';
 import { CENARIOS } from './mock/scenarios';
 import { Modal, Nota } from './ui/primitivos';
 import T1 from './screens/T1';
@@ -35,7 +36,7 @@ export default function App() {
   );
 }
 
-function Casca() {
+export function Casca() {
   const papel = useSessao((s) => s.papel);
   const setPapel = useSessao((s) => s.setPapel);
   const cenarioId = useSessao((s) => s.cenarioId);
@@ -43,13 +44,48 @@ function Casca() {
   const banco = useSessao((s) => s.banco);
   const avisos = useSessao((s) => s.avisos);
   const fecharAviso = useSessao((s) => s.fecharAviso);
+  const avisar = useSessao((s) => s.avisar);
   const modoApresentacao = useSessao((s) => s.modoApresentacao);
   const setApresentacao = useSessao((s) => s.setApresentacao);
+  const falhaDeTransporte = useSessao((s) => s.falhaDeTransporte);
+  const setFalhaDeTransporte = useSessao((s) => s.setFalhaDeTransporte);
   const [explicando, setExplicando] = useState(false);
   const local = useLocation();
 
+  /**
+   * C-09 — tela que o papel não opera **sai do menu**.
+   *
+   * Antes, o item ficava com `aria-disabled="true"` e `pointer-events: none`:
+   * anunciava um lugar que não existe para quem está ali, e o `NavLink` ainda
+   * navegava por teclado, caindo na página de bloqueio sem ter parecido um
+   * link. A página de bloqueio continua — para acesso por link direto, que é
+   * legítimo e precisa de uma resposta clara.
+   */
   const bloqueadas = TELAS_BLOQUEADAS[papel] ?? [];
-  const grupos = [...new Set(TELAS.map((t) => t.grupo))];
+  const visiveis = TELAS.filter((t) => !bloqueadas.includes(t.rota));
+  const grupos = [...new Set(visiveis.map((t) => t.grupo))];
+
+  /**
+   * Trocar de papel muda o menu debaixo do cursor. Uma linha dizendo o que
+   * entrou e o que saiu evita a pergunta "sumiu ou eu não achei?" — e é o
+   * momento em que a fronteira fica mais fácil de entender.
+   */
+  const anterior = useRef<Papel | null>(null);
+  useEffect(() => {
+    const antes = anterior.current;
+    anterior.current = papel;
+    if (!antes || antes === papel) return;
+    const rotasAntes = TELAS.filter((t) => !(TELAS_BLOQUEADAS[antes] ?? []).includes(t.rota)).map((t) => t.rota);
+    const rotasAgora = visiveis.map((t) => t.rota);
+    const nomeDe = (rota: string) => TELAS.find((t) => t.rota === rota)?.nome ?? rota;
+    const entraram = rotasAgora.filter((r) => !rotasAntes.includes(r)).map(nomeDe);
+    const sairam = rotasAntes.filter((r) => !rotasAgora.includes(r)).map(nomeDe);
+    if (entraram.length === 0 && sairam.length === 0) return;
+    avisar('info',
+      [entraram.length ? `Entrou no menu: ${entraram.join(', ')}.` : '',
+        sairam.length ? `Saiu: ${sairam.join(', ')}.` : ''].filter(Boolean).join(' '),
+      'O menu reflete o que o papel opera. Acesso por link direto continua respondendo, com a página de bloqueio.');
+  }, [papel, visiveis]);
 
   return (
     <div className="app">
@@ -62,13 +98,11 @@ function Casca() {
         {grupos.map((g) => (
           <div key={g}>
             <div className="rail-group">{g}</div>
-            {TELAS.filter((t) => t.grupo === g).map((t) => (
+            {visiveis.filter((t) => t.grupo === g).map((t) => (
               <NavLink
                 key={t.rota}
                 to={t.rota}
                 className={({ isActive }) => `nav ${isActive ? 'ativo' : ''}`}
-                aria-disabled={bloqueadas.includes(t.rota) ? 'true' : undefined}
-                title={bloqueadas.includes(t.rota) ? 'Indisponível para o seu papel' : undefined}
               >
                 <span className="nav-id">{t.id}</span> {t.nome}
               </NavLink>
@@ -120,6 +154,18 @@ function Casca() {
             />
             <span className="track" /> modo apresentação
           </label>
+          {/* C-13 — sem um jeito de provocar a falha, o estado de erro seria
+              código que ninguém consegue ver. Fica no modo demonstração. */}
+          {banco.modoDemo && (
+            <label className="toggle" title="Simula uma resposta que não chega, para exercitar o estado de erro">
+              <input
+                type="checkbox"
+                checked={falhaDeTransporte}
+                onChange={(e) => setFalhaDeTransporte(e.target.checked)}
+              />
+              <span className="track" /> simular queda
+            </label>
+          )}
           <button className="shield" onClick={() => setExplicando(true)}>
             🛡 Dados mascarados
           </button>

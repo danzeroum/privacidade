@@ -177,7 +177,7 @@ export default function T8() {
                       );
                     }))}
                   </div>
-                  <div className="row" style={{ justifyContent: 'space-between', marginTop: 6, fontSize: 10.5, color: 'var(--text-3)' }}>
+                  <div className="row" style={{ justifyContent: 'space-between', marginTop: 6, fontSize: 12.5, color: 'var(--text-3)' }}>
                     <span>← menor dano</span><span>maior dano →</span>
                   </div>
                 </div>
@@ -242,7 +242,7 @@ export default function T8() {
             <Passo n={4} titulo="Transparência e oposição" desc="Onde o titular vê isso e como ele se opõe — em um clique, não em um formulário." feito>
               <dl className="kv">
                 <dt>Onde aparece</dt><dd>Aviso de privacidade e tela de resultado do tratamento.</dd>
-                <dt>Canal de oposição</dt><dd className="mono" style={{ fontSize: 12 }}>POST /api/v1/titulares/me/oposicao?lia={lia.codigo}</dd>
+                <dt>Canal de oposição</dt><dd className="mono" style={{ fontSize: 12.5 }}>POST /api/v1/titulares/me/oposicao?lia={lia.codigo}</dd>
                 <dt>Oposições no mês</dt><dd>4 · todas atendidas em até 48 h</dd>
               </dl>
             </Passo>

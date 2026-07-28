@@ -1,13 +1,15 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, act, cleanup } from '@testing-library/react';
+import { readFileSync } from 'fs';
+import { render, screen, fireEvent, act, cleanup, within } from '@testing-library/react';
 import { BancoMock } from '../src/mock/db';
 import { request } from '../src/mock/api';
 import { pode } from '../src/mock/permissoes';
 import { POLITICAS, POLITICA_PADRAO, politicaDe } from '../src/mock/politicas';
 import { TRANSICOES_INCIDENTE, transicaoPermitida } from '../src/mock/estados';
-import { CampoPII, Didatico } from '../src/ui/primitivos';
+import { CampoPII, Didatico, Explica } from '../src/ui/primitivos';
 import { MemoryRouter } from 'react-router-dom';
 import T2 from '../src/screens/T2';
+import { Casca } from '../src/App';
 import T1 from '../src/screens/T1';
 import T3 from '../src/screens/T3';
 import T5 from '../src/screens/T5';
@@ -1686,11 +1688,235 @@ describe('CSS · invariante — nenhuma classe simples declarada duas vezes', ()
     // do que não existir. Descoberto injetando a colisão de propósito.
     // `import.meta.url` sob vitest não é `file:`; o caminho sai do cwd, que é
     // a raiz do app.
-    const { readFileSync } = await import('fs');
     const css = readFileSync('src/ui/estilos.css', 'utf8');
     expect(css.length, 'a folha precisa ter sido lida de verdade').toBeGreaterThan(1000);
     const simples = [...css.matchAll(/^(\.[a-z0-9-]+)\s*\{/gm)].map((m) => m[1]);
     const repetidas = simples.filter((c, i) => simples.indexOf(c) !== i);
     expect([...new Set(repetidas)]).toEqual([]);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PR 6 — Legibilidade, larguras e estados
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe('C-09 · sistema — o menu reflete o papel', () => {
+  beforeEach(() => {
+    limparBancosDaSessao();
+    useSessao.setState({
+      papel: 'engenharia', banco: new BancoMock('banco'), versao: 0,
+      avisos: [], recusas: {}, modoApresentacao: true, falhaDeTransporte: false,
+    });
+  });
+
+  it('aceitação — segurança não vê T4 no menu, e o link direto cai no bloqueio', () => {
+    useSessao.setState({ papel: 'seguranca' });
+    const { unmount } = render(<MemoryRouter initialEntries={['/t1']}><Casca /></MemoryRouter>);
+    // A tela sai do menu inteiro, não fica cinza e clicável.
+    const menu = screen.getByRole('navigation', { name: /Telas/i });
+    expect(within(menu).queryByText('Direitos do titular')).toBeNull();
+    expect(within(menu).getByText('Expurgo e auditoria')).toBeInTheDocument();
+    unmount();
+
+    // Link direto continua respondendo — e responde com a página de bloqueio.
+    render(<MemoryRouter initialEntries={['/t4']}><Casca /></MemoryRouter>);
+    expect(screen.getByText(/Tela indisponível para o seu papel/)).toBeInTheDocument();
+  });
+
+  it('o DPO vê a T4; ninguém perde tela sem motivo', () => {
+    useSessao.setState({ papel: 'dpo' });
+    render(<MemoryRouter initialEntries={['/t1']}><Casca /></MemoryRouter>);
+    const menu = screen.getByRole('navigation', { name: /Telas/i });
+    expect(within(menu).getByText('Direitos do titular')).toBeInTheDocument();
+  });
+
+  it('nenhum item de menu fica "desabilitado" navegando por baixo', () => {
+    useSessao.setState({ papel: 'seguranca' });
+    render(<MemoryRouter initialEntries={['/t1']}><Casca /></MemoryRouter>);
+    const menu = screen.getByRole('navigation', { name: /Telas/i });
+    expect(within(menu).queryByLabelText(/indisponível/i)).toBeNull();
+    expect([...menu.querySelectorAll('[aria-disabled="true"]')]).toHaveLength(0);
+  });
+
+  it('trocar de papel diz em uma linha o que entrou e o que saiu', () => {
+    const { rerender } = render(<MemoryRouter initialEntries={['/t1']}><Casca /></MemoryRouter>);
+    act(() => { useSessao.setState({ papel: 'seguranca' }); });
+    rerender(<MemoryRouter initialEntries={['/t1']}><Casca /></MemoryRouter>);
+    const aviso = useSessao.getState().avisos.at(-1);
+    expect(aviso?.texto).toMatch(/Saiu: Direitos do titular/);
+  });
+});
+
+describe('C-11 · invariante — piso tipográfico', () => {
+  const PISO_INTERFACE = 12.5;
+  const PISO_GRAFICO = 11;
+
+  it('nenhuma declaração de font-size na folha fica abaixo do piso', () => {
+    const css = readFileSync('src/ui/estilos.css', 'utf8');
+    expect(css.length).toBeGreaterThan(1000);
+    /**
+     * A isenção de 11px é do **seletor**, não do valor. A primeira versão deste
+     * teste isentava o número onde quer que ele aparecesse, e deixou passar o
+     * `?` do popover a 11px — só o navegador pegou, medindo o DOM. Aqui a única
+     * regra que pode descer até 11 é `.chart text`, o rótulo de eixo.
+     */
+    const abaixo = [...css.matchAll(/([^\n{}]+)\{([^}]*)\}/g)].flatMap(([, seletor, corpo]) => {
+      const m = corpo.match(/font-size:\s*([0-9.]+)px/);
+      if (!m) return [];
+      const px = Number(m[1]);
+      const piso = seletor.includes('.chart text') ? PISO_GRAFICO : PISO_INTERFACE;
+      return px < piso ? [`${seletor.trim()}: ${px}px`] : [];
+    });
+    expect(abaixo).toEqual([]);
+  });
+
+  it('nenhum fontSize embutido em SVG fica abaixo do piso de gráfico', () => {
+    const { readdirSync } = require('fs') as typeof import('fs');
+    const telas = readdirSync('src/screens').filter((f) => f.endsWith('.tsx'));
+    const abaixo: string[] = [];
+    for (const arquivo of [...telas.map((t) => `src/screens/${t}`), 'src/ui/primitivos.tsx']) {
+      const fonte = readFileSync(arquivo, 'utf8');
+      for (const m of fonte.matchAll(/fontSize=\{([0-9.]+)\}/g)) {
+        if (Number(m[1]) < PISO_GRAFICO) abaixo.push(`${arquivo}: ${m[1]}`);
+      }
+      // `style={{ fontSize: N }}` também conta como texto de interface.
+      for (const m of fonte.matchAll(/fontSize:\s*([0-9.]+)\b/g)) {
+        if (Number(m[1]) < PISO_INTERFACE) abaixo.push(`${arquivo}: style ${m[1]}`);
+      }
+    }
+    expect(abaixo).toEqual([]);
+  });
+});
+
+describe('C-12 · unidade — um só padrão de popover, acionável por teclado', () => {
+  it('abre por Enter, fecha por Esc, e mantém o title como redundância', async () => {
+    render(<Explica rotulo="hash" titulo="Guarda: hash">Hash irreversível com sal.</Explica>);
+    const alvo = screen.getByRole('button', { name: /hash/ });
+
+    expect(alvo).toHaveAttribute('aria-expanded', 'false');
+    expect(alvo).toHaveAttribute('title', 'Guarda: hash');
+    expect(screen.queryByRole('note')).toBeNull();
+
+    // Enter num `<button>` dispara o clique nativo — é o caminho de teclado.
+    alvo.focus();
+    fireEvent.keyDown(alvo, { key: 'Enter' });
+    fireEvent.click(alvo);
+    expect(alvo).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('note')).toHaveTextContent(/Hash irreversível com sal/);
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('note')).toBeNull();
+    expect(alvo).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('integração — a guarda do catálogo explica por popover, não só por title', () => {
+    limparBancosDaSessao();
+    useSessao.setState({
+      papel: 'engenharia', banco: new BancoMock('banco'), versao: 0,
+      avisos: [], recusas: {}, falhaDeTransporte: false,
+    });
+    render(<MemoryRouter><T2 /></MemoryRouter>);
+    // `name: /hash/` sozinho casaria também a área de soltar o YAML, cujo texto
+    // menciona o hash do arquivo. O alvo é o rótulo exato da guarda.
+    const alvo = screen.getByRole('button', { name: /^🔒 hash/ });
+    fireEvent.click(alvo);
+    expect(screen.getByRole('note')).toHaveTextContent(/não é anonimização|força bruta|sal/i);
+  });
+});
+
+describe('C-13 · integração — os quatro estados', () => {
+  beforeEach(() => {
+    limparBancosDaSessao();
+    useSessao.setState({
+      papel: 'engenharia', banco: new BancoMock('banco'), versao: 0,
+      avisos: [], recusas: {}, modoApresentacao: true, falhaDeTransporte: false,
+    });
+  });
+
+  it('aceitação — erro de transporte em GET mostra erro com repetir, e a tabela sai da tela', () => {
+    render(<MemoryRouter><T2 /></MemoryRouter>);
+    const b = useSessao.getState().banco;
+    const primeiro = b.cenario.campos[0];
+    expect(screen.getByText(primeiro.nome)).toBeInTheDocument();
+
+    // Só o interruptor, sem bumpar `versao`: a primeira versão deste teste
+    // mudava os dois juntos e passava por causa do segundo, escondendo que
+    // ligar a queda sozinha não refazia a leitura.
+    act(() => { useSessao.setState({ falhaDeTransporte: true }); });
+
+    const falha = screen.getAllByRole('alert').find((n) => /Não foi possível carregar/.test(n.textContent ?? ''))!;
+    expect(falha).toBeDefined();
+    expect(falha).toHaveTextContent(/repetir é seguro/i);
+    expect(within(falha).getByRole('button', { name: /Tentar de novo/ })).toBeInTheDocument();
+    // A tabela anterior não fica na tela como se fosse a atual.
+    expect(screen.queryByText(primeiro.nome)).toBeNull();
+
+    act(() => { useSessao.setState({ falhaDeTransporte: false }); });
+    fireEvent.click(within(falha).getByRole('button', { name: /Tentar de novo/ }));
+    expect(screen.getByText(primeiro.nome)).toBeInTheDocument();
+  });
+
+  it('o gráfico da T1 também passa pelos quatro estados', () => {
+    useSessao.setState({ papel: 'dpo', falhaDeTransporte: true });
+    render(<MemoryRouter><T1 /></MemoryRouter>);
+    const falha = screen.getAllByRole('alert').find((n) => /o mapa de riscos/.test(n.textContent ?? ''))!;
+    expect(falha).toBeDefined();
+    expect(document.querySelector('.bub')).toBeNull();
+  });
+
+  it('a ação de escrita distingue transporte caído de recusa de regra', () => {
+    render(<MemoryRouter><T2 /></MemoryRouter>);
+    useSessao.setState({ falhaDeTransporte: true });
+    fireEvent.click(screen.getByRole('button', { name: /^Validar$/ }));
+
+    const falha = screen.getAllByRole('alert')
+      .find((n) => /não chegou ao servidor/i.test(n.textContent ?? ''))!;
+    expect(falha).toBeDefined();
+    expect(falha).toHaveTextContent(/Nada foi gravado/);
+
+    // Com o transporte de pé, a mesma ação volta a produzir recusa de regra —
+    // que não oferece "tentar de novo", porque repetir daria o mesmo 422.
+    act(() => { useSessao.setState({ falhaDeTransporte: false }); });
+    fireEvent.click(screen.getByRole('button', { name: /^Validar$/ }));
+    expect(screen.queryByText(/não chegou ao servidor/i)).toBeNull();
+    expect(screen.getByText(/finalidades compatíveis/)).toBeInTheDocument();
+  });
+
+  it('sem permissão é ausência — nunca carregando nem erro', () => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'auditor', banco: new BancoMock('banco'), versao: 0, falhaDeTransporte: false });
+    render(<MemoryRouter><T2 /></MemoryRouter>);
+    // O auditor não escreve: o validador não é montado, e nenhum esqueleto ou
+    // bloco de falha aparece no lugar dele.
+    expect(screen.queryByRole('button', { name: /^Validar$/ })).toBeNull();
+    expect(document.querySelector('.esqueleto')).toBeNull();
+    expect(screen.queryByText(/Não foi possível carregar/)).toBeNull();
+  });
+});
+
+describe('T1-03 · unidade — a bolha é botão inteiro', () => {
+  beforeEach(() => {
+    limparBancosDaSessao();
+    useSessao.setState({
+      papel: 'dpo', banco: new BancoMock('banco'), versao: 0,
+      avisos: [], recusas: {}, simulandoViolacao: false, falhaDeTransporte: false,
+    });
+  });
+
+  it('tem nome acessível próprio, e responde a Enter e a Espaço', () => {
+    render(<MemoryRouter><T1 /></MemoryRouter>);
+    const bolha = document.querySelector('.bub') as HTMLElement;
+    expect(bolha.getAttribute('aria-label')).toMatch(/Score \d+, esforço/);
+    expect(bolha.getAttribute('tabindex')).toBe('0');
+
+    fireEvent.keyDown(bolha, { key: ' ' });
+    expect(screen.getByRole('link', { name: /Reclassificar na matriz/ })).toBeInTheDocument();
+  });
+
+  it('o nome acessível não depende do <title>, que fica como redundância', () => {
+    render(<MemoryRouter><T1 /></MemoryRouter>);
+    const bolha = document.querySelector('.bub') as HTMLElement;
+    expect(bolha.querySelector('title')).not.toBeNull();
+    expect(bolha.getAttribute('aria-label')).not.toBe(bolha.querySelector('title')?.textContent);
   });
 });

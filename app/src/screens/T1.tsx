@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Cabecalho, Cartao, Didatico, Kpi, Nota, Pill, Tabela, Permitido } from '../ui/primitivos';
+import { Estados, useRecurso } from '../ui/estados';
 import { CORES_DANO } from '../ui/reclassificar';
 import { useSessao } from '../store/sessao';
 import type { Risco } from '../mock/types';
@@ -17,7 +18,11 @@ export default function T1() {
   const [aberto, setAberto] = useState<string | null>(null);
   const [emFoco, setEmFoco] = useState<Risco | null>(null);
 
-  const { metricas, maturidade, gates, riscos } = banco.cenario;
+  const { metricas, maturidade, gates } = banco.cenario;
+  // C-13 — o gráfico também passa pelos quatro estados. Um mapa de risco que
+  // aparece do nada é indistinguível de um mapa que carregou vazio.
+  const recursoRiscos = useRecurso<Risco[]>({ metodo: 'GET', caminho: '/v1/risks' });
+  const riscos = recursoRiscos.dados ?? [];
   const bloqueados = gates.filter((g) => g.bloqueouMerge);
   const comAviso = gates.filter((g) => !g.bloqueouMerge && g.findings.length > 0);
   const limpos = gates.filter((g) => !g.bloqueouMerge && g.findings.length === 0);
@@ -143,7 +148,16 @@ export default function T1() {
             </Permitido>
           }
         >
-          <Dispersao riscos={riscosVisiveis} simulando={incidente} aoSelecionar={(r) => setEmFoco(r)} />
+          <Estados
+            recurso={recursoRiscos}
+            rotulo="o mapa de riscos"
+            vazio={<><b>Nenhum risco catalogado neste cenário.</b>
+              <p className="hint" style={{ margin: '6px 0 0' }}>
+                O mapa sai do <span className="mono">risk-matrix.csv</span>; sem linhas lá, não há o que priorizar.
+              </p></>}
+          >
+            {() => <Dispersao riscos={riscosVisiveis} simulando={incidente} aoSelecionar={(r) => setEmFoco(r)} />}
+          </Estados>
           <div className="legend">
             <span><i className="dot" style={{ background: 'var(--crit)' }} /> Material</span>
             <span><i className="dot" style={{ background: 'var(--warn)' }} /> Moral / perda de controle</span>
@@ -260,22 +274,38 @@ function Dispersao({ riscos, simulando, aoSelecionar }: {
   return (
     <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Dispersão de riscos por esforço e score">
       <rect x={ml} y={y(25)} width={x(1.05) - ml} height={y(14) - y(25)} fill="var(--crit)" opacity={0.07} />
-      <text x={ml + 8} y={y(24) + 4} fontSize={9.5} fill="var(--crit)">alto impacto, baixo esforço — resolver primeiro</text>
+      <text x={ml + 8} y={y(24) + 4} fontSize={11} fill="var(--crit)">alto impacto, baixo esforço — resolver primeiro</text>
       {[0, 5, 10, 15, 20, 25].map((v) => (
         <g key={v}>
           <line x1={ml} x2={W - mr} y1={y(v)} y2={y(v)} stroke="var(--line)" />
-          <text x={ml - 8} y={y(v) + 4} textAnchor="end" fontSize={10}>{v}</text>
+          <text x={ml - 8} y={y(v) + 4} textAnchor="end" fontSize={11}>{v}</text>
         </g>
       ))}
       {[0.5, 1, 1.5, 2].map((v) => (
-        <text key={v} x={x(v)} y={H - mb + 16} textAnchor="middle" fontSize={10}>{v} sp</text>
+        <text key={v} x={x(v)} y={H - mb + 16} textAnchor="middle" fontSize={11}>{v} sp</text>
       ))}
-      <text x={12} y={H / 2} fontSize={10} textAnchor="middle" transform={`rotate(-90 12 ${H / 2})`}>score (P × I)</text>
-      <text x={(W + ml) / 2} y={H - 4} fontSize={10} textAnchor="middle">esforço estimado</text>
+      <text x={12} y={H / 2} fontSize={11} textAnchor="middle" transform={`rotate(-90 12 ${H / 2})`}>score (P × I)</text>
+      <text x={(W + ml) / 2} y={H - 4} fontSize={11} textAnchor="middle">esforço estimado</text>
 
       {pts.map(({ r, cx, cy, raio }) => (
-        <g key={r.codigo} className="bub" onClick={() => aoSelecionar(r)} role="button" tabIndex={0}
-           onKeyDown={(e) => { if (e.key === 'Enter') aoSelecionar(r); }}>
+        /* T1-03 — a bolha era botão pela metade: `role="button"` sem Espaço,
+           sem nome acessível além do `<title>` e sem foco visível. Agora é
+           botão inteiro — Enter e Espaço, `aria-label` com o que o `<title>`
+           dizia, e o `<title>` fica como redundância para o mouse (C-12). */
+        <g
+          key={r.codigo}
+          className="bub"
+          role="button"
+          tabIndex={0}
+          aria-label={`${r.codigo}: ${r.descricao}. Score ${r.probabilidade * r.impacto}, esforço ${r.esforcoSprints} sprint, ${r.status.replace('_', ' ')}${r.codigo === 'R11' && simulando ? '. Risco simulado' : ''}. Abre o detalhe.`}
+          onClick={() => aoSelecionar(r)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+              e.preventDefault();
+              aoSelecionar(r);
+            }
+          }}
+        >
           <title>{`${r.codigo} · ${r.descricao} · score ${r.probabilidade * r.impacto} · ${r.status}${r.codigo === 'R11' && simulando ? ' · SIMULADO' : ''}`}</title>
           <circle
             cx={cx} cy={cy} r={raio}

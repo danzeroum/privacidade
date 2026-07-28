@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useSessao } from '../store/sessao';
 import { pode, type Acao } from '../mock/permissoes';
 import { redigir, resumoDaRedacao } from '../lib/redator';
@@ -110,6 +110,55 @@ export function Didatico({ children }: { children: ReactNode }) {
   const ligado = useSessao((s) => s.modoApresentacao);
   if (!ligado) return null;
   return <>{children}</>;
+}
+
+/**
+ * C-12 — o único padrão de popover do sistema para o que explica regra.
+ *
+ * Havia conteúdo indispensável morando só em `title`: a explicação de
+ * `tipo_armazenado` na T2, a descrição do risco nas bolhas, o mecanismo do
+ * Art. 33, o nome da tabela na T6. `title` não abre por teclado, não é lido de
+ * forma confiável por leitor de tela, não funciona em toque e some se o mouse
+ * escorregar. Conteúdo que ensina a regra não pode depender disso.
+ *
+ * Aqui é um `<button>` de verdade: Enter e Espaço abrem, Esc fecha, `aria-expanded`
+ * diz o estado. O `title` **permanece** como redundância para quem já aprendeu a
+ * passar o mouse — o que ele não pode ser é o único caminho.
+ */
+export function Explica({ rotulo, titulo, children }: {
+  rotulo: ReactNode; titulo: string; children: ReactNode;
+}) {
+  const [aberto, setAberto] = useState(false);
+  const id = useId();
+
+  useEffect(() => {
+    if (!aberto) return;
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setAberto(false); };
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [aberto]);
+
+  return (
+    <span className="explica">
+      <button
+        type="button"
+        className="explica-alvo"
+        aria-expanded={aberto}
+        aria-controls={aberto ? id : undefined}
+        title={titulo}
+        onClick={() => setAberto((v) => !v)}
+      >
+        {rotulo}
+        <span className="explica-marca" aria-hidden="true">?</span>
+      </button>
+      {aberto && (
+        <span className="explica-balao" id={id} role="note">
+          <b>{titulo}</b>
+          <span>{children}</span>
+        </span>
+      )}
+    </span>
+  );
 }
 
 export function Modal({ titulo, children, rodape, aoFechar }: {

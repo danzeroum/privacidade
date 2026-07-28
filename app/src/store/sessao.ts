@@ -55,6 +55,16 @@ interface Estado {
    * apresentação. O operacional — estado, prazo, recusa — nunca some.
    */
   modoApresentacao: boolean;
+  /**
+   * C-13 — interruptor da demonstração "o transporte falhou".
+   *
+   * A API mock é síncrona e sempre responde: sem isto, o estado de erro seria
+   * um componente que ninguém consegue ver, e estado que não dá para exercitar
+   * é estado que não existe. Ligado, `chamar` devolve status 0 antes de tocar
+   * na API — falha de transporte, não recusa de regra. As duas são coisas
+   * diferentes e a tela precisa distingui-las.
+   */
+  falhaDeTransporte: boolean;
 
   setPapel: (p: Papel) => void;
   setCenario: (id: string) => void;
@@ -62,6 +72,7 @@ interface Estado {
   setRisco: (codigo: string | null) => void;
   setSimulacao: (ativa: boolean) => void;
   setApresentacao: (ativo: boolean) => void;
+  setFalhaDeTransporte: (ativa: boolean) => void;
   /**
    * Chama a API mock já com o papel e o ator da sessão.
    *
@@ -113,6 +124,7 @@ export const useSessao = create<Estado>((set, get) => ({
   simulandoViolacao: false,
   recusas: {},
   modoApresentacao: true,
+  falhaDeTransporte: false,
 
   setPapel: (papel) => set({ papel }),
 
@@ -133,8 +145,21 @@ export const useSessao = create<Estado>((set, get) => ({
 
   setApresentacao: (modoApresentacao) => set({ modoApresentacao }),
 
+  setFalhaDeTransporte: (falhaDeTransporte) => set({ falhaDeTransporte }),
+
   chamar: <T,>(req: Omit<Req, 'papel' | 'ator'>, ancora?: string) => {
-    const { banco, papel } = get();
+    const { banco, papel, falhaDeTransporte } = get();
+
+    /**
+     * C-13 — falha de transporte não é recusa. Status 0 significa "a resposta
+     * não chegou": a tela mostra erro recuperável com ação de repetir, e não
+     * uma mensagem de regra que ninguém violou.
+     */
+    if (falhaDeTransporte) {
+      return { status: 0, body: { erro: 'A resposta não chegou.' } as T,
+        regra: 'Falha de transporte — nada foi decidido, e repetir é seguro.' };
+    }
+
     const res = request<T>(banco, { ...req, papel, ator: NOME_POR_PAPEL[papel] });
 
     // Só escrita invalida a tela. Bumpar a versão em GET criaria laço de render

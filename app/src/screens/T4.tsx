@@ -186,13 +186,13 @@ export default function T4() {
                   </button>
                 </td>
                 <td>{ROTULO_DIREITO[s.direito]}</td>
-                <td className="mono" style={{ fontSize: 11.5 }}>{s.titularPseudonimo}</td>
+                <td className="mono" style={{ fontSize: 12.5 }}>{s.titularPseudonimo}</td>
                 <td className="hint">{s.sistemas.length} sistema{s.sistemas.length === 1 ? '' : 's'}</td>
                 <td style={{ minWidth: 170 }}>
                   {encerrada(s)
                     ? (
                       <>
-                        <span style={{ color: (s.concluidaEmMs ?? 0) <= s.prazoLimiteMs ? 'var(--ok)' : 'var(--warn)', fontSize: 12 }}>
+                        <span style={{ color: (s.concluidaEmMs ?? 0) <= s.prazoLimiteMs ? 'var(--ok)' : 'var(--warn)', fontSize: 12.5 }}>
                           {s.status === 'recusada' ? 'recusada' : 'concluída'} em {s.concluidaEm}
                           {' · '}{(s.concluidaEmMs ?? 0) <= s.prazoLimiteMs ? 'no prazo' : 'fora do prazo'}
                         </span>
@@ -349,7 +349,7 @@ export default function T4() {
                       <tr key={c.destino}>
                         <td>{c.destino}</td>
                         <td>{c.finalidade}</td>
-                        <td className="mono" style={{ fontSize: 11.5 }}>{c.baseLegal}</td>
+                        <td className="mono" style={{ fontSize: 12.5 }}>{c.baseLegal}</td>
                         <td>{c.internacional
                           ? <Pill tom="warn">🌎 {c.mecanismo === 'clausulas_padrao_anpd' ? 'SCC ANPD' : c.mecanismo}</Pill>
                           : <Pill tom="neutral">nacional</Pill>}</td>
