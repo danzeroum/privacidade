@@ -146,14 +146,6 @@ export default function T6() {
           <Cartao
             titulo="Audit trail"
             hint="append-only · cada linha sela a anterior"
-            acao={
-              <div className="row">
-                <button className="btn danger" onClick={tentarEditar}>Tentar editar uma linha</button>
-                <Permitido acao="escrever">
-                  <button className="btn danger" onClick={forjar}>Forjar edição no banco</button>
-                </Permitido>
-              </div>
-            }
           >
             <div className="row" style={{ marginBottom: 12 }}>
               <input
@@ -189,11 +181,33 @@ export default function T6() {
                 e o hash anterior guardado fora da tabela denuncia a refação.
               </p>
             )}
-            <Nota>
-              O botão <b>Tentar editar</b> passa pela API e recebe 409. O botão <b>Forjar</b> escreve direto na
-              estrutura, como faria quem tem acesso ao banco — e é a verificação que denuncia.
-            </Nota>
           </Cartao>
+
+          {/* T6-02 — os dois controles escrevem (ou tentam). Ficam atrás de duas
+              condições, não de uma: a ação `escrever` e o modo demonstração. */}
+          {banco.modoDemo && (
+            <Permitido acao="escrever">
+              <section
+                className="card"
+                style={{ borderStyle: 'dashed', borderColor: 'var(--line-strong)' }}
+                aria-labelledby="t6-ataque"
+              >
+                <div className="card-head">
+                  <h3 id="t6-ataque">Demonstração de ataque</h3>
+                  <span className="hint">só no modo demonstração, só para papéis que escrevem</span>
+                </div>
+                <div className="row">
+                  <button className="btn danger" onClick={tentarEditar}>Tentar editar uma linha</button>
+                  <button className="btn danger" onClick={forjar}>Forjar edição no banco</button>
+                </div>
+                <Nota>
+                  <b>Tentar editar</b> passa pela API e recebe 409 — o log é append-only no banco, não
+                  por convenção da aplicação. <b>Forjar</b> escreve direto na estrutura, como faria quem
+                  tem acesso ao banco; é a verificação da cadeia que denuncia.
+                </Nota>
+              </section>
+            </Permitido>
+          )}
         </div>
       </div>
     </>

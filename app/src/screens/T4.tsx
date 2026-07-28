@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { CampoPII, Cabecalho, Cartao, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
 import { useSessao } from '../store/sessao';
-import { hashCpf, curto } from '../lib/sha256';
+import { hashCpf } from '../lib/sha256';
 import { pode } from '../mock/permissoes';
+import type { Finalidade } from '../mock/types';
 
 const DIA = 86_400_000;
 
@@ -21,6 +22,8 @@ export default function T4() {
 
   const [aba, setAba] = useState<'dados' | 'compart' | 'revisao' | 'mensagens'>('dados');
   const [cpf, setCpf] = useState('');
+  const [finalidadeBusca, setFinalidadeBusca] = useState<Finalidade | ''>('');
+  const [ultimoHash, setUltimoHash] = useState<string | null>(null);
   const [identificado, setIdentificado] = useState<string | null>(null);
   const [rascunho, setRascunho] = useState('');
 
@@ -43,9 +46,15 @@ export default function T4() {
   const noSla = concluidas.filter((s) => s.prazoLimiteMs > Date.now() - 30 * DIA).length;
 
   const identificar = () => {
+    const h = hashCpf(cpf);
     const res = chamar<{ id: string }>({
-      metodo: 'POST', caminho: '/v1/titulares/buscar', body: { cpfHash: hashCpf(cpf) },
+      metodo: 'POST', caminho: '/v1/titulares/buscar',
+      purpose: finalidadeBusca || undefined,
+      body: { cpfHash: h },
     });
+    // T2-01 — o documento sai da sessão assim que o hash é calculado.
+    setCpf('');
+    setUltimoHash(h.slice(0, 8));
     if (res.status === 200) setIdentificado(res.body.id);
   };
 
@@ -291,30 +300,63 @@ export default function T4() {
         </Cartao>
 
         <div className="stack">
-          <Cartao titulo="Buscar titular">
-            <div className="field">
-              <label htmlFor="t4-cpf">CPF</label>
-              <input id="t4-cpf" type="text" value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="•••.•••.•••-••" />
-            </div>
-            {cpf.replace(/\D/g, '').length >= 11 && (
-              <p className="hash" style={{ marginTop: 8 }}>hash enviado: {curto(hashCpf(cpf), 20)}</p>
-            )}
-            <div className="row" style={{ marginTop: 10 }}>
-              <button
-                className="btn primary"
-                style={{ width: '100%', justifyContent: 'center' }}
-                onClick={identificar}
-                disabled={cpf.replace(/\D/g, '').length < 11}
-              >
-                Identificar com autenticação forte
-              </button>
-            </div>
-            {identificado && <p className="mono" style={{ marginTop: 8 }}>titular {identificado} carregado</p>}
-            <Nota>
-              A busca envia apenas o <b>hash</b> do CPF. O documento digitado nunca entra na URL, no histórico
-              do navegador nem no log do gateway.
-            </Nota>
-          </Cartao>
+          {/* C-01 — mesma porta da T2. Fechar uma e deixar a outra aberta seria
+              fechar a porta e esquecer a janela. */}
+          <Permitido
+            acao="buscar_titular"
+            alternativa={
+              <Cartao titulo="Buscar titular">
+                <Nota>
+                  Localizar um titular pelo documento pertence ao DPO. O seu papel acompanha a fila e os
+                  prazos, mas não recebe este campo — e a rota recusa a busca mesmo fora da tela.
+                </Nota>
+              </Cartao>
+            }
+          >
+            <Cartao titulo="Buscar titular">
+              <div className="field">
+                <label htmlFor="t4-cpf">CPF</label>
+                <input
+                  id="t4-cpf"
+                  type="text"
+                  value={cpf}
+                  onChange={(e) => setCpf(e.target.value)}
+                  placeholder="•••.•••.•••-••"
+                  autoComplete="off"
+                  inputMode="numeric"
+                />
+              </div>
+              <div className="field" style={{ marginTop: 10 }}>
+                <label htmlFor="t4-finalidade">Finalidade da busca</label>
+                <select id="t4-finalidade" value={finalidadeBusca} onChange={(e) => setFinalidadeBusca(e.target.value as Finalidade | '')}>
+                  <option value="">Selecione…</option>
+                  <option value="atendimento">atendimento — localizar solicitação do titular</option>
+                  <option value="cobranca">cobranca — negociação de dívida</option>
+                  <option value="auditoria">auditoria — verificação de conformidade</option>
+                </select>
+              </div>
+              <div className="row" style={{ marginTop: 10 }}>
+                <button
+                  className="btn primary"
+                  style={{ width: '100%', justifyContent: 'center' }}
+                  onClick={identificar}
+                  disabled={cpf.replace(/\D/g, '').length < 11 || !finalidadeBusca}
+                >
+                  Identificar com autenticação forte
+                </button>
+              </div>
+              {ultimoHash && (
+                <p className="hash" style={{ marginTop: 8 }}>
+                  hash consultado: {ultimoHash}… · o documento saiu da sessão
+                </p>
+              )}
+              {identificado && <p className="mono" style={{ marginTop: 8 }}>titular {identificado} carregado</p>}
+              <Nota>
+                A busca envia apenas o <b>hash</b> do CPF, com a finalidade declarada e registro no audit
+                trail antes da resposta. O documento digitado nunca entra na URL nem no log do gateway.
+              </Nota>
+            </Cartao>
+          </Permitido>
 
           <Cartao titulo="Distribuição do mês">
             {Object.entries(
