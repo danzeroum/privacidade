@@ -13,7 +13,10 @@ export default function T5() {
   useSessao((s) => s.versao);
 
   const riscos = banco.cenario.riscos;
-  const [sel, setSel] = useState(riscos[0]?.codigo ?? '');
+  // T1-01 — a T1 encaminha para cá com o risco já escolhido: o mapa de esforço
+  // informa, a matriz P × I é onde se reclassifica.
+  const vindoDaT1 = useSessao((s) => s.riscoSelecionado);
+  const [sel, setSel] = useState(vindoDaT1 ?? riscos[0]?.codigo ?? '');
   /**
    * T5-01 — o ajuste por teclado é **rascunho**, não aplicação.
    *
@@ -197,15 +200,15 @@ export default function T5() {
                 <div className="row" style={{ marginTop: 12, gap: 18 }}>
                   <div className="row" style={{ gap: 8 }}>
                     <span style={{ fontSize: 12.5, fontWeight: 600 }}>Probabilidade</span>
-                    <button className="stepper" aria-label="Diminuir probabilidade" onClick={() => mover(-1, 0)}>−</button>
+                    <button className="stepper-num" aria-label="Diminuir probabilidade" onClick={() => mover(-1, 0)}>−</button>
                     <span className="mono" aria-live="polite">{emAjuste.p}</span>
-                    <button className="stepper" aria-label="Aumentar probabilidade" onClick={() => mover(1, 0)}>+</button>
+                    <button className="stepper-num" aria-label="Aumentar probabilidade" onClick={() => mover(1, 0)}>+</button>
                   </div>
                   <div className="row" style={{ gap: 8 }}>
                     <span style={{ fontSize: 12.5, fontWeight: 600 }}>Impacto</span>
-                    <button className="stepper" aria-label="Diminuir impacto" onClick={() => mover(0, -1)}>−</button>
+                    <button className="stepper-num" aria-label="Diminuir impacto" onClick={() => mover(0, -1)}>−</button>
                     <span className="mono" aria-live="polite">{emAjuste.i}</span>
-                    <button className="stepper" aria-label="Aumentar impacto" onClick={() => mover(0, 1)}>+</button>
+                    <button className="stepper-num" aria-label="Aumentar impacto" onClick={() => mover(0, 1)}>+</button>
                   </div>
                 </div>
                 <div className="row" style={{ marginTop: 12 }}>

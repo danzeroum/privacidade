@@ -1,20 +1,31 @@
 import { useState } from 'react';
-import { Cabecalho, Cartao, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
-import { useSessao } from '../store/sessao';
+import { Cabecalho, Cartao, Didatico, Nota, Permitido, Pill, Recusa, Tabela } from '../ui/primitivos';
+import { useSessao, nomeDoPapel } from '../store/sessao';
 import { BASES_PARA_SENSIVEL } from '../mock/types';
+import { sha256 } from '../lib/sha256';
 import type { BaseLegal, Campo } from '../mock/types';
 
 export default function T3() {
   const banco = useSessao((s) => s.banco);
   const chamar = useSessao((s) => s.chamar);
   const avisar = useSessao((s) => s.avisar);
+  const papel = useSessao((s) => s.papel);
   useSessao((s) => s.versao);
 
   const ripd = banco.cenario.ripds[0];
   const [mermaid, setMermaid] = useState(ripd?.fluxoMermaid ?? '');
   const [doc, setDoc] = useState<string | null>(null);
   const [baseTeste, setBaseTeste] = useState<BaseLegal>('legitimo_interesse');
-  const [campoTeste, setCampoTeste] = useState(banco.cenario.campos.find((c) => c.sensivel)?.id ?? '');
+  const [anexo, setAnexo] = useState<{ commit: string; autor: string; quando: string } | null>(null);
+  /**
+   * Mesmo defeito do T8-03, aqui: a tela abria com o campo sensível escolhido e
+   * disparava a recusa antes de alguém tocar em nada. Um alerta que já está lá
+   * quando você chega não é resposta a uma ação — é decoração vermelha, e
+   * ensina a ignorar o próximo.
+   */
+  const [campoTeste, setCampoTeste] = useState(
+    banco.cenario.campos.find((c) => !c.sensivel)?.id ?? banco.cenario.campos[0]?.id ?? '',
+  );
 
   if (!ripd) return <Nota>Este cenário não tem RIPD em aberto.</Nota>;
 
@@ -30,21 +41,62 @@ export default function T3() {
     useSessao.setState((s) => ({ versao: s.versao + 1 }));
   };
 
+  /**
+   * T3-02 — baixar e anexar eram o mesmo botão, e o rótulo dizia "anexar ao PR"
+   * enquanto o clique só salvava um arquivo na pasta de downloads. São dois
+   * atos com consequências diferentes: um leva o documento para a sua máquina,
+   * o outro coloca um commit no pull request de outra pessoa.
+   */
   const gerar = () => {
-    const res = chamar<{ markdown: string }>({ metodo: 'POST', caminho: `/v1/ripds/${ripd.id}/render` });
-    if (res.status === 200) {
-      setDoc(res.body.markdown);
-      baixar(`${ripd.codigo}.md`, res.body.markdown);
-    }
+    const res = chamar<{ markdown: string }>({ metodo: 'POST', caminho: `/v1/ripds/${ripd.id}/render` }, 'ripd-gerar');
+    if (res.status === 200) setDoc(res.body.markdown);
+    return res;
+  };
+
+  const baixarDoc = () => {
+    const res = gerar();
+    if (res.status === 200) baixar(`${ripd.codigo}.md`, res.body.markdown);
+  };
+
+  const anexarAoPr = () => {
+    const res = gerar();
+    if (res.status !== 200) return;
+    // O commit é derivado do conteúdo: anexo diferente, sha diferente.
+    setAnexo({
+      commit: sha256(`${ripd.codigo}:${res.body.markdown}`).slice(0, 7),
+      autor: nomeDoPapel(papel),
+      quando: new Date().toLocaleTimeString('pt-BR'),
+    });
   };
 
   const aprovar = () => {
-    const res = chamar({ metodo: 'POST', caminho: `/v1/ripds/${ripd.id}/aprovar` });
+    const res = chamar({ metodo: 'POST', caminho: `/v1/ripds/${ripd.id}/aprovar` }, 'ripd-aprovar');
     if (res.status === 200) avisar('ok', `Status check do PR #${ripd.prNumero} voltou a verde. O merge está liberado.`);
   };
 
   const campoSelecionado = banco.cenario.campos.find((c) => c.id === campoTeste);
   const combinacaoInvalida = Boolean(campoSelecionado?.sensivel && !BASES_PARA_SENSIVEL.includes(baseTeste));
+
+  /**
+   * T3-01 — o stepper mostrava cinco seções "feitas" porque `feito` estava
+   * escrito à mão no JSX. Progresso que ninguém calcula é decoração: dizia
+   * 4/5 completo com o parecer vazio.
+   *
+   * Agora cada seção deriva do conteúdo, e o topo diz o que falta — não quanto
+   * já foi. Requisito pendente é acionável; percentual não é.
+   */
+  const requisitos = [
+    { n: 1, feito: ripd.contexto.trim().length > 0 && ripd.foraDeEscopo.trim().length > 0,
+      falta: 'contexto e escopo do parecer' },
+    { n: 2, feito: campos.length > 0, falta: 'campos importados do catálogo' },
+    { n: 3, feito: /[A-Za-z_]\w*\s*[[({]/.test(mermaid), falta: 'fluxo de dados com ao menos um nó' },
+    { n: 4, feito: ripd.operacoes.length > 0 && ripd.operacoes.every((o) => Boolean(o.baseLegal)),
+      falta: 'base legal declarada em toda operação' },
+    { n: 5, feito: ripd.recomendacoes.every((r) => r.prioridade !== 'P0' || r.concluida),
+      falta: 'recomendações P0 concluídas' },
+  ];
+  const pendentes = requisitos.filter((r) => !r.feito);
+  const feitoDe = (n: number) => requisitos.find((r) => r.n === n)?.feito ?? false;
 
   return (
     <>
@@ -82,13 +134,24 @@ export default function T3() {
       </div>
 
       <div className="grid g-2-1">
-        <Cartao titulo="Parecer técnico" hint="seções do template parecer-tecnico.md">
+        <Cartao
+          titulo="Parecer técnico"
+          hint={pendentes.length === 0
+            ? 'todos os requisitos atendidos'
+            : `${pendentes.length} requisito${pendentes.length > 1 ? 's' : ''} pendente${pendentes.length > 1 ? 's' : ''}`}
+        >
+          {pendentes.length > 0 && (
+            <Nota tom="warn">
+              Falta: {pendentes.map((r) => r.falta).join(' · ')}. O passo só fica marcado quando o dado
+              existe — o número no topo é contado, não escrito.
+            </Nota>
+          )}
           <div className="stepper">
-            <Secao n={1} titulo="Contexto e escopo" desc="O que entra, o que fica de fora e por quê." feito>
+            <Secao n={1} feitoDerivado={feitoDe(1)} titulo="Contexto e escopo" desc="O que entra, o que fica de fora e por quê.">
               <textarea readOnly value={`${ripd.contexto}\n\nFora de escopo: ${ripd.foraDeEscopo}`} />
             </Secao>
 
-            <Secao n={2} titulo="Dados tratados" desc="Importados do catálogo — sem redigitação, sem divergência." feito>
+            <Secao n={2} feitoDerivado={feitoDe(2)} titulo="Dados tratados" desc="Importados do catálogo — sem redigitação, sem divergência.">
               <Tabela cabecalho={['Campo', 'Categoria', 'Base legal', 'Retenção']}>
                 {campos.map((c) => (
                   <tr key={c.id}>
@@ -101,14 +164,14 @@ export default function T3() {
               </Tabela>
             </Secao>
 
-            <Secao n={3} titulo="Fluxo de dados" desc="Editor mermaid com pré-visualização estrutural — o mesmo diagrama vai para o threat-model.md." feito>
+            <Secao n={3} feitoDerivado={feitoDe(3)} titulo="Fluxo de dados" desc="Editor mermaid com pré-visualização estrutural — o mesmo diagrama vai para o threat-model.md.">
               <Permitido acao="gerar_ripd" alternativa={<pre className="mermaid-src">{mermaid}</pre>}>
                 <textarea value={mermaid} onChange={(e) => setMermaid(e.target.value)} style={{ minHeight: 92 }} />
               </Permitido>
               <PreviaMermaid fonte={mermaid} />
             </Secao>
 
-            <Secao n={4} titulo="Base legal por operação" desc="Legítimo interesse só é aceito com LIA vigente vinculada." feito>
+            <Secao n={4} feitoDerivado={feitoDe(4)} titulo="Base legal por operação" desc="Legítimo interesse só é aceito com LIA vigente vinculada.">
               <Tabela cabecalho={['Operação', 'Finalidade', 'Base legal', 'LIA']}>
                 {ripd.operacoes.map((o) => (
                   <tr key={o.operacao}>
@@ -138,16 +201,28 @@ export default function T3() {
                     </select>
                   </div>
                 </div>
-                {combinacaoInvalida && (
+                {/* T3-03 — o teste só falava quando recusava. Quem experimentava
+                    uma combinação válida recebia silêncio, que é indistinguível
+                    de "a ferramenta não funcionou". Um só `role="alert"` na
+                    região: o válido confirma em `role="status"`. */}
+                {combinacaoInvalida ? (
                   <p className="note crit" style={{ marginTop: 10 }} role="alert">
                     <b>Combinação recusada.</b> {campoSelecionado?.nome} é dado sensível e o Art. 11 traz rol fechado de
                     bases legais — legítimo interesse, execução de contrato e proteção ao crédito não estão nele.
+                  </p>
+                ) : (
+                  <p className="note" style={{ marginTop: 10 }} role="status">
+                    <b>Combinação aceita.</b> {campoSelecionado?.nome} sob <span className="mono">{baseTeste}</span>
+                    {campoSelecionado?.sensivel
+                      ? ` — base do rol fechado do Art. 11, que é o que dado sensível exige.`
+                      : ` — campo não sensível, e a base consta do Art. 7º.`}
+                    {baseTeste === 'legitimo_interesse' && ' Exige LIA vigente vinculada (Art. 7º, IX).'}
                   </p>
                 )}
               </div>
             </Secao>
 
-            <Secao n={5} titulo="Recomendações" desc="Cada item tem dono e prazo — sem isso o RIPD não fecha." feito={false}>
+            <Secao n={5} feitoDerivado={feitoDe(5)} titulo="Recomendações" desc="Cada item tem dono e prazo — sem isso o RIPD não fecha.">
               <Tabela cabecalho={['', 'Recomendação', 'Dono', 'Prazo', 'Status']}>
                 {ripd.recomendacoes.map((r) => (
                   <tr key={r.descricao}>
@@ -179,18 +254,32 @@ export default function T3() {
             </Secao>
           </div>
 
-          <div className="row" style={{ borderTop: '1px solid var(--line)', paddingTop: 14 }}>
-            <Permitido acao="gerar_ripd">
-              <button className="btn primary" onClick={gerar}>Gerar RIPD.md e anexar ao PR</button>
-            </Permitido>
-            <Permitido acao="aprovar_ripd">
-              <button className="btn" onClick={aprovar} disabled={ripd.status === 'aprovado'}>
-                {ripd.status === 'aprovado' ? 'Aprovado' : 'Aprovar como DPO'}
-              </button>
-            </Permitido>
-            <span className="hint">
-              {ripd.recomendacoes.filter((r) => r.prioridade === 'P0' && !r.concluida).length} recomendação P0 em aberto
-            </span>
+          <div style={{ borderTop: '1px solid var(--line)', paddingTop: 14 }}>
+            <div className="row">
+              <Permitido acao="gerar_ripd">
+                <button className="btn" onClick={baixarDoc}>Baixar RIPD.md</button>
+                <button className="btn primary" onClick={anexarAoPr}>Anexar ao PR #{ripd.prNumero}</button>
+              </Permitido>
+              <Permitido acao="aprovar_ripd">
+                <button className="btn" onClick={aprovar} disabled={ripd.status === 'aprovado'}>
+                  {ripd.status === 'aprovado' ? 'Aprovado' : 'Aprovar como DPO'}
+                </button>
+              </Permitido>
+              <span className="hint">
+                {ripd.recomendacoes.filter((r) => r.prioridade === 'P0' && !r.concluida).length} recomendação P0 em aberto
+              </span>
+            </div>
+            {/* C-10 — a recusa da aprovação fica aqui, no cartão do botão que
+                falhou, e não no canto da tela do outro lado. */}
+            <Recusa ancora="ripd-aprovar" />
+            <Recusa ancora="ripd-gerar" />
+            {anexo && (
+              <p className="note" role="status" style={{ marginTop: 10 }}>
+                <b>Anexado ao PR #{ripd.prNumero}.</b> commit <span className="mono">{anexo.commit}</span> ·
+                {' '}{anexo.autor} · {anexo.quando}. O documento vira um arquivo versionado no branch, não
+                um download na máquina de quem clicou.
+              </p>
+            )}
           </div>
 
           {doc && <pre className="doc" style={{ marginTop: 14 }}>{doc}</pre>}
@@ -215,10 +304,12 @@ export default function T3() {
                 </span>
               </label>
             ))}
-            <Nota>
-              Os seis rótulos são os que este time usa no <span className="mono">threat-model.md</span>. A plataforma grava
-              também o equivalente canônico, para que o modelo continue comparável fora de casa.
-            </Nota>
+            <Didatico>
+              <Nota>
+                Os seis rótulos são os que este time usa no <span className="mono">threat-model.md</span>. A plataforma grava
+                também o equivalente canônico, para que o modelo continue comparável fora de casa.
+              </Nota>
+            </Didatico>
           </Cartao>
 
           <Cartao titulo="Mitigações geradas">
@@ -239,11 +330,11 @@ export default function T3() {
   );
 }
 
-function Secao({ n, titulo, desc, feito, children }: {
-  n: number; titulo: string; desc: string; feito: boolean; children: React.ReactNode;
+function Secao({ n, titulo, desc, feitoDerivado, children }: {
+  n: number; titulo: string; desc: string; feitoDerivado: boolean; children: React.ReactNode;
 }) {
   return (
-    <div className={`step ${feito ? 'done' : ''}`}>
+    <div className={`step ${feitoDerivado ? 'done' : ''}`}>
       <div className="step-n">{n}</div>
       <div>
         <h4>{titulo}</h4>

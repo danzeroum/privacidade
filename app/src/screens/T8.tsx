@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Cabecalho, Cartao, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
+import { Cabecalho, Cartao, Didatico, Nota, Permitido, Pill, Recusa, Tabela } from '../ui/primitivos';
 import { useSessao } from '../store/sessao';
 import { vereditoBalanceamento } from '../mock/api';
 import { sha256, curto } from '../lib/sha256';
@@ -14,9 +14,23 @@ export default function T8() {
   const [beneficio, setBeneficio] = useState(lia?.beneficio ?? 2);
   const [dano, setDano] = useState(lia?.danoTitular ?? 2);
   const [doc, setDoc] = useState<string | null>(null);
+  /**
+   * T8-03 — a tela pré-selecionava justamente o campo que ela mesma ia recusar.
+   * A demonstração da regra do Art. 11 continua disponível, mas escolhida por
+   * quem opera; o padrão é o primeiro campo elegível.
+   */
   const [campoParaVincular, setCampoParaVincular] = useState(
-    banco.cenario.campos.find((c) => c.sensivel)?.id ?? banco.cenario.campos[0]?.id ?? '',
+    banco.cenario.campos.find((c) => !c.sensivel)?.id ?? banco.cenario.campos[0]?.id ?? '',
   );
+  // T8-01 — o Passo 1 tinha `defaultValue` sem `onChange`: parecia editor e era
+  // vitrine. Agora edita de verdade para quem assina, e é leitura para os demais.
+  const [categoria, setCategoria] = useState(lia?.categoria ?? '');
+  const [expectativa, setExpectativa] = useState(lia?.expectativa ?? 'media');
+  const [finalidadeTexto, setFinalidadeTexto] = useState(lia?.finalidade ?? '');
+  // T8-02 — o veredito saía de dois números e nada mais. O raciocínio de cada
+  // eixo passa a ser escrito e guardado junto.
+  const [razaoBeneficio, setRazaoBeneficio] = useState('');
+  const [razaoDano, setRazaoDano] = useState('');
   const [anexos, setAnexos] = useState<{ arquivo: string; hash: string }[]>([]);
 
   if (!lia) return <Nota>Este cenário não tem LIA cadastrada.</Nota>;
@@ -27,11 +41,17 @@ export default function T8() {
     .filter(Boolean);
 
   const vincular = () => {
-    chamar({ metodo: 'POST', caminho: `/v1/lias/${lia.id}/campos`, body: { campoId: campoParaVincular } });
+    chamar({ metodo: 'POST', caminho: `/v1/lias/${lia.id}/campos`, body: { campoId: campoParaVincular } }, 'lia-vincular');
   };
 
+  const campoAlvo = banco.cenario.campos.find((c) => c.id === campoParaVincular);
+  // O veredito não flutua: ele se apoia nas mitigações ativas do threat model.
+  const mitigacoesQueSustentam = (banco.cenario.ripds[0]?.linddun ?? [])
+    .filter((l) => l.ativo).map((l) => l.rotulo);
+  const balanceamentoFundamentado = razaoBeneficio.trim().length >= 20 && razaoDano.trim().length >= 20;
+
   const assinar = () => {
-    const res = chamar<{ markdown: string }>({ metodo: 'POST', caminho: `/v1/lias/${lia.id}/assinar` });
+    const res = chamar<{ markdown: string }>({ metodo: 'POST', caminho: `/v1/lias/${lia.id}/assinar` }, 'lia-assinar');
     if (res.status === 200) setDoc(res.body.markdown);
   };
 
@@ -79,28 +99,48 @@ export default function T8() {
           )}
 
           <div className="stepper">
-            <Passo n={1} titulo="Finalidade legítima" desc="O interesse precisa ser real, presente e específico — não uma conveniência futura." feito>
-              <div className="grid g2" style={{ gap: 11 }}>
-                <div className="field">
-                  <label htmlFor="lia-cat">Categoria</label>
-                  <select id="lia-cat" defaultValue={lia.categoria}>
-                    {['Análise de crédito', 'Prevenção de fraude', 'Segurança da informação', 'Melhoria de produto', 'Marketing direto']
-                      .map((c) => <option key={c}>{c}</option>)}
-                  </select>
+            <Passo n={1} titulo="Finalidade legítima" desc="O interesse precisa ser real, presente e específico — não uma conveniência futura." feito={finalidadeTexto.trim().length > 0}>
+              <Permitido
+                acao="assinar_lia"
+                alternativa={
+                  <>
+                    <dl className="kv">
+                      <dt>Categoria</dt><dd>{categoria}</dd>
+                      <dt>Expectativa</dt><dd>{expectativa}</dd>
+                      <dt>Descrição</dt><dd>{finalidadeTexto}</dd>
+                    </dl>
+                    <span className="hint">somente leitura para o seu papel — quem assina a LIA é quem a edita</span>
+                  </>
+                }
+              >
+                <div className="grid g2" style={{ gap: 11 }}>
+                  <div className="field">
+                    <label htmlFor="lia-cat">Categoria</label>
+                    <select id="lia-cat" value={categoria} onChange={(e) => setCategoria(e.target.value)}>
+                      {['Análise de crédito', 'Prevenção de fraude', 'Segurança da informação', 'Melhoria de produto', 'Marketing direto']
+                        .map((c) => <option key={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="lia-exp">Expectativa do titular</label>
+                    <select id="lia-exp" value={expectativa} onChange={(e) => setExpectativa(e.target.value as typeof expectativa)}>
+                      <option value="alta">alta — decorre diretamente do serviço</option>
+                      <option value="media">média — declarada no aviso de privacidade</option>
+                      <option value="baixa">baixa — exigiria comunicação ativa</option>
+                    </select>
+                  </div>
                 </div>
-                <div className="field">
-                  <label htmlFor="lia-exp">Expectativa do titular</label>
-                  <select id="lia-exp" defaultValue={lia.expectativa}>
-                    <option value="alta">alta — decorre diretamente do serviço</option>
-                    <option value="media">média — declarada no aviso de privacidade</option>
-                    <option value="baixa">baixa — exigiria comunicação ativa</option>
-                  </select>
+                <div className="field" style={{ marginTop: 11 }}>
+                  <label htmlFor="lia-fin">Descrição</label>
+                  <textarea id="lia-fin" value={finalidadeTexto} onChange={(e) => setFinalidadeTexto(e.target.value)} />
                 </div>
-              </div>
-              <div className="field" style={{ marginTop: 11 }}>
-                <label htmlFor="lia-fin">Descrição</label>
-                <textarea id="lia-fin" defaultValue={lia.finalidade} readOnly />
-              </div>
+                {expectativa === 'baixa' && (
+                  <p className="note warn" role="status" style={{ marginTop: 10 }}>
+                    Expectativa baixa não invalida a LIA, mas exige comunicação ativa ao titular — e é o
+                    ponto que a ANPD examina primeiro no balanceamento.
+                  </p>
+                )}
+              </Permitido>
             </Passo>
 
             <Passo n={2} titulo="Necessidade" desc='Cada alternativa menos invasiva precisa ser respondida. "Não aplicável" também exige justificativa.' feito>
@@ -117,7 +157,7 @@ export default function T8() {
               ))}
             </Passo>
 
-            <Passo n={3} titulo="Balanceamento" desc="Benefício para o controlador × dano ao titular. O veredito é escrito, não um número." feito>
+            <Passo n={3} titulo="Balanceamento" desc="Benefício para o controlador × dano ao titular. O veredito é escrito, não um número." feito={balanceamentoFundamentado}>
               <div className="grid g2" style={{ gap: 18 }}>
                 <div>
                   <div className="bal">
@@ -161,6 +201,42 @@ export default function T8() {
                   </p>
                 </div>
               </div>
+
+              {/* T8-02 — o veredito saía de dois números e nada mais. Um
+                  balanceamento é a razão de cada lado; sem ela, o quadrado
+                  clicado é opinião com aparência de método. */}
+              <Permitido acao="assinar_lia" alternativa={
+                <dl className="kv" style={{ marginTop: 12 }}>
+                  <dt>Razão do benefício</dt><dd>{razaoBeneficio || '— não preenchida'}</dd>
+                  <dt>Razão do dano</dt><dd>{razaoDano || '— não preenchida'}</dd>
+                </dl>
+              }>
+                <div className="grid g2" style={{ gap: 11, marginTop: 12 }}>
+                  <div className="field">
+                    <label htmlFor="lia-rb">Por que o benefício é {beneficio === 3 ? 'alto' : beneficio === 2 ? 'médio' : 'baixo'} (mín. 20)</label>
+                    <textarea id="lia-rb" value={razaoBeneficio} onChange={(e) => setRazaoBeneficio(e.target.value)}
+                      placeholder="Ex.: reduz inadimplência em 18% na safra medida, com efeito direto no preço ao cliente adimplente." />
+                    <span className="hint">{razaoBeneficio.trim().length}/20</span>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="lia-rd">Por que o dano é {dano === 3 ? 'alto' : dano === 2 ? 'médio' : 'baixo'} (mín. 20)</label>
+                    <textarea id="lia-rd" value={razaoDano} onChange={(e) => setRazaoDano(e.target.value)}
+                      placeholder="Ex.: dado pseudonimizado, retenção de 180 dias e oposição em um clique no aviso de privacidade." />
+                    <span className="hint">{razaoDano.trim().length}/20</span>
+                  </div>
+                </div>
+                {!balanceamentoFundamentado && (
+                  <p className="note warn" role="status" style={{ marginTop: 8 }}>
+                    O passo 3 não fecha só com o quadrado escolhido: as duas razões são o que a ANPD lê.
+                  </p>
+                )}
+                {mitigacoesQueSustentam.length > 0 && (
+                  <p className="note" style={{ marginTop: 8 }}>
+                    <b>O veredito se apoia em:</b> {mitigacoesQueSustentam.join(' · ')}. Remover uma delas na T3
+                    muda o dano, e o balanceamento precisa ser refeito.
+                  </p>
+                )}
+              </Permitido>
             </Passo>
 
             <Passo n={4} titulo="Transparência e oposição" desc="Onde o titular vê isso e como ele se opõe — em um clique, não em um formulário." feito>
@@ -205,6 +281,7 @@ export default function T8() {
             <Permitido acao="assinar_lia" alternativa={<Nota>Assinar a LIA é ação exclusiva do DPO.</Nota>}>
               <button className="btn primary" onClick={assinar}>Gerar LIA.md assinado</button>
             </Permitido>
+            <Recusa ancora="lia-assinar" />
             <span className="hash">
               {lia.assinaturaDpo
                 ? `documento: sha256 ${curto(lia.documentoHash ?? '', 16)} · ${lia.assinaturaDpo}`
@@ -224,10 +301,12 @@ export default function T8() {
                 <p style={{ fontSize: 12.5 }}>{veredito.texto}</p>
               </div>
             </div>
-            <Nota tom="crit">
-              Legítimo interesse não sustenta dado sensível (Art. 11). Tente vincular um campo sensível abaixo:
-              a plataforma recusa a gravação.
-            </Nota>
+            <Didatico>
+              <Nota tom="crit">
+                Legítimo interesse não sustenta dado sensível (Art. 11). Na lista abaixo, campo sensível
+                aparece inelegível com o motivo — e a rota recusa a gravação mesmo se a tela deixasse passar.
+              </Nota>
+            </Didatico>
           </Cartao>
 
           <Cartao titulo="Datasets vinculados" hint="quem depende desta LIA">
@@ -242,18 +321,31 @@ export default function T8() {
               <dd><Pill tom="crit">o campo perde base legal</Pill> e o gate de CI bloqueia o repositório</dd>
             </dl>
 
+            {/* T8-03 — a lista oferecia o campo sensível como se fosse escolha
+                válida, e a tela pré-selecionava justamente ele. A opção continua
+                visível, porque saber que existe e por que é recusada faz parte
+                do que a tela ensina — mas inelegível e não selecionável. */}
             <Permitido acao="escrever">
               <div className="field" style={{ marginTop: 12 }}>
                 <label htmlFor="lia-campo">Vincular outro campo</label>
                 <select id="lia-campo" value={campoParaVincular} onChange={(e) => setCampoParaVincular(e.target.value)}>
                   {banco.cenario.campos.map((c) => (
-                    <option key={c.id} value={c.id}>{c.nome}{c.sensivel ? ' (sensível)' : ''}</option>
+                    <option key={c.id} value={c.id} disabled={c.sensivel}>
+                      {c.nome}{c.sensivel ? ' — inelegível: dado sensível (Art. 11)' : ''}
+                    </option>
                   ))}
                 </select>
+                <span className="hint">
+                  Legítimo interesse não consta do rol fechado do Art. 11: campo sensível aparece na lista
+                  com o motivo, e não pode ser escolhido.
+                </span>
               </div>
               <div className="row" style={{ marginTop: 8 }}>
-                <button className="btn" onClick={vincular}>Vincular à LIA</button>
+                <button className="btn" onClick={vincular} disabled={Boolean(campoAlvo?.sensivel)}>
+                  Vincular à LIA
+                </button>
               </div>
+              <Recusa ancora="lia-vincular" />
             </Permitido>
 
             <div className="row" style={{ marginTop: 12 }}>

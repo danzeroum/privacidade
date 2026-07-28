@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Cabecalho, Cartao, Kpi, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
+import { Cabecalho, Cartao, Didatico, Kpi, NaoImplementado, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
 import { useSessao } from '../store/sessao';
 import { curto } from '../lib/sha256';
 
@@ -118,9 +118,11 @@ export default function T6() {
                 </div>
               </div>
             ))}
-            <Nota>
-              Um dia em vermelho não é ruído: é dado que deveria ter sido eliminado e continua vivo.
-            </Nota>
+            <Didatico>
+              <Nota>
+                Um dia em vermelho não é ruído: é dado que deveria ter sido eliminado e continua vivo.
+              </Nota>
+            </Didatico>
           </Cartao>
 
           <Cartao titulo="Volume por lote">
@@ -165,10 +167,11 @@ export default function T6() {
               ))}
             </Tabela>
             <div className="row" style={{ marginTop: 12 }}>
-              <button className="btn" onClick={() => avisar('info', 'Relatório gerado com hash próprio para verificação futura.')}>
-                Gerar relatório de expurgo (PDF)
-              </button>
-              <span className="hash">o relatório carrega o próprio hash — a auditoria de 2029 confere o arquivo de 2026</span>
+              {/* C-15 — o botão anunciava um PDF e só publicava um aviso. */}
+              <NaoImplementado nota="O relatório em PDF não é gerado neste protótipo — o CSV assinado do trail é o que existe">
+                <button className="btn" disabled>Gerar relatório de expurgo (PDF)</button>
+              </NaoImplementado>
+              <span className="hash">o CSV assinado acima é a exportação que existe e fica registrada</span>
             </div>
           </Cartao>
 

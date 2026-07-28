@@ -222,7 +222,20 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.45; }
 /* Ajuste por teclado ainda não aplicado: tracejado é rascunho, não estado. */
 .risco-pill.rascunho { border-style: dashed; border-color: var(--text); }
 
-.stepper { width: 32px; height: 32px; border: 1px solid var(--line); background: var(--surface); border-radius: var(--r); cursor: pointer; }
+/* Nome próprio de propósito: `.stepper` já era o contêiner de passos do parecer
+   (T3) e da LIA (T8). Reaproveitar a classe colapsou os dois steppers para
+   32 × 32 px e fez as seções se sobreporem — os botões ficavam por baixo e não
+   recebiam clique. Só o navegador pega isso; jsdom não faz layout. */
+.stepper-num { width: 32px; height: 32px; border: 1px solid var(--line); background: var(--surface); border-radius: var(--r); cursor: pointer; }
+
+/* T2-03 — estado vazio que nomeia o que recortou a lista e oferece a saída. */
+.vazio { padding: 22px 18px; border: 1px dashed var(--line-strong); border-radius: var(--r-lg); background: var(--surface-2); text-align: center; margin-bottom: 12px; }
+
+/* C-15 — controle inerte marcado. A marca é discreta mas não é escondida:
+   quem lê a tela precisa saber que aquele clique não faz o que o rótulo diz. */
+.inerte { display: inline-flex; align-items: center; gap: 6px; position: relative; }
+.inerte > .btn, .inerte > button { opacity: .78; border-style: dashed; }
+.inerte-marca { font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); border: 1px dashed var(--line-strong); border-radius: 3px; padding: 1px 5px; white-space: nowrap; }
 
 /* C-12 — o rótulo por extenso existe para leitor de tela sem duplicar na tela. */
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
