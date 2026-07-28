@@ -43,6 +43,8 @@ function Casca() {
   const banco = useSessao((s) => s.banco);
   const avisos = useSessao((s) => s.avisos);
   const fecharAviso = useSessao((s) => s.fecharAviso);
+  const modoApresentacao = useSessao((s) => s.modoApresentacao);
+  const setApresentacao = useSessao((s) => s.setApresentacao);
   const [explicando, setExplicando] = useState(false);
   const local = useLocation();
 
@@ -109,6 +111,15 @@ function Casca() {
           </select>
 
           <span className="spacer" />
+          {/* C-16 — o didático fica atrás deste interruptor; o operacional não. */}
+          <label className="toggle" title="Mostra o texto que explica por que cada regra existe">
+            <input
+              type="checkbox"
+              checked={modoApresentacao}
+              onChange={(e) => setApresentacao(e.target.checked)}
+            />
+            <span className="track" /> modo apresentação
+          </label>
           <button className="shield" onClick={() => setExplicando(true)}>
             🛡 Dados mascarados
           </button>
@@ -151,8 +162,11 @@ function Casca() {
         </main>
       </div>
 
+      {/* C-10 — este canal é de confirmação e informação. A recusa mora no
+          controle que falhou, com `role="alert"`, e não aqui: `aria-live` é
+          "polite" de propósito, porque nada aqui interrompe ninguém. */}
       <div className="avisos" role="status" aria-live="polite">
-        {avisos.slice(-4).map((a) => (
+        {avisos.map((a) => (
           <div key={a.id} className={`aviso ${a.tom}`}>
             <div style={{ flex: 1 }}>
               <b>{a.texto}</b>

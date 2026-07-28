@@ -153,6 +153,11 @@ export const POLITICAS: PoliticaRota[] = [
   { metodo: 'PATCH', caminho: /^risks\/[^/]+$/, tipo: 'escrita', foraDeEscopo: '403', acao: 'gerenciar_risco', nota: 'Reclassificação de risco.' },
   { metodo: 'POST', caminho: /^purge\/[^/]+\/verificar$/, tipo: 'escrita', foraDeEscopo: '403', nota: 'Verificação de lote de expurgo.' },
   { metodo: 'GET', caminho: /^kms(\/.*)?$/, tipo: 'leitura', foraDeEscopo: '403', nota: 'Chaves e rotação.' },
+  {
+    metodo: 'POST', caminho: /^kms\/[^/]+\/(agendar-rotacao|promover-canary)$/,
+    tipo: 'escrita', foraDeEscopo: '403', acao: 'ver_pipeline_rotacao',
+    nota: 'Operar o ciclo de chave é de quem responde por ele — engenharia e segurança. T7-01.',
+  },
   { metodo: 'GET', caminho: /^metrics(\/.*)?$/, tipo: 'leitura', foraDeEscopo: '403', nota: 'Métricas de governança.' },
 ];
 

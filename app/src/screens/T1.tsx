@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Cabecalho, Cartao, Kpi, Nota, Pill, Tabela, Permitido } from '../ui/primitivos';
-import { ModalReclassificar, CORES_DANO } from '../ui/reclassificar';
+import { Cabecalho, Cartao, Didatico, Kpi, Nota, Pill, Tabela, Permitido } from '../ui/primitivos';
+import { CORES_DANO } from '../ui/reclassificar';
 import { useSessao } from '../store/sessao';
 import type { Risco } from '../mock/types';
 
@@ -9,9 +9,13 @@ export default function T1() {
   const banco = useSessao((s) => s.banco);
   useSessao((s) => s.versao); // redesenha quando a API escreve
   const avisar = useSessao((s) => s.avisar);
+  const setRisco = useSessao((s) => s.setRisco);
+  // T1-02 — a simulação é estado da sessão: navegar para outra tela e voltar
+  // não pode apagar a marca de que o painel está exibindo cenário fabricado.
+  const incidente = useSessao((s) => s.simulandoViolacao);
+  const setSimulacao = useSessao((s) => s.setSimulacao);
   const [aberto, setAberto] = useState<string | null>(null);
-  const [emEdicao, setEmEdicao] = useState<Risco | null>(null);
-  const [incidente, setIncidente] = useState(false);
+  const [emFoco, setEmFoco] = useState<Risco | null>(null);
 
   const { metricas, maturidade, gates, riscos } = banco.cenario;
   const bloqueados = gates.filter((g) => g.bloqueouMerge);
@@ -43,6 +47,28 @@ export default function T1() {
           auditor: 'Tudo aqui é leitura. Os números vêm de snapshots imutáveis e podem ser confrontados com o audit trail na T6.',
         }}
       />
+
+      {/* T1-02 — a simulação injetava R11 no mesmo gráfico do comitê, com a
+          mesma aparência dos riscos reais. Uma captura de tela sairia daqui
+          contando uma violação que não aconteceu. A faixa é fixa enquanto a
+          simulação estiver ativa, e a bolha fabricada é tracejada. */}
+      {incidente && (
+        <div className="banner crit" role="status" style={{ marginBottom: 16 }}>
+          <span className="mark">🧪</span>
+          <div style={{ flex: 1 }}>
+            <h4>Simulação ativa — este painel não representa o cenário real</h4>
+            <p>
+              R11 é um risco fabricado para demonstração e aparece tracejado no mapa. Nenhum número desta
+              tela serve de evidência enquanto esta faixa estiver aqui.
+            </p>
+          </div>
+          <Permitido acao="escrever">
+            <button className="btn" onClick={() => { setSimulacao(false); avisar('info', 'Simulação encerrada: o painel voltou ao cenário real.'); }}>
+              Encerrar simulação
+            </button>
+          </Permitido>
+        </div>
+      )}
 
       <div className="grid g4">
         {metricas.map((m) => {
@@ -100,28 +126,60 @@ export default function T1() {
               )}
             </div>
           ))}
-          <Nota>
-            Nota sem lastro é slide. Cada domínio expande mostrando a evidência que sustenta o número.
-          </Nota>
+          <Didatico>
+            <Nota>
+              Nota sem lastro é slide. Cada domínio expande mostrando a evidência que sustenta o número.
+            </Nota>
+          </Didatico>
         </Cartao>
 
         <Cartao
           titulo="Mapa de calor de riscos"
           acao={
             <Permitido acao="escrever">
-              <button className="btn" onClick={() => { setIncidente(!incidente); avisar('info', incidente ? 'Incidente simulado removido.' : 'Incidente injetado: R11 entra em P5 × I5, esforço 0,75 sprint.'); }}>
-                {incidente ? 'Limpar simulação' : 'Simular violação'}
+              <button className="btn" onClick={() => { setSimulacao(!incidente); avisar('info', incidente ? 'Simulação encerrada: o painel voltou ao cenário real.' : 'Simulação ativa: R11 é fabricado e está marcado como tal.'); }}>
+                {incidente ? 'Encerrar simulação' : 'Simular violação'}
               </button>
             </Permitido>
           }
         >
-          <Dispersao riscos={riscosVisiveis} aoSelecionar={(r) => setEmEdicao(r)} />
+          <Dispersao riscos={riscosVisiveis} simulando={incidente} aoSelecionar={(r) => setEmFoco(r)} />
           <div className="legend">
             <span><i className="dot" style={{ background: 'var(--crit)' }} /> Material</span>
             <span><i className="dot" style={{ background: 'var(--warn)' }} /> Moral / perda de controle</span>
             <span><i className="dot" style={{ background: 'var(--sens)' }} /> Discriminação</span>
-            <span style={{ color: 'var(--text-3)' }}>Bolha maior = ainda não mitigado · clique para reclassificar</span>
+            <span style={{ color: 'var(--text-3)' }}>Bolha maior = ainda não mitigado · clique para ver o risco</span>
           </div>
+
+          {/* T1-01 — este mapa é esforço × score; a matriz da T5 é P × I. Abrir
+              o mesmo diálogo de reclassificação a partir dos dois fazia a pessoa
+              ajustar eixos que não são os que ela estava lendo. Aqui o clique
+              informa e encaminha; quem reclassifica é a matriz certa. */}
+          {emFoco && (
+            <div className="card" style={{ marginTop: 12, background: 'var(--surface-2)' }} role="status">
+              <div className="card-head">
+                <h3 style={{ fontSize: 14 }}>{emFoco.codigo} · {emFoco.descricao}</h3>
+                <button className="reveal" onClick={() => setEmFoco(null)}>fechar</button>
+              </div>
+              <dl className="kv">
+                <dt>Score</dt><dd className="mono">{emFoco.probabilidade * emFoco.impacto} (P {emFoco.probabilidade} × I {emFoco.impacto})</dd>
+                <dt>Esforço</dt><dd>{emFoco.esforcoSprints} sprint · dono {emFoco.dono}</dd>
+                <dt>Tratamento</dt><dd>{emFoco.tratamento}</dd>
+              </dl>
+              {emFoco.codigo === 'R11' ? (
+                <Nota tom="warn">Risco fabricado pela simulação: não existe na matriz e não é reclassificável.</Nota>
+              ) : (
+                <div className="row" style={{ marginTop: 10 }}>
+                  <Link className="btn" to="/t5" onClick={() => setRisco(emFoco.codigo)}>
+                    Reclassificar na matriz P × I →
+                  </Link>
+                  <span className="hint">
+                    este mapa é esforço × score; reclassificar acontece na matriz de probabilidade e impacto
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </Cartao>
       </div>
 
@@ -163,21 +221,15 @@ export default function T1() {
         </Tabela>
       </Cartao>
 
-      {emEdicao && (
-        <ModalReclassificar
-          risco={emEdicao}
-          p={emEdicao.probabilidade}
-          i={emEdicao.impacto}
-          aoFechar={() => setEmEdicao(null)}
-        />
-      )}
     </>
   );
 }
 
 /** Dispersão esforço × score. Colisões são resolvidas no eixo do esforço, que é
  *  estimativa — nunca no eixo do score, que é o número usado para decidir. */
-function Dispersao({ riscos, aoSelecionar }: { riscos: Risco[]; aoSelecionar: (r: Risco) => void }) {
+function Dispersao({ riscos, simulando, aoSelecionar }: {
+  riscos: Risco[]; simulando: boolean; aoSelecionar: (r: Risco) => void;
+}) {
   const W = 620, H = 300, ml = 46, mb = 36, mt = 14, mr = 14;
   const maxEsforco = Math.max(2.25, ...riscos.map((r) => r.esforcoSprints + 0.3));
   const x = (v: number) => ml + (v / maxEsforco) * (W - ml - mr);
@@ -224,9 +276,17 @@ function Dispersao({ riscos, aoSelecionar }: { riscos: Risco[]; aoSelecionar: (r
       {pts.map(({ r, cx, cy, raio }) => (
         <g key={r.codigo} className="bub" onClick={() => aoSelecionar(r)} role="button" tabIndex={0}
            onKeyDown={(e) => { if (e.key === 'Enter') aoSelecionar(r); }}>
-          <title>{`${r.codigo} · ${r.descricao} · score ${r.probabilidade * r.impacto} · ${r.status}`}</title>
-          <circle cx={cx} cy={cy} r={raio} fill={CORES_DANO[r.dano]} opacity={r.status === 'mitigado' ? 0.38 : 0.88} />
-          <text x={cx} y={cy + 3.5} className="bub-label" textAnchor="middle">{r.codigo}</text>
+          <title>{`${r.codigo} · ${r.descricao} · score ${r.probabilidade * r.impacto} · ${r.status}${r.codigo === 'R11' && simulando ? ' · SIMULADO' : ''}`}</title>
+          <circle
+            cx={cx} cy={cy} r={raio}
+            fill={r.codigo === 'R11' && simulando ? 'none' : CORES_DANO[r.dano]}
+            stroke={r.codigo === 'R11' && simulando ? CORES_DANO[r.dano] : 'none'}
+            strokeWidth={2.5}
+            strokeDasharray={r.codigo === 'R11' && simulando ? '5 3' : undefined}
+            opacity={r.status === 'mitigado' ? 0.38 : 0.88}
+          />
+          <text x={cx} y={cy + 3.5} className="bub-label" textAnchor="middle"
+                fill={r.codigo === 'R11' && simulando ? CORES_DANO[r.dano] : undefined}>{r.codigo}</text>
         </g>
       ))}
     </svg>

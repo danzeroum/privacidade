@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Cabecalho, Cartao, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Cabecalho, Cartao, Didatico, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
 import { useSessao } from '../store/sessao';
 import { hashCpf } from '../lib/sha256';
 import { redigir, resumoDaRedacao } from '../lib/redator';
@@ -62,6 +62,18 @@ export default function T2() {
       || (fRet === 'Acima de 1 ano' && c.retencaoDias !== null && c.retencaoDias > 365)
       || (fRet === 'Indeterminada' && c.retencaoDias === null))
   )), [campos, fBase, fSens, fIntl, fRet]);
+
+  /** T2-03 — os filtros que estão de fato recortando a lista, para o estado vazio nomeá-los. */
+  const filtrosAtivos = [
+    { rotulo: 'base legal', valor: fBase, neutro: 'Todas' },
+    { rotulo: 'sensibilidade', valor: fSens, neutro: 'Todos' },
+    { rotulo: 'transferência', valor: fIntl, neutro: 'Todas' },
+    { rotulo: 'retenção', valor: fRet, neutro: 'Qualquer' },
+  ].filter((f) => f.valor !== f.neutro);
+
+  const limparFiltros = () => {
+    setFBase('Todas'); setFSens('Todos'); setFIntl('Todas'); setFRet('Qualquer');
+  };
 
   const buscar = () => {
     const h = hashCpf(cpf);
@@ -167,10 +179,10 @@ export default function T2() {
           </Permitido>
 
           <Cartao titulo="Novo inventário">
-            <div className="drop">
-              Arraste o <span className="mono">data-inventory.yaml</span>
-              <div className="hint">valida contra o schema e mostra o diff</div>
-            </div>
+            {/* C-15 — a área anunciava "arraste o YAML" e não tinha nenhum
+                manipulador: soltar o arquivo abria ele no navegador. Agora
+                recebe de verdade, como a da T8. */}
+            <AreaDeInventario />
             <ValidadorInventario />
           </Cartao>
 
@@ -214,6 +226,19 @@ export default function T2() {
               ? `${filtrados.length} de ${total} campos`
               : `${filtrados.length} campos nesta página · total não exibido para o seu papel`}
           >
+            {/* T2-03 — a tabela ficava simplesmente vazia, sem dizer que um
+                filtro a esvaziou nem como desfazer. Quem chega assim conclui que
+                o catálogo não tem o campo, e não que ele está escondido. */}
+            {filtrados.length === 0 && (
+              <div className="vazio" role="status">
+                <b>Nenhum campo com os filtros atuais.</b>
+                <p className="hint" style={{ margin: '6px 0 10px' }}>
+                  Ativos: {filtrosAtivos.map((f) => `${f.rotulo} = ${f.valor}`).join(' · ')}.
+                  {' '}São {campos.length} campos no catálogo deste cenário.
+                </p>
+                <button className="btn" onClick={limparFiltros}>Limpar filtros</button>
+              </div>
+            )}
             <Tabela dense cabecalho={['Campo', 'Guarda', 'Finalidade', 'Base legal', 'Retenção', 'Destino', 'Estado']}>
               {filtrados.map((c) => {
                 const conf = conformidade(c);
@@ -248,10 +273,12 @@ export default function T2() {
                 );
               })}
             </Tabela>
-            <Nota>
-              🔒 hash irreversível · 🎭 pseudônimo reversível pelo serviço autorizado · 📊 agregado com k-anonimato ·
-              <b> nenhum valor de titular é exibido nesta tela</b> — o catálogo descreve campos, não conteúdo.
-            </Nota>
+            <Didatico>
+              <Nota>
+                🔒 hash irreversível · 🎭 pseudônimo reversível pelo serviço autorizado · 📊 agregado com k-anonimato ·
+                <b> nenhum valor de titular é exibido nesta tela</b> — o catálogo descreve campos, não conteúdo.
+              </Nota>
+            </Didatico>
           </Cartao>
 
           {selecionado && <Linhagem campo={selecionado} aoFechar={() => setSelecionado(null)} />}
@@ -261,14 +288,33 @@ export default function T2() {
   );
 }
 
+/**
+ * T2-02 — a linhagem abria abaixo da tabela, fora do campo de visão e sem mover
+ * o foco: quem clicou numa linha não via nada acontecer, e quem navega por
+ * teclado ficava com o foco onde estava. Agora o painel recebe foco e se traz
+ * para a tela; Esc fecha e devolve a atenção à lista.
+ */
 function Linhagem({ campo, aoFechar }: { campo: Campo; aoFechar: () => void }) {
+  const alvo = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // `scrollIntoView` não existe em todo ambiente (jsdom, por exemplo). O
+    // foco é o que importa para acessibilidade; a rolagem é conforto.
+    alvo.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+    alvo.current?.focus();
+  }, [campo.id]);
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') aoFechar(); };
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [aoFechar]);
   const largura = 900;
   const passo = largura / campo.linhagem.length;
   return (
-    <Cartao
-      titulo={`Linhagem — ${campo.sistema}.${campo.nome}`}
-      acao={<button className="btn ghost" onClick={aoFechar}>fechar</button>}
-    >
+    <div ref={alvo} tabIndex={-1} role="region" aria-label={`Linhagem do campo ${campo.nome}`}>
+      <Cartao
+        titulo={`Linhagem — ${campo.sistema}.${campo.nome}`}
+        acao={<button className="btn ghost" onClick={aoFechar}>fechar (Esc)</button>}
+      >
       <svg className="chart" viewBox={`0 0 ${largura} 110`} role="img" aria-label={`Fluxo do campo ${campo.nome}`}>
         {campo.linhagem.map((e, i) => {
           const x = i * passo + 8;
@@ -290,7 +336,8 @@ function Linhagem({ campo, aoFechar }: { campo: Campo; aoFechar: () => void }) {
       <Nota>
         A resposta ao Art. 18, VII sai desta cadeia, que é append-only. Não é uma lista mantida à mão.
       </Nota>
-    </Cartao>
+      </Cartao>
+    </div>
   );
 }
 
@@ -383,7 +430,14 @@ function ValidadorInventario() {
           )}
         </div>
       )}
-      {saida && <p className="note" style={{ marginTop: 10 }}>{saida}</p>}
+      {/* C-10 — o resultado da validação fica no cartão do formulário. Um só
+          `role` por região: recusa é alerta, aceite é status. */}
+      {saida && (
+        <p className={`note ${saida.startsWith('❌') ? 'crit' : ''}`}
+           role={saida.startsWith('❌') ? 'alert' : 'status'} style={{ marginTop: 10 }}>
+          {saida}
+        </p>
+      )}
       <Nota>
         Os toggles nascem desligados. Tente <span className="mono">hash + anonimizado</span>,
         {' '}<span className="mono">sensível + legítimo interesse</span> ou simplesmente validar sem
@@ -485,5 +539,52 @@ function RegistrosDeConsentimento() {
         );
       })}
     </Cartao>
+  );
+}
+
+/**
+ * C-15 — a área de soltar o YAML do inventário.
+ *
+ * Antes era um retângulo com texto: soltar o arquivo em cima abria ele numa
+ * aba do navegador, que é o comportamento padrão de quem não trata o evento.
+ * Rótulo que promete o que o clique não faz é o começo da desconfiança em tudo
+ * o mais que a tela afirma.
+ */
+function AreaDeInventario() {
+  const [recebidos, setRecebidos] = useState<{ nome: string; bytes: number; hash: string }[]>([]);
+
+  const receber = (arquivos: File[]) => {
+    if (arquivos.length === 0) return;
+    setRecebidos((atual) => [
+      ...atual,
+      ...arquivos.map((f) => ({ nome: f.name, bytes: f.size, hash: hashCpf(`${f.name}:${f.size}`).slice(0, 8) })),
+    ]);
+  };
+
+  return (
+    <>
+      <div
+        className="drop"
+        role="button"
+        tabIndex={0}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => { e.preventDefault(); receber([...e.dataTransfer.files]); }}
+        onClick={() => receber([new File([''], `data-inventory.exemplo-${recebidos.length + 1}.yaml`)])}
+        onKeyDown={(e) => { if (e.key === 'Enter') receber([new File([''], `data-inventory.exemplo-${recebidos.length + 1}.yaml`)]); }}
+      >
+        Arraste o <span className="mono">data-inventory.yaml</span> ou{' '}
+        <span style={{ color: 'var(--accent)', fontWeight: 600 }}>clique para simular</span>
+        <div className="hint">valida contra o schema abaixo e registra o hash do arquivo recebido</div>
+      </div>
+      {recebidos.length > 0 && (
+        <ul style={{ margin: '10px 0 0', paddingLeft: 18, fontSize: 12.5, color: 'var(--text-2)' }} role="status">
+          {recebidos.map((r, i) => (
+            <li key={i}>
+              <span className="mono">{r.nome}</span> · {r.bytes} bytes · hash <span className="hash">{r.hash}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }

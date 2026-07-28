@@ -541,6 +541,52 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
       break;
     }
 
+    // ── T7-01 — a T7 informava muito bem e não deixava fazer nada ────────
+    case 'POST kms': {
+      const chave = banco.cenario.chaves.find((c) => c.alias === decodeURIComponent(partes[1] ?? ''));
+      if (!chave) return erro(404, 'Não encontrado.') as Res<T>;
+
+      if (partes[2] === 'agendar-rotacao') {
+        if (chave.status === 'revogada') {
+          return erro(409, `${chave.alias} está revogada: rotacionar uma chave morta não devolve acesso a nada.`) as Res<T>;
+        }
+        try {
+          banco.auditAppend({
+            ator, atorPapel: papel, acao: 'ROTACAO_AGENDADA', recursoTipo: 'chave_kms',
+            recursoId: chave.alias, campos: [`em_dias=${chave.rotacaoEmDias ?? '-'}`],
+          });
+        } catch (e) {
+          const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar o agendamento.';
+          return erro(503, msg) as Res<T>;
+        }
+        chave.rotacaoEmDias = 1;
+        return ok({ alias: chave.alias, rotacaoEmDias: chave.rotacaoEmDias }) as Res<T>;
+      }
+
+      if (partes[2] === 'promover-canary') {
+        // A promoção é do pipeline, não do botão: só avança se a recriptografia
+        // terminou. Promover no meio deixa registro ilegível com a chave nova.
+        const recripto = banco.cenario.rotacao.etapas.find((e) => e.etapa === 'recriptografar');
+        if (recripto && recripto.status !== 'concluida') {
+          return erro(409, `A recriptografia está em ${recripto.progresso.toFixed(1)}%.`,
+            'Promover canary antes do fim deixa registros ilegíveis: os dois aliases precisam continuar válidos até o último byte migrar.') as Res<T>;
+        }
+        const canary = banco.cenario.rotacao.etapas.find((e) => e.etapa === 'canary_5');
+        try {
+          banco.auditAppend({
+            ator, atorPapel: papel, acao: 'CANARY_PROMOVIDO', recursoTipo: 'chave_kms', recursoId: chave.alias,
+          });
+        } catch (e) {
+          const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a promoção.';
+          return erro(503, msg) as Res<T>;
+        }
+        if (canary) { canary.status = 'concluida'; canary.progresso = 100; }
+        chave.status = 'ativa';
+        return ok({ alias: chave.alias, status: chave.status }) as Res<T>;
+      }
+      break;
+    }
+
     // ── C-08 — consentimento como prova, e revogação que propaga ──────────
     case 'GET consentimentos':
       return ok(banco.cenario.consentimentos) as Res<T>;

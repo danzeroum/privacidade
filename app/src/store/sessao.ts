@@ -35,14 +35,43 @@ interface Estado {
    * de qual atendimento o dado foi aberto.
    */
   protocoloSelecionado: string | null;
+  /**
+   * T1-01 — o risco que a dispersão da T1 selecionou, para a T5 abrir nele.
+   * Os dois mapas têm eixos diferentes; quem reclassifica é a matriz P × I.
+   */
+  riscoSelecionado: string | null;
+  /** T1-02 — a simulação de violação é estado da sessão, não da tela. */
+  simulandoViolacao: boolean;
+  /**
+   * C-10 — recusas ancoradas no controle que falhou, indexadas por âncora.
+   *
+   * O canal do canto passou a ser só de confirmação. Recusa longe da ação
+   * obriga a pessoa a procurar o motivo do outro lado da tela, e a mensagem
+   * some antes de ela achar.
+   */
+  recusas: Record<string, { texto: string; regra?: string; id: number }>;
+  /**
+   * C-16 — texto didático (o "por quê" do conceito) só aparece em modo
+   * apresentação. O operacional — estado, prazo, recusa — nunca some.
+   */
+  modoApresentacao: boolean;
 
   setPapel: (p: Papel) => void;
   setCenario: (id: string) => void;
   setProtocolo: (protocolo: string | null) => void;
-  /** Chama a API mock já com o papel e o ator da sessão, e publica o aviso resultante. */
-  chamar: <T = unknown>(req: Omit<Req, 'papel' | 'ator'>) => Res<T>;
+  setRisco: (codigo: string | null) => void;
+  setSimulacao: (ativa: boolean) => void;
+  setApresentacao: (ativo: boolean) => void;
+  /**
+   * Chama a API mock já com o papel e o ator da sessão.
+   *
+   * `ancora` é o identificador do controle que originou a chamada: com ele, a
+   * recusa é renderizada ao lado do botão em vez de ir para o canto da tela.
+   */
+  chamar: <T = unknown>(req: Omit<Req, 'papel' | 'ator'>, ancora?: string) => Res<T>;
   avisar: (tom: Aviso['tom'], texto: string, regra?: string) => void;
   fecharAviso: (id: number) => void;
+  limparRecusa: (ancora: string) => void;
 }
 
 let seqAviso = 1;
@@ -80,6 +109,10 @@ export const useSessao = create<Estado>((set, get) => ({
   versao: 0,
   avisos: [],
   protocoloSelecionado: null,
+  riscoSelecionado: null,
+  simulandoViolacao: false,
+  recusas: {},
+  modoApresentacao: true,
 
   setPapel: (papel) => set({ papel }),
 
@@ -88,12 +121,19 @@ export const useSessao = create<Estado>((set, get) => ({
   setCenario: (cenarioId) =>
     set((s) => ({
       cenarioId, banco: bancoDe(cenarioId), versao: s.versao + 1,
-      avisos: [], protocoloSelecionado: null,
+      avisos: [], recusas: {}, protocoloSelecionado: null,
+      riscoSelecionado: null, simulandoViolacao: false,
     })),
 
   setProtocolo: (protocoloSelecionado) => set({ protocoloSelecionado }),
 
-  chamar: <T,>(req: Omit<Req, 'papel' | 'ator'>) => {
+  setRisco: (riscoSelecionado) => set({ riscoSelecionado }),
+
+  setSimulacao: (simulandoViolacao) => set({ simulandoViolacao }),
+
+  setApresentacao: (modoApresentacao) => set({ modoApresentacao }),
+
+  chamar: <T,>(req: Omit<Req, 'papel' | 'ator'>, ancora?: string) => {
     const { banco, papel } = get();
     const res = request<T>(banco, { ...req, papel, ator: NOME_POR_PAPEL[papel] });
 
@@ -102,18 +142,33 @@ export const useSessao = create<Estado>((set, get) => ({
     if (req.metodo !== 'GET') set((s) => ({ versao: s.versao + 1 }));
 
     if (res.status >= 400) {
-      const corpo = res.body as { erro?: string };
-      get().avisar('negado', corpo?.erro ?? 'Operação recusada.', res.regra);
-    } else if (res.regra) {
-      get().avisar('ok', res.regra);
+      const texto = (res.body as { erro?: string })?.erro ?? 'Operação recusada.';
+      // C-10 — com âncora, a recusa mora no controle. Sem âncora, cai no canal
+      // do canto, que é o último recurso e não o primeiro.
+      if (ancora) {
+        set((s) => ({ recusas: { ...s.recusas, [ancora]: { texto, regra: res.regra, id: seqAviso++ } } }));
+      } else {
+        get().avisar('negado', texto, res.regra);
+      }
+    } else {
+      if (ancora) get().limparRecusa(ancora);
+      if (res.regra) get().avisar('ok', res.regra);
     }
     return res;
   },
 
   avisar: (tom, texto, regra) =>
-    set((s) => ({ avisos: [...s.avisos, { id: seqAviso++, tom, texto, regra }] })),
+    // No máximo três simultâneas: canal que empilha vira ruído, e ruído se
+    // aprende a ignorar.
+    set((s) => ({ avisos: [...s.avisos, { id: seqAviso++, tom, texto, regra }].slice(-3) })),
 
   fecharAviso: (id) => set((s) => ({ avisos: s.avisos.filter((a) => a.id !== id) })),
+
+  limparRecusa: (ancora) => set((s) => {
+    if (!s.recusas[ancora]) return {};
+    const { [ancora]: _, ...resto } = s.recusas;
+    return { recusas: resto };
+  }),
 }));
 
 export const nomeDoPapel = (p: Papel) => NOME_POR_PAPEL[p];

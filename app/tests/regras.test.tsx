@@ -5,10 +5,14 @@ import { request } from '../src/mock/api';
 import { pode } from '../src/mock/permissoes';
 import { POLITICAS, POLITICA_PADRAO, politicaDe } from '../src/mock/politicas';
 import { TRANSICOES_INCIDENTE, transicaoPermitida } from '../src/mock/estados';
-import { CampoPII } from '../src/ui/primitivos';
+import { CampoPII, Didatico } from '../src/ui/primitivos';
 import { MemoryRouter } from 'react-router-dom';
 import T2 from '../src/screens/T2';
+import T1 from '../src/screens/T1';
+import T3 from '../src/screens/T3';
 import T5 from '../src/screens/T5';
+import T7 from '../src/screens/T7';
+import T8 from '../src/screens/T8';
 import T4 from '../src/screens/T4';
 import T6 from '../src/screens/T6';
 import { useSessao, limparBancosDaSessao } from '../src/store/sessao';
@@ -1299,5 +1303,394 @@ describe('C-08 · consentimento como prova, e revogação que propaga', () => {
         metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: 'x'.repeat(30) },
       }).status, p).toBe(403);
     }
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PR 5 — Fidelidade do protótipo e mensagens
+// Unidade (store e primitivos) · integração (tela + API) · sistema (fluxo entre
+// telas) · aceitação (os quatro critérios do pedido).
+// ═════════════════════════════════════════════════════════════════════════════
+
+const montar = (tela: React.ReactNode) => render(<MemoryRouter>{tela}</MemoryRouter>);
+
+describe('C-10 · unidade — a recusa mora no controle, não no canto', () => {
+  beforeEach(() => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'engenharia', banco: new BancoMock('banco'), versao: 0, avisos: [], recusas: {} });
+  });
+
+  it('chamada com âncora não polui o canal de confirmação', () => {
+    const { chamar: chamarNaSessao } = useSessao.getState();
+    chamarNaSessao({ metodo: 'POST', caminho: `/v1/ripds/r1/aprovar` }, 'ripd-aprovar');
+
+    const { avisos, recusas } = useSessao.getState();
+    expect(avisos).toHaveLength(0);
+    expect(recusas['ripd-aprovar'].texto).toContain('DPO');
+  });
+
+  it('sem âncora, a recusa cai no canal do canto — o último recurso', () => {
+    const { chamar: chamarNaSessao } = useSessao.getState();
+    chamarNaSessao({ metodo: 'POST', caminho: `/v1/ripds/r1/aprovar` });
+    expect(useSessao.getState().avisos.at(-1)?.tom).toBe('negado');
+    expect(useSessao.getState().recusas).toEqual({});
+  });
+
+  it('a mesma ação bem-sucedida limpa a recusa anterior', () => {
+    const b = useSessao.getState().banco;
+    useSessao.setState({ papel: 'dpo', recusas: { 'ripd-aprovar': { texto: 'antiga', id: 0 } } });
+    // Com a P0 aberta a aprovação ainda falha; a recusa só some quando o ato
+    // que a produziu passa de verdade.
+    b.cenario.ripds[0].recomendacoes.forEach((r) => { r.concluida = true; });
+    useSessao.getState().chamar({ metodo: 'POST', caminho: `/v1/ripds/r1/aprovar` }, 'ripd-aprovar');
+    expect(useSessao.getState().recusas['ripd-aprovar']).toBeUndefined();
+  });
+
+  it('o canal do canto guarda no máximo três avisos simultâneos', () => {
+    const { avisar } = useSessao.getState();
+    for (let i = 0; i < 6; i++) avisar('info', `aviso ${i}`);
+    expect(useSessao.getState().avisos).toHaveLength(3);
+    expect(useSessao.getState().avisos[0].texto).toBe('aviso 3');
+  });
+});
+
+describe('C-16 · unidade — didático some, operacional permanece', () => {
+  it('o texto didático não é renderizado fora do modo apresentação', () => {
+    useSessao.setState({ modoApresentacao: true });
+    const { unmount } = render(<Didatico><p>explicação do conceito</p></Didatico>);
+    expect(screen.getByText('explicação do conceito')).toBeInTheDocument();
+    unmount();
+
+    useSessao.setState({ modoApresentacao: false });
+    render(<Didatico><p>explicação do conceito</p></Didatico>);
+    expect(screen.queryByText('explicação do conceito')).toBeNull();
+  });
+
+  it('a recusa e o estado continuam visíveis com o didático desligado', () => {
+    limparBancosDaSessao();
+    useSessao.setState({
+      papel: 'engenharia', banco: new BancoMock('banco'), versao: 0,
+      modoApresentacao: false, recusas: { 'ripd-aprovar': { texto: 'Somente o DPO aprova RIPD.', id: 1 } },
+    });
+    montar(<T3 />);
+    const alertas = screen.getAllByRole('alert');
+    expect(alertas.some((a) => /Somente o DPO aprova RIPD/.test(a.textContent ?? ''))).toBe(true);
+    expect(screen.getByText(/recomendação P0 em aberto/)).toBeInTheDocument();
+  });
+});
+
+describe('T3 · integração — o parecer diz a verdade sobre si mesmo', () => {
+  beforeEach(() => {
+    limparBancosDaSessao();
+    useSessao.setState({
+      papel: 'engenharia', banco: new BancoMock('banco'), versao: 0,
+      avisos: [], recusas: {}, modoApresentacao: true,
+    });
+  });
+
+  it('T3-01 · o stepper deriva do conteúdo: seção vazia não fica completa', () => {
+    const b = useSessao.getState().banco;
+    // A P0 aberta mantém a seção 5 pendente e o topo diz o que falta.
+    expect(b.cenario.ripds[0].recomendacoes.some((r) => r.prioridade === 'P0' && !r.concluida)).toBe(true);
+    montar(<T3 />);
+    expect(screen.getByText(/recomendações P0 concluídas/i)).toBeInTheDocument();
+
+    const passos = document.querySelectorAll('.step');
+    expect(passos.length).toBe(5);
+    expect([...passos].filter((p) => p.classList.contains('done')).length).toBe(4);
+  });
+
+  it('T3-01 · concluir a P0 fecha a seção e o aviso de pendência some', () => {
+    const b = useSessao.getState().banco;
+    b.cenario.ripds[0].recomendacoes.forEach((r) => { r.concluida = true; });
+    montar(<T3 />);
+    expect(screen.queryByText(/recomendações P0 concluídas/i)).toBeNull();
+    expect([...document.querySelectorAll('.step')].every((p) => p.classList.contains('done'))).toBe(true);
+  });
+
+  it('T3-02 · baixar e anexar são dois controles distintos', () => {
+    montar(<T3 />);
+    expect(screen.getByRole('button', { name: /^Baixar RIPD\.md$/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Anexar ao PR #/ })).toBeInTheDocument();
+  });
+
+  it('T3-02 · anexar exibe commit, autor e hora', () => {
+    montar(<T3 />);
+    fireEvent.click(screen.getByRole('button', { name: /Anexar ao PR #/ }));
+    const confirmacao = screen.getAllByRole('status')
+      .find((n) => /Anexado ao PR/.test(n.textContent ?? ''))!;
+    expect(confirmacao).toBeDefined();
+    expect(confirmacao).toHaveTextContent(/commit [0-9a-f]{7}/);
+    expect(confirmacao).toHaveTextContent(/Maria Souza/);
+  });
+
+  it('T3-03 · a tela não abre disparando alerta, e a combinação válida confirma', () => {
+    montar(<T3 />);
+    // Nenhum alerta antes de a pessoa tocar em nada.
+    expect(screen.queryByRole('alert')).toBeNull();
+    const comum = useSessao.getState().banco.cenario.campos.find((c) => !c.sensivel)!;
+    fireEvent.change(screen.getByLabelText('Campo'), { target: { value: comum.id } });
+    fireEvent.change(screen.getByLabelText('Base legal'), { target: { value: 'execucao_contrato' } });
+
+    const status = screen.getAllByRole('status').find((n) => /Combinação aceita/.test(n.textContent ?? ''))!;
+    expect(status).toBeDefined();
+    expect(status).toHaveTextContent(/execucao_contrato/);
+    // Um só alerta por região: o aceite não é alerta.
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('T3-03 · combinação inválida continua sendo alerta, e só ela', () => {
+    montar(<T3 />);
+    const sensivel = useSessao.getState().banco.cenario.campos.find((c) => c.sensivel)!;
+    fireEvent.change(screen.getByLabelText('Campo'), { target: { value: sensivel.id } });
+    fireEvent.change(screen.getByLabelText('Base legal'), { target: { value: 'legitimo_interesse' } });
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(screen.getByRole('alert')).toHaveTextContent(/Art\. 11/);
+  });
+
+  it('T3 · aceitação — P0 aberta: aprovar recusa no cartão do botão, não na faixa', () => {
+    useSessao.setState({ papel: 'dpo' });
+    montar(<T3 />);
+    fireEvent.click(screen.getByRole('button', { name: /Aprovar como DPO/ }));
+
+    const alerta = screen.getAllByRole('alert')
+      .find((a) => /recomendação P0 em aberto/i.test(a.textContent ?? ''))!;
+    expect(alerta).toBeDefined();
+    // A recusa fica no mesmo cartão do botão que falhou.
+    expect(alerta.closest('.card')).toBe(
+      screen.getByRole('button', { name: /Aprovar como DPO/ }).closest('.card'),
+    );
+    // E não foi para o canal do canto.
+    expect(useSessao.getState().avisos.filter((a) => a.tom === 'negado')).toHaveLength(0);
+  });
+});
+
+describe('T8 · integração — o editor edita e o veredito guarda o raciocínio', () => {
+  beforeEach(() => {
+    limparBancosDaSessao();
+    useSessao.setState({
+      papel: 'dpo', banco: new BancoMock('banco'), versao: 0,
+      avisos: [], recusas: {}, modoApresentacao: true,
+    });
+  });
+
+  it('T8-03 · aceitação — campo sensível é inelegível com motivo, não selecionável', () => {
+    montar(<T8 />);
+    const seletor = screen.getByLabelText('Vincular outro campo') as HTMLSelectElement;
+    const sensivel = useSessao.getState().banco.cenario.campos.find((c) => c.sensivel)!;
+    const opcao = [...seletor.options].find((o) => o.value === sensivel.id)!;
+
+    expect(opcao.disabled).toBe(true);
+    expect(opcao.textContent).toContain('Art. 11');
+    // E não é o que a tela pré-seleciona.
+    expect(seletor.value).not.toBe(sensivel.id);
+    expect(useSessao.getState().banco.cenario.campos.find((c) => c.id === seletor.value)?.sensivel).toBe(false);
+  });
+
+  it('T8-01 · o Passo 1 edita para quem assina e é leitura para os demais', () => {
+    const { unmount } = montar(<T8 />);
+    const desc = screen.getByLabelText('Descrição') as HTMLTextAreaElement;
+    fireEvent.change(desc, { target: { value: 'Nova finalidade declarada pelo DPO.' } });
+    expect((screen.getByLabelText('Descrição') as HTMLTextAreaElement).value)
+      .toBe('Nova finalidade declarada pelo DPO.');
+    unmount();
+
+    useSessao.setState({ papel: 'engenharia' });
+    montar(<T8 />);
+    expect(screen.queryByLabelText('Descrição')).toBeNull();
+    expect(screen.getByText(/somente leitura para o seu papel/)).toBeInTheDocument();
+  });
+
+  it('T8-02 · o passo 3 só fecha com as duas razões escritas', () => {
+    montar(<T8 />);
+    const passo3 = [...document.querySelectorAll('.step')][2];
+    expect(passo3.classList.contains('done')).toBe(false);
+
+    fireEvent.change(screen.getByLabelText(/Por que o benefício/), {
+      target: { value: 'Reduz inadimplência em 18% na safra medida.' },
+    });
+    fireEvent.change(screen.getByLabelText(/Por que o dano/), {
+      target: { value: 'Dado pseudonimizado, retenção de 180 dias e oposição em um clique.' },
+    });
+    expect([...document.querySelectorAll('.step')][2].classList.contains('done')).toBe(true);
+  });
+});
+
+describe('T2 · integração — filtros e linhagem', () => {
+  beforeEach(() => {
+    limparBancosDaSessao();
+    useSessao.setState({
+      papel: 'engenharia', banco: new BancoMock('banco'), versao: 0,
+      avisos: [], recusas: {}, modoApresentacao: true,
+    });
+  });
+
+  it('T2-03 · aceitação — sem resultado, o estado vazio nomeia os filtros e oferece limpar', () => {
+    montar(<T2 />);
+    // `protecao_credito` existe no catálogo; combinada com retenção longa, não
+    // sobra campo nenhum — que é o recorte vazio que este teste exercita.
+    fireEvent.change(screen.getByLabelText('Base legal'), { target: { value: 'protecao_credito' } });
+    fireEvent.change(screen.getByLabelText('Retenção'), { target: { value: 'Acima de 1 ano' } });
+
+    const vazio = screen.getByText(/Nenhum campo com os filtros atuais/).closest('.vazio')!;
+    expect(vazio).toHaveTextContent(/base legal = protecao_credito/);
+    expect(vazio).toHaveTextContent(/retenção = Acima de 1 ano/);
+
+    fireEvent.click(screen.getByRole('button', { name: /Limpar filtros/ }));
+    expect(screen.queryByText(/Nenhum campo com os filtros atuais/)).toBeNull();
+  });
+
+  it('T2-02 · a linhagem abre como região focável e nomeada', () => {
+    montar(<T2 />);
+    const campo = useSessao.getState().banco.cenario.campos[0];
+    fireEvent.click(screen.getByText(campo.nome).closest('tr')!);
+    const regiao = screen.getByRole('region', { name: new RegExp(`Linhagem do campo ${campo.nome}`) });
+    expect(regiao).toBeInTheDocument();
+    expect(regiao.getAttribute('tabindex')).toBe('-1');
+  });
+
+  it('C-15 · a área de inventário recebe arquivo em vez de só anunciar', () => {
+    montar(<T2 />);
+    const area = screen.getByText(/Arraste o/).closest('.drop')!;
+    fireEvent.click(area);
+    expect(screen.getByRole('status')).toHaveTextContent(/data-inventory\.exemplo-1\.yaml/);
+  });
+});
+
+describe('T1 · sistema — dois mapas, dois eixos, um caminho de reclassificação', () => {
+  beforeEach(() => {
+    limparBancosDaSessao();
+    useSessao.setState({
+      papel: 'dpo', banco: new BancoMock('banco'), versao: 0,
+      avisos: [], recusas: {}, simulandoViolacao: false, riscoSelecionado: null, modoApresentacao: true,
+    });
+  });
+
+  it('T1-01 · o mapa de esforço não abre o diálogo da matriz P × I', () => {
+    montar(<T1 />);
+    const bolha = document.querySelector('.bub')!;
+    fireEvent.click(bolha);
+    // Nenhum modal de reclassificação: este mapa não tem os eixos que ele ajusta.
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('link', { name: /Reclassificar na matriz P × I/ })).toBeInTheDocument();
+  });
+
+  it('T1-01 · o encaminhamento leva o risco escolhido para a T5', () => {
+    montar(<T1 />);
+    fireEvent.click(document.querySelector('.bub')!);
+    fireEvent.click(screen.getByRole('link', { name: /Reclassificar na matriz P × I/ }));
+    expect(useSessao.getState().riscoSelecionado).toBeTruthy();
+  });
+
+  it('T1-02 · aceitação — simulação mantém faixa fixa e bolha tracejada', () => {
+    const { unmount } = montar(<T1 />);
+    expect(screen.queryByText(/Simulação ativa/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^Simular violação$/ }));
+
+    expect(screen.getByText(/Simulação ativa — este painel não representa o cenário real/)).toBeInTheDocument();
+    const fabricada = [...document.querySelectorAll('circle')].find((c) => c.getAttribute('stroke-dasharray'));
+    expect(fabricada).toBeDefined();
+    unmount();
+
+    // T1-02 · o estado é da sessão: remontar a tela não apaga a marca.
+    montar(<T1 />);
+    expect(screen.getByText(/Simulação ativa/)).toBeInTheDocument();
+    expect(useSessao.getState().simulandoViolacao).toBe(true);
+  });
+
+  it('T1-02 · o risco fabricado não é reclassificável', () => {
+    useSessao.setState({ simulandoViolacao: true });
+    montar(<T1 />);
+    const r11 = [...document.querySelectorAll('.bub')]
+      .find((g) => g.textContent?.includes('R11'))!;
+    fireEvent.click(r11);
+    expect(screen.getByText(/Risco fabricado pela simulação/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Reclassificar na matriz/ })).toBeNull();
+  });
+});
+
+describe('T7 · integração — a tela deixa operar, e recusa o que o pipeline não permite', () => {
+  beforeEach(() => {
+    limparBancosDaSessao();
+    useSessao.setState({
+      papel: 'seguranca', banco: new BancoMock('banco'), versao: 0,
+      avisos: [], recusas: {}, modoApresentacao: true,
+    });
+  });
+
+  it('T7-01 · agendar rotação registra no trail antes de responder', () => {
+    const b = useSessao.getState().banco;
+    const antes = b.auditoria.length;
+    montar(<T7 />);
+    fireEvent.click(screen.getByRole('button', { name: /Agendar rotação/ }));
+    expect(b.auditoria.length).toBe(antes + 1);
+    expect(b.auditoria.at(-1)!.acao).toBe('ROTACAO_AGENDADA');
+  });
+
+  it('T7-01 · promover canary com recriptografia em curso recusa no controle', () => {
+    montar(<T7 />);
+    fireEvent.click(screen.getByRole('button', { name: /Promover canary/ }));
+    const alerta = screen.getByRole('alert');
+    expect(alerta).toHaveTextContent(/recriptografia está em/i);
+    expect(useSessao.getState().avisos.filter((a) => a.tom === 'negado')).toHaveLength(0);
+  });
+
+  it('T7-01 · papel sem o pipeline não recebe os controles', () => {
+    useSessao.setState({ papel: 'produto' });
+    montar(<T7 />);
+    expect(screen.queryByRole('button', { name: /Agendar rotação/ })).toBeNull();
+  });
+
+  it('T7-02 · as duas listas de cripto-shredding são cartões separados', () => {
+    montar(<T7 />);
+    expect(screen.getByText('Campos com cripto-shredding suportado')).toBeInTheDocument();
+    expect(screen.getByText('Chaves sem suporte a shredding')).toBeInTheDocument();
+  });
+});
+
+describe('C-15 · sistema — nenhum rótulo promete o que o clique não faz', () => {
+  it('os controles inertes de T4 e T6 estão marcados e inoperantes', () => {
+    limparBancosDaSessao();
+    useSessao.setState({
+      papel: 'dpo', banco: new BancoMock('banco'), versao: 0,
+      avisos: [], recusas: {}, protocoloSelecionado: '2026-0731', modoApresentacao: true,
+    });
+    const { unmount } = montar(<T4 />);
+    const json = screen.getByRole('button', { name: 'JSON' });
+    expect(json).toBeDisabled();
+    expect(json.closest('.inerte')).not.toBeNull();
+    unmount();
+
+    montar(<T6 />);
+    const pdf = screen.getByRole('button', { name: /relatório de expurgo/i });
+    expect(pdf).toBeDisabled();
+    expect(pdf.closest('.inerte')).not.toBeNull();
+  });
+});
+
+describe('CSS · invariante — nenhuma classe simples declarada duas vezes', () => {
+  /**
+   * O PR 3 introduziu `.stepper` para os botões −/+ da matriz, colidindo com o
+   * `.stepper` que já era o contêiner de passos do parecer (T3) e da LIA (T8).
+   * A segunda declaração venceu, os dois steppers colapsaram para 32 × 32 px e
+   * as seções passaram a se sobrepor: o botão "Aprovar como DPO" ficou embaixo
+   * de um `<h4>` e parou de receber clique.
+   *
+   * Nenhum teste de comportamento pega isso — jsdom não faz layout, e a suíte
+   * inteira continuou verde. O que pega é esta invariante sobre a folha, e é
+   * barata o suficiente para valer a pena numa folha escrita à mão.
+   */
+  it('a folha de estilo não redeclara a mesma classe em dois lugares', async () => {
+    // Lido do disco, e não por `import ... ?raw`: sob vitest o CSS é stubado e
+    // o import devolve string vazia — o teste passaria sem ler nada, que é pior
+    // do que não existir. Descoberto injetando a colisão de propósito.
+    // `import.meta.url` sob vitest não é `file:`; o caminho sai do cwd, que é
+    // a raiz do app.
+    const { readFileSync } = await import('fs');
+    const css = readFileSync('src/ui/estilos.css', 'utf8');
+    expect(css.length, 'a folha precisa ter sido lida de verdade').toBeGreaterThan(1000);
+    const simples = [...css.matchAll(/^(\.[a-z0-9-]+)\s*\{/gm)].map((m) => m[1]);
+    const repetidas = simples.filter((c, i) => simples.indexOf(c) !== i);
+    expect([...new Set(repetidas)]).toEqual([]);
   });
 });

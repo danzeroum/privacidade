@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { CampoPII, Cabecalho, Cartao, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
+import { CampoPII, Cabecalho, Cartao, Didatico, NaoImplementado, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
 import { useSessao } from '../store/sessao';
 import { hashCpf } from '../lib/sha256';
 import { redigir, resumoDaRedacao } from '../lib/redator';
@@ -281,11 +281,13 @@ export default function T4() {
                 <div role="tabpanel" id="painel-dados" aria-labelledby="aba-dados" tabIndex={0}>
                   {titular ? (
                     <>
-                      <Nota tom="warn">
-                        Nenhum valor abaixo foi carregado ainda — o servidor só envia o campo que você abrir,
-                        com finalidade declarada e sob o protocolo {foco.protocolo}, e o registro é gravado
-                        antes da resposta.
-                      </Nota>
+                      <Didatico>
+                        <Nota tom="warn">
+                          Nenhum valor abaixo foi carregado ainda — o servidor só envia o campo que você abrir,
+                          com finalidade declarada e sob o protocolo {foco.protocolo}, e o registro é gravado
+                          antes da resposta.
+                        </Nota>
+                      </Didatico>
                       <div className="grid g2" style={{ marginTop: 14 }}>
                         {grupos.map((grupo) => (
                           <div className="card" style={{ background: 'var(--surface-2)' }} key={grupo}>
@@ -320,10 +322,16 @@ export default function T4() {
                             Não existe exportação em massa nesta interface.
                           </p>
                           <div className="row">
+                            {/* C-15 — os três formatos comunicam o desenho da
+                                portabilidade, mas nenhum deles gera arquivo.
+                                Ficam marcados: rótulo que promete o que o clique
+                                não faz é o começo da desconfiança no resto. */}
                             <Permitido acao="escrever" alternativa={<Pill tom="neutral">somente leitura</Pill>}>
-                              <button className="btn">JSON</button>
-                              <button className="btn">CSV</button>
-                              <button className="btn">PDF declaratório</button>
+                              <NaoImplementado nota="O pacote de portabilidade não é gerado neste protótipo">
+                                <button className="btn" disabled>JSON</button>
+                                <button className="btn" disabled>CSV</button>
+                                <button className="btn" disabled>PDF declaratório</button>
+                              </NaoImplementado>
                             </Permitido>
                           </div>
                         </div>

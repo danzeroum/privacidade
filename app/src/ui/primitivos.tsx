@@ -61,6 +61,57 @@ export function Permitido({ acao, children, alternativa }: { acao: Acao; childre
   return <>{children}</>;
 }
 
+/**
+ * C-10 — a recusa mora ao lado do controle que falhou.
+ *
+ * Antes, toda negativa ia para o canal do canto: a pessoa clicava aqui e o
+ * motivo aparecia do outro lado da tela, num aviso que sumia antes de ela
+ * achar. Aqui é `role="alert"` no ponto do erro, e some sozinha quando a mesma
+ * ação passa.
+ *
+ * Um alerta por região: quem renderizar dois `Recusa` visíveis ao mesmo tempo
+ * está usando a mesma âncora para coisas diferentes.
+ */
+export function Recusa({ ancora }: { ancora: string }) {
+  const recusa = useSessao((s) => s.recusas[ancora]);
+  if (!recusa) return null;
+  return (
+    <p className="note crit" role="alert" style={{ marginTop: 10 }}>
+      <b>{recusa.texto}</b>
+      {recusa.regra && <><br /><span className="hint">{recusa.regra}</span></>}
+    </p>
+  );
+}
+
+/**
+ * C-15 — controle que existe para demonstrar forma, não função.
+ *
+ * A alternativa seria removê-lo, e onde ele não ensinava nada foi o que
+ * fizemos. Onde a presença comunica o desenho — os três formatos de
+ * portabilidade, por exemplo — a marca é obrigatória: rótulo que promete o que
+ * o clique não faz é o começo da desconfiança em tudo o mais que a tela diz.
+ */
+export const NaoImplementado = ({ children, nota }: { children: ReactNode; nota?: string }) => (
+  <span className="inerte" title={nota ?? 'Não implementado neste protótipo'}>
+    {children}
+    <span className="inerte-marca" aria-hidden="true">não implementado</span>
+    <span className="visually-hidden">não implementado neste protótipo</span>
+  </span>
+);
+
+/**
+ * C-16 — dois níveis de texto.
+ *
+ * O operacional — estado, prazo, recusa, o que fazer agora — é permanente. O
+ * didático, que explica por que a regra existe, é excelente numa demonstração e
+ * vira ruído para quem opera a tela todo dia. Fica atrás do modo apresentação.
+ */
+export function Didatico({ children }: { children: ReactNode }) {
+  const ligado = useSessao((s) => s.modoApresentacao);
+  if (!ligado) return null;
+  return <>{children}</>;
+}
+
 export function Modal({ titulo, children, rodape, aoFechar }: {
   titulo: string; children: ReactNode; rodape: ReactNode; aoFechar: () => void;
 }) {

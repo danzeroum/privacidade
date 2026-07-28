@@ -1,10 +1,23 @@
-import { Cabecalho, Cartao, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
+import { Cabecalho, Cartao, Didatico, Nota, Permitido, Pill, Recusa, Tabela } from '../ui/primitivos';
 import { useSessao } from '../store/sessao';
 
 export default function T7() {
   const banco = useSessao((s) => s.banco);
+  const chamar = useSessao((s) => s.chamar);
   useSessao((s) => s.versao);
   const { chaves, rotacao, acessosKms, campos } = banco.cenario;
+
+  /**
+   * T7-01 — a tela informava muito bem e não deixava fazer nada: quatro cartões
+   * de leitura sobre um ciclo que alguém precisa operar. As duas ações que o
+   * desenho pede passam pela API, com registro no trail — e a promoção do canary
+   * é recusada enquanto a recriptografia não termina, porque promover no meio
+   * deixa registro ilegível com a chave nova.
+   */
+  const agendar = (alias: string) =>
+    chamar({ metodo: 'POST', caminho: `/v1/kms/${encodeURIComponent(alias)}/agendar-rotacao` }, 'kms-acao');
+  const promover = (alias: string) =>
+    chamar({ metodo: 'POST', caminho: `/v1/kms/${encodeURIComponent(alias)}/promover-canary` }, 'kms-acao');
 
   const semShredding = chaves.filter((c) => !c.criptoShredding && c.status !== 'revogada');
   const urgentes = chaves.filter((c) => c.rotacaoEmDias !== null && c.rotacaoEmDias <= 10 && c.status === 'ativa');
@@ -33,7 +46,16 @@ export default function T7() {
           </Nota>
         }
       >
-        <Cartao titulo={`Rotação em curso — ${rotacao.chaveAntiga} → ${rotacao.chaveNova}`} hint="pipeline do kms-rotation.yml">
+        <Cartao
+          titulo={`Rotação em curso — ${rotacao.chaveAntiga} → ${rotacao.chaveNova}`}
+          acao={
+            <span className="row">
+              <button className="btn primary" onClick={() => agendar(rotacao.chaveNova)}>Agendar rotação</button>
+              <button className="btn" onClick={() => promover(rotacao.chaveNova)}>Promover canary</button>
+            </span>
+          }
+        >
+          <Recusa ancora="kms-acao" />
           <div className="pipe">
             {rotacao.etapas.map((e, i) => (
               <div key={e.etapa} className={`pipe-step ${e.status}`}>
@@ -132,30 +154,45 @@ export default function T7() {
                 );
               })}
             </svg>
-            <Nota>Destruir a chave torna o dataset ilegível — é a eliminação em base imutável.</Nota>
+            <Didatico>
+              <Nota>Destruir a chave torna o dataset ilegível — é a eliminação em base imutável.</Nota>
+            </Didatico>
           </Cartao>
 
-          <Cartao titulo="Cripto-shredding" hint="destruir a chave = destruir o dado">
+          {/* T7-02 — a lista misturava campos do catálogo e chaves do KMS na
+              mesma `<dl>`, com o mesmo formato: `dataset.campo` ao lado de
+              "Backup de banco de dados", como se fossem a mesma coisa. São dois
+              inventários diferentes e duas perguntas diferentes. */}
+          <Cartao titulo="Campos com cripto-shredding suportado" hint="destruir a chave = destruir o dado">
             <dl className="kv">
               {campos.filter((c) => c.tipoArmazenado === 'criptografado' || c.tipoArmazenado === 'hmac').map((c) => (
                 <div key={c.id} style={{ display: 'contents' }}>
                   <dt className="mono">{c.dataset}.{c.nome}</dt>
-                  <dd><Pill tom="ok">suportado</Pill> DEK por registro</dd>
-                </div>
-              ))}
-              {semShredding.map((c) => (
-                <div key={c.alias} style={{ display: 'contents' }}>
-                  <dt className="mono">{c.finalidade}</dt>
-                  <dd><Pill tom="crit">não suportado</Pill> exige hard delete</dd>
+                  <dd><Pill tom="ok">suportado</Pill> {c.tipoArmazenado === 'hmac' ? 'HMAC com chave no KMS' : 'DEK por registro'} · eliminação comprovável</dd>
                 </div>
               ))}
             </dl>
-            {semShredding.length > 0 && (
-              <Nota tom="crit">
-                Enquanto {semShredding[0].alias} não suportar cripto-shredding, uma restauração devolve dados
-                já eliminados. É exatamente o risco R10 da matriz.
-              </Nota>
-            )}
+          </Cartao>
+
+          <Cartao titulo="Chaves sem suporte a shredding" hint="onde só resta hard delete">
+            {semShredding.length === 0
+              ? <Nota>Todas as chaves ativas suportam cripto-shredding neste cenário.</Nota>
+              : (
+                <>
+                  <dl className="kv">
+                    {semShredding.map((c) => (
+                      <div key={c.alias} style={{ display: 'contents' }}>
+                        <dt className="mono">{c.alias}</dt>
+                        <dd><Pill tom="crit">não suportado</Pill> {c.finalidade} · exige hard delete</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <Nota tom="crit">
+                    Enquanto {semShredding[0].alias} não suportar cripto-shredding, uma restauração devolve dados
+                    já eliminados. É exatamente o risco R10 da matriz.
+                  </Nota>
+                </>
+              )}
           </Cartao>
         </div>
       </div>
