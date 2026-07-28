@@ -336,6 +336,50 @@ export interface Maturidade {
   evidencias: string[];
 }
 
+// ── C-07 · incidente de segurança (Art. 48) ─────────────────────────────────
+
+export type EstadoIncidente =
+  | 'aberto' | 'contido' | 'decidido' | 'comunicado' | 'nao_comunicado' | 'encerrado';
+
+export type DecisaoIncidente = 'comunicar_anpd_e_titulares' | 'comunicar_anpd' | 'nao_comunicar';
+
+export interface Incidente {
+  id: string;
+  estado: EstadoIncidente;
+  /** ISO. O prazo corre à vista a partir daqui — o rótulo é derivado, nunca digitado ao lado. */
+  detectadoEm: string;
+  origem: string;
+  /**
+   * Escopo **lido do catálogo**: são ids de `Campo`, não texto digitado. Quem
+   * responde ao Art. 48 precisa dizer que dado vazou, e a resposta tem de vir
+   * do inventário — senão o incidente descreve um universo que o ROPA
+   * desconhece, que é o problema do C-17 outra vez.
+   */
+  camposIds: string[];
+  titularesEstimados: number;
+  riscoCodigo?: string;
+  ripdId?: string;
+  decisao?: DecisaoIncidente;
+  /** ≥ 20 caracteres, já redigido (C-04). */
+  fundamento?: string;
+  contidoPor?: string;
+  decididoPor?: string;
+}
+
+// ── C-08 · registro de consentimento ────────────────────────────────────────
+
+export interface Consentimento {
+  campoId: string;
+  versao: string;
+  texto: string;
+  coletadoEm: string;
+  canal: string;
+  hash: string;
+  estado: 'ativo' | 'revogado' | 'expirado';
+  revogadoEm?: string;
+  titulares: number;
+}
+
 export interface Cenario {
   id: string;
   nome: string;
@@ -343,6 +387,8 @@ export interface Cenario {
   descricao: string;
   sistemas: Sistema[];
   campos: Campo[];
+  incidentes: Incidente[];
+  consentimentos: Consentimento[];
   gates: GateRun[];
   ripds: Ripd[];
   riscos: Risco[];

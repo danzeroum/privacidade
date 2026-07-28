@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Cabecalho, Cartao, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
 import { useSessao } from '../store/sessao';
 import { hashCpf } from '../lib/sha256';
+import { redigir, resumoDaRedacao } from '../lib/redator';
 import type { Campo, Categoria, Finalidade, TipoArmazenado } from '../mock/types';
 
 const ICONE: Record<TipoArmazenado, string> = {
@@ -172,6 +173,8 @@ export default function T2() {
             </div>
             <ValidadorInventario />
           </Cartao>
+
+          <RegistrosDeConsentimento />
         </div>
 
         <div className="stack">
@@ -387,5 +390,100 @@ function ValidadorInventario() {
         declarar finalidades: o inventário é recusado inteiro.
       </Nota>
     </Permitido>
+  );
+}
+
+/**
+ * C-08 — o registro de consentimento é a prova que sustenta a base legal.
+ *
+ * A base "consentimento" só é aceita no inventário com um registro vivo aqui, e
+ * revogar não muda um rótulo: o campo perde a base legal, sai dos caminhos de
+ * revelação e o gate do repositório volta a bloquear — como a LIA vencida.
+ */
+function RegistrosDeConsentimento() {
+  const banco = useSessao((s) => s.banco);
+  const chamar = useSessao((s) => s.chamar);
+  useSessao((s) => s.versao);
+
+  const [alvo, setAlvo] = useState<string | null>(null);
+  const [motivo, setMotivo] = useState('');
+  const previa = redigir(motivo);
+
+  const registros = banco.cenario.consentimentos;
+  if (registros.length === 0) {
+    return (
+      <Cartao titulo="Registro de consentimento">
+        <Nota>Nenhum campo deste cenário usa consentimento como base legal.</Nota>
+      </Cartao>
+    );
+  }
+
+  const revogar = (campoId: string) => {
+    const res = chamar({ metodo: 'POST', caminho: `/v1/consentimentos/${campoId}/revogar`, body: { motivo } });
+    if (res.status === 200) { setAlvo(null); setMotivo(''); }
+  };
+
+  return (
+    <Cartao titulo="Registro de consentimento" hint="a prova que sustenta a base legal">
+      <Nota>
+        A base “consentimento” só é aceita no inventário com um registro vivo aqui. Revogar bloqueia o
+        tratamento e aciona o gate, como a LIA vencida.
+      </Nota>
+      {registros.map((c) => {
+        const campo = banco.cenario.campos.find((x) => x.id === c.campoId);
+        const ativo = c.estado === 'ativo';
+        return (
+          <div key={c.campoId} style={{ paddingTop: 12, borderTop: '1px solid var(--line)', marginTop: 12 }}>
+            <dl className="kv">
+              <dt>Campo</dt><dd className="mono">{campo?.nome ?? c.campoId}</dd>
+              <dt>Texto {c.versao}</dt><dd>“{c.texto}”</dd>
+              <dt>Coletado</dt>
+              <dd>{c.coletadoEm} · {c.canal} · hash <span className="hash">{c.hash.slice(0, 8)}…</span></dd>
+              <dt>Estado</dt>
+              <dd>
+                <Pill tom={ativo ? 'ok' : 'crit'}>
+                  {ativo ? `ativo · ${c.titulares.toLocaleString('pt-BR')} titulares` : `revogado`}
+                </Pill>
+                {!ativo && <div className="hint">o campo perdeu a base legal e não é mais revelável</div>}
+              </dd>
+            </dl>
+            {ativo && (
+              <Permitido
+                acao="revogar_consentimento"
+                alternativa={<span className="hint">a revogação é operada pelo balcão do DPO (Art. 18, VIII)</span>}
+              >
+                {alvo === c.campoId ? (
+                  <>
+                    <div className="field" style={{ marginTop: 8 }}>
+                      <label htmlFor={`rev-${c.campoId}`}>Motivo da revogação</label>
+                      <textarea
+                        id={`rev-${c.campoId}`}
+                        value={motivo}
+                        onChange={(e) => setMotivo(e.target.value)}
+                        placeholder="Ex.: titular pediu a revogação pelo canal do programa."
+                      />
+                    </div>
+                    {previa.houveRemocao && (
+                      <Nota tom="warn">
+                        O motivo contém {resumoDaRedacao(previa.achados)} — será gravado assim:
+                        {' '}<span className="mono">{previa.texto}</span>
+                      </Nota>
+                    )}
+                    <div className="row" style={{ marginTop: 8 }}>
+                      <button className="btn danger" onClick={() => revogar(c.campoId)}>Confirmar revogação</button>
+                      <button className="btn" onClick={() => setAlvo(null)}>Cancelar</button>
+                    </div>
+                  </>
+                ) : (
+                  <button className="reveal" onClick={() => { setAlvo(c.campoId); setMotivo(''); }}>
+                    Revogar consentimento
+                  </button>
+                )}
+              </Permitido>
+            )}
+          </div>
+        );
+      })}
+    </Cartao>
   );
 }

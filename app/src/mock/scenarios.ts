@@ -1,6 +1,6 @@
 import { sha256, hashCpf } from '../lib/sha256';
 import type {
-  Campo, Cenario, LinddunItem, Maturidade, Risco, Solicitacao, Titular,
+  Campo, Cenario, Incidente, LinddunItem, Maturidade, Risco, Solicitacao, Titular,
 } from './types';
 
 const DIA = 86_400_000;
@@ -81,6 +81,23 @@ const metricas = (ropa: number, sla: number, logs: number, ripd: number): Cenari
  * "atendidas no SLA" passou a medir outra coisa.
  */
 const emDia = (ms: number) => new Date(ms).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+
+
+/**
+ * C-07 — o incidente nasce em `aberto` para a máquina de estados ser
+ * exercitável no protótipo. `camposIds` aponta para o catálogo: escopo de
+ * incidente é lido do inventário, nunca digitado.
+ */
+const incidentePadrao = (camposIds: string[], riscoCodigo: string, ripdId: string): Incidente[] => [{
+  id: 'INC-2026-003',
+  estado: 'aberto',
+  detectadoEm: new Date(Date.now() - 6 * HORA - 12 * 60_000).toISOString(),
+  origem: 'alerta de volume · API de cobrança',
+  camposIds,
+  titularesEstimados: 4118,
+  riscoCodigo,
+  ripdId,
+}];
 
 const solicitacoesPadrao = (titularIds: string[], sistemas: string[]): Solicitacao[] => {
   const agora = Date.now();
@@ -169,6 +186,12 @@ const banco: Cenario = {
     { slug: 'analytics', nome: 'Pipeline analítico', repositorio: 'danzeroum/analytics', timeDono: '@squad-dados', temInventario: false },
   ],
   campos: camposBanco,
+  incidentes: incidentePadrao(['b-cpf', 'b-nome', 'b-hist'], 'R09', 'r1'),
+  consentimentos: [
+    { campoId: 'b-bio', versao: 'v3', texto: 'Autorizo o uso da minha imagem facial para verificação de identidade na abertura de conta.',
+      coletadoEm: '14/03/2026', canal: 'app iOS', hash: sha256('consent-b-bio-v3').slice(0, 16),
+      estado: 'ativo', titulares: 8412 },
+  ],
   gates: [
     { id: 'g1', workflow: 'privacy-ci-gate', repositorio: 'credit-scoring', prNumero: 1234, prTitulo: 'feat: scoring v2 com LLM', prAutor: '@maria.silva', headSha: 'a1b2c3d', conclusao: 'failure', bloqueouMerge: true, runUrl: 'https://github.com/danzeroum/credit-scoring/actions/runs/1234', quando: 'há 4 h', ripdId: 'r1',
       findings: [
@@ -319,6 +342,15 @@ const varejo: Cenario = {
     { slug: 'fidelidade', nome: 'Programa de fidelidade', repositorio: 'aurora/fidelidade', timeDono: '@squad-crm', temInventario: false },
   ],
   campos: camposVarejo,
+  incidentes: incidentePadrao(['v-cpf', 'v-email', 'v-tel'], 'R09', 'r1'),
+  consentimentos: [
+    { campoId: 'v-email', versao: 'v2', texto: 'Aceito receber comunicações do programa de fidelidade por e-mail.',
+      coletadoEm: '02/02/2026', canal: 'checkout web', hash: sha256('consent-v-email-v2').slice(0, 16),
+      estado: 'ativo', titulares: 31207 },
+    { campoId: 'v-tel', versao: 'v2', texto: 'Aceito receber comunicações do programa de fidelidade por SMS.',
+      coletadoEm: '02/02/2026', canal: 'checkout web', hash: sha256('consent-v-tel-v2').slice(0, 16),
+      estado: 'ativo', titulares: 18904 },
+  ],
   gates: [
     { id: 'g1', workflow: 'privacy-ci-gate', repositorio: 'recomendacao', prNumero: 512, prTitulo: 'feat: cruzar cesta da farmácia com recomendação', prAutor: '@lucas.dias', headSha: 'd9c8b7a', conclusao: 'failure', bloqueouMerge: true, runUrl: '#', quando: 'há 2 h', ripdId: 'r1',
       findings: [
@@ -327,6 +359,10 @@ const varejo: Cenario = {
       ] },
     { id: 'g2', workflow: 'architecture-review', repositorio: 'recomendacao', prNumero: 512, prTitulo: 'feat: cruzar cesta da farmácia com recomendação', prAutor: '@lucas.dias', headSha: 'd9c8b7a', conclusao: 'action_required', bloqueouMerge: true, runUrl: '#', quando: 'há 2 h', ripdId: 'r1', findings: [] },
     { id: 'g3', workflow: 'privacy-ci-gate', repositorio: 'checkout', prNumero: 941, prTitulo: 'chore: TTL no endereço de entrega', prAutor: '@ana.ferraz', headSha: 'b2a1c0d', conclusao: 'success', bloqueouMerge: false, runUrl: '#', quando: 'há 7 h', findings: [] },
+    // C-08 — o gate do repositório que trata dado sob consentimento. Revogar
+    // o consentimento derruba este gate, como faz a LIA vencida: a demonstração
+    // só existe se houver um gate verde para ficar vermelho.
+    { id: 'g4', workflow: 'privacy-ci-gate', repositorio: 'fidelidade', prNumero: 77, prTitulo: 'feat: campanha de SMS do programa', prAutor: '@bruno.reis', headSha: 'e5f4a3b', conclusao: 'success', bloqueouMerge: false, runUrl: '#', quando: 'há 1 d', findings: [] },
   ],
   ripds: [{
     id: 'r1', codigo: 'RIPD-2026-031', titulo: 'Cruzamento de cesta da farmácia com recomendação', sistema: 'recomendacao', prNumero: 512, headSha: 'd9c8b7a',
@@ -455,6 +491,15 @@ const midia: Cenario = {
     { slug: 'ads', nome: 'Publicidade', repositorio: 'palco/ads', timeDono: '@squad-ads', temInventario: true },
   ],
   campos: camposMidia,
+  incidentes: incidentePadrao(['m-cpf', 'm-inferencia'], 'R09', 'r1'),
+  consentimentos: [
+    { campoId: 'm-inferencia', versao: 'v5', texto: 'Autorizo o uso do meu histórico de consumo para recomendação e publicidade segmentada.',
+      coletadoEm: '21/05/2026', canal: 'app Android', hash: sha256('consent-m-inferencia-v5').slice(0, 16),
+      estado: 'ativo', titulares: 96330 },
+    { campoId: 'm-orientacao', versao: 'v5', texto: 'Autorizo o uso de afinidade temática do meu perfil para curadoria editorial.',
+      coletadoEm: '21/05/2026', canal: 'app Android', hash: sha256('consent-m-orientacao-v5').slice(0, 16),
+      estado: 'ativo', titulares: 4211 },
+  ],
   gates: [
     { id: 'g1', workflow: 'privacy-ci-gate', repositorio: 'ads', prNumero: 77, prTitulo: 'feat: segmento por afinidade de acervo', prAutor: '@bruno.reis', headSha: 'e1f2a3b', conclusao: 'failure', bloqueouMerge: true, runUrl: '#', quando: 'há 1 h', ripdId: 'r1',
       findings: [

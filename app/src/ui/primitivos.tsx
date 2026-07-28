@@ -151,7 +151,15 @@ export function CampoPII({ titularId, chave, rotulo, mascara, sensivel }: {
     ? banco.cenario.campos.find((c) => c.id === meta.campoCatalogoId)
     : undefined;
   const finalidadesOfertadas = catalogado?.finalidadesCompativeis ?? [];
-  const revelavel = finalidadesOfertadas.length > 0;
+  /**
+   * C-08 — a revogação propaga até o botão. A rota já recusa com 422, mas
+   * deixar o controle na tela ofereceria um caminho que a API não aceita: a
+   * pessoa clica, preenche justificativa e só então descobre que o titular
+   * revogou. Mesma disciplina do C-03.
+   */
+  const consentimentoVivo = catalogado?.baseLegal !== 'consentimento'
+    || banco.cenario.consentimentos.some((c) => c.campoId === catalogado?.id && c.estado === 'ativo');
+  const revelavel = finalidadesOfertadas.length > 0 && consentimentoVivo;
 
   const previa = redigir(justificativa);
 
@@ -177,10 +185,13 @@ export function CampoPII({ titularId, chave, rotulo, mascara, sensivel }: {
         <span className="dots">{valor ?? mascara}</span>
         {valor
           ? <span className="countdown">{restante}s</span>
-          : revelavel && (
+          : revelavel ? (
             <Permitido acao="revelar_pii">
               <button className="reveal" onClick={() => setAberto(true)}>revelar</button>
             </Permitido>
+          ) : !consentimentoVivo && (
+            // A ausência precisa dizer por quê: some o botão, fica a razão.
+            <span className="hint">consentimento revogado</span>
           )}
       </span>
 
