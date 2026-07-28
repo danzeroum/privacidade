@@ -17,6 +17,14 @@ export interface EntradaAudit {
 /** Ações que tocam dado pessoal: sem finalidade e justificativa, não entram no log (Art. 37). */
 const ACOES_PII = ['CAMPO_REVELADO', 'TITULAR_CONSULTADO', 'PSEUDONIMO_RESOLVIDO'];
 
+/**
+ * Ações que exigem finalidade, mas não prosa. Localizar um titular é passo
+ * intermediário: o que sustenta a operação em auditoria é a finalidade
+ * declarada mais o identificador truncado. Exigir justificativa de 20
+ * caracteres a cada busca só produziria texto de fachada.
+ */
+const ACOES_COM_FINALIDADE = ['TITULAR_BUSCADO'];
+
 export class FalhaDeAuditoria extends Error {}
 export class LogImutavel extends Error {}
 
@@ -32,7 +40,18 @@ export class BancoMock {
   /** Interruptor da demonstração "se o log falhar, a resposta falha". */
   simularFalhaDeLog = false;
 
+  /**
+   * Modo demonstração. As rotas que simulam ataque (`POST /v1/audit/forjar`)
+   * só existem com ele ligado — e ainda assim exigem a ação `escrever`. Uma
+   * rota de ataque presa a uma condição só é uma condição a menos do que ela
+   * precisa.
+   */
+  modoDemo = true;
+
   private proximoId = 1;
+
+  /** Carimbos de busca por ator, para o limite de taxa. Busca em rajada é enumeração. */
+  private buscasPorAtor = new Map<string, number[]>();
 
   constructor(cenarioId: string) {
     this.cenario = estruturaClonada(CENARIOS[cenarioId] ?? CENARIOS.banco);
@@ -59,6 +78,9 @@ export class BancoMock {
         );
       }
     }
+    if (ACOES_COM_FINALIDADE.includes(e.acao) && e.resultado !== 'negado' && !e.finalidade) {
+      throw new FalhaDeAuditoria('Esta operação de tratamento exige finalidade declarada (Art. 37).');
+    }
     const anterior = this.auditoria.at(-1) ?? null;
     const parcial: Omit<AuditLinha, 'hash'> = {
       id: this.proximoId++,
@@ -77,6 +99,23 @@ export class BancoMock {
     const linha: AuditLinha = { ...parcial, hash: this.calcularHash(parcial) };
     this.auditoria.push(linha);
     return linha;
+  }
+
+  /**
+   * Consome uma vaga da janela de busca do ator. Devolve `false` quando o
+   * limite estourou — e o chamador responde 429 **antes** de olhar se o
+   * titular existe, para que o limite não vire o oráculo que o 404 evitou.
+   */
+  consumirCotaDeBusca(ator: string, limite = 5, janelaMs = 60_000): boolean {
+    const agora = Date.now();
+    const recentes = (this.buscasPorAtor.get(ator) ?? []).filter((t) => agora - t < janelaMs);
+    if (recentes.length >= limite) {
+      this.buscasPorAtor.set(ator, recentes);
+      return false;
+    }
+    recentes.push(agora);
+    this.buscasPorAtor.set(ator, recentes);
+    return true;
   }
 
   /** Append-only de verdade: nem administrador edita. */

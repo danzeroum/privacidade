@@ -34,10 +34,44 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
   const raiz = partes[0];
   const body = (req.body ?? {}) as Record<string, any>;
 
-  // Auditor externo nunca escreve. Nem em rota de demonstração.
-  if (metodo !== 'GET' && !pode(papel, 'escrever') && raiz !== 'audit') {
-    return erro(403, 'Auditor externo tem acesso somente de leitura.',
-      'Papel sem a ação "escrever" não recebe rota de escrita.') as Res<T>;
+  /**
+   * Verificar a integridade da cadeia é leitura: recomputa hashes e compara,
+   * sem mudar uma linha. Por isso sai antes da guarda de escrita — é
+   * justamente o que o auditor externo veio fazer, e prendê-lo a `escrever`
+   * tiraria dele o único ato que sustenta o parecer.
+   *
+   * Decisão registrada para o PR 3: quando `verificar` passar a gravar
+   * `INTEGRIDADE_VERIFICADA` no trail (T6-01), o registro é consequência do
+   * sistema, não escalada do ator — a rota ganha a ação própria
+   * `verificar_integridade`, concedida a todos os papéis de leitura, e **não**
+   * volta para dentro de `escrever`.
+   */
+  if (raiz === 'audit' && partes[1] === 'verificar') {
+    return ok(banco.auditVerificar()) as Res<T>;
+  }
+
+  /**
+   * A busca por titular também sai antes da guarda genérica, por outro motivo:
+   * ela precisa responder **404 uniforme** a quem está fora de escopo. Caindo
+   * na guarda, um papel sem `escrever` receberia 403 — e o 403 confirmaria que
+   * a rota existe e que o pedido só falhou por permissão, reabrindo pela porta
+   * da guarda o oráculo que a Regra 5 fecha.
+   *
+   * Isto não é uma exceção como a que existia em `audit` (C-02): `buscar_titular`
+   * é estritamente mais restritiva que `escrever` — só o DPO a tem, e o DPO
+   * escreve. Nada alcança esta rota que não alcançaria a guarda.
+   */
+  if (metodo === 'POST' && raiz === 'titulares' && partes[1] === 'buscar') {
+    return buscarTitular<T>(banco, req);
+  }
+
+  // Papel sem `escrever` não alcança rota de escrita — inclusive as de auditoria.
+  // A exceção que existia aqui para `audit` deixava PATCH /v1/audit/{id} e
+  // POST /v1/audit/forjar ao alcance do auditor externo, invertendo o princípio
+  // do projeto: quem protegia era a interface (C-02).
+  if (metodo !== 'GET' && !pode(papel, 'escrever')) {
+    return erro(403, 'Seu papel tem acesso somente de leitura.',
+      'Papel sem a ação "escrever" não recebe rota de escrita — nem as de auditoria.') as Res<T>;
   }
 
   switch (`${metodo} ${raiz}`) {
@@ -106,15 +140,6 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         compartilhamentos: titular.compartilhamentos,
         decisao: titular.decisao,
       }) as Res<T>;
-    }
-
-    case 'POST titulares': {
-      if (partes[1] !== 'buscar') break;
-      // A busca chega com hash. O CPF digitado nunca saiu do navegador.
-      const { cpfHash } = body as { cpfHash: string };
-      const titular = banco.cenario.titulares.find((t) => t.cpfHash === cpfHash);
-      if (!titular) return erro(404, 'Não encontrado.') as Res<T>;
-      return ok({ id: titular.id, pseudonimo: `hmac:${cpfHash.slice(0, 4)}…${cpfHash.slice(-4)}` }) as Res<T>;
     }
 
     case 'GET catalog': {
@@ -246,9 +271,19 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
     }
 
     case 'POST audit': {
-      if (partes[1] === 'verificar') return ok(banco.auditVerificar()) as Res<T>;
-      // Rota exclusiva da demonstração: simula um DBA comprometido editando o log direto.
+      // `verificar` já foi atendido antes da guarda de escrita, como leitura.
       if (partes[1] === 'forjar') {
+        // Simula um DBA comprometido editando o log direto. Duas condições, não
+        // uma: fora do modo demonstração a rota não existe, e mesmo dentro dele
+        // continua exigindo `escrever` — checado aqui além da guarda de topo,
+        // para que reintroduzir uma exceção lá não reabra esta porta.
+        if (!banco.modoDemo) {
+          return erro(404, 'Rota não encontrada.',
+            'A simulação de ataque só existe no modo demonstração.') as Res<T>;
+        }
+        if (!pode(papel, 'escrever')) {
+          return erro(403, 'Seu papel tem acesso somente de leitura.') as Res<T>;
+        }
         banco.auditForjar(Number(body.id ?? 2));
         return ok(banco.auditVerificar()) as Res<T>;
       }
@@ -314,6 +349,70 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
   }
 
   return erro(404, `Rota não encontrada: ${metodo} ${caminho}`) as Res<T>;
+}
+
+/**
+ * REGRA 5b — a busca por hash é o mesmo oráculo de existência que o
+ * `GET /titulares/{id}` evita, entrando pelo POST (C-01).
+ *
+ * Ordem deliberada: permissão → finalidade → cota → registro → resposta.
+ * A cota vem antes do `find` para que o 429 seja idêntico para hash existente
+ * e inexistente; se dependesse do resultado, o limite viraria o oráculo que o
+ * 404 acabou de fechar.
+ *
+ * Exige finalidade, não justificativa: a busca é passo intermediário. A
+ * revelação, que é o acesso ao valor, continua exigindo as duas. Pedir prosa a
+ * cada busca só produziria justificativa de fachada — o que sustenta esta
+ * consulta em auditoria é a finalidade declarada mais o hash truncado no
+ * registro.
+ */
+function buscarTitular<T>(banco: BancoMock, req: Req): Res<T> {
+  const { papel, ator } = req;
+  // A busca chega com hash. O CPF digitado nunca saiu do navegador.
+  const cpfHash = String((req.body as { cpfHash?: string } | undefined)?.cpfHash ?? '');
+  const naoEncontrado = erro(404, 'Não encontrado.',
+    'Busca fora do escopo do ator responde igual a busca sem resultado — 403 confirmaria a existência.');
+
+  if (!pode(papel, 'buscar_titular')) {
+    registrarBuscaNegada(banco, ator, papel, cpfHash, 'papel sem a ação buscar_titular');
+    return naoEncontrado as Res<T>;
+  }
+  if (!req.purpose) {
+    registrarBuscaNegada(banco, ator, papel, cpfHash, 'sem X-Purpose');
+    return erro(403, 'Finalidade não declarada no cabeçalho X-Purpose.',
+      'Art. 37: localizar um titular é operação de tratamento e exige finalidade registrada.') as Res<T>;
+  }
+  if (!banco.consumirCotaDeBusca(ator)) {
+    registrarBuscaNegada(banco, ator, papel, cpfHash, 'limite de taxa excedido');
+    return erro(429, 'Limite de 5 buscas por minuto atingido.',
+      'Busca em rajada é enumeração, não atendimento.') as Res<T>;
+  }
+
+  // Grava antes de responder. Falha de gravação derruba a busca inteira.
+  try {
+    banco.auditAppend({
+      ator, atorPapel: papel, acao: 'TITULAR_BUSCADO', recursoTipo: 'titular',
+      recursoId: cpfHash.slice(0, 8), finalidade: req.purpose, campos: ['cpf_hash'],
+    });
+  } catch (e) {
+    const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a busca.';
+    return erro(503, msg, 'Sem registro não há busca: a ordem é gravar, depois responder.') as Res<T>;
+  }
+
+  const titular = banco.cenario.titulares.find((t) => t.cpfHash === cpfHash);
+  if (!titular) return naoEncontrado as Res<T>;
+  return ok({ id: titular.id, pseudonimo: `hmac:${cpfHash.slice(0, 4)}…${cpfHash.slice(-4)}` }) as Res<T>;
+}
+
+/** A tentativa recusada também entra no trail — negativa sem rastro não é controle. */
+function registrarBuscaNegada(banco: BancoMock, ator: string, papel: Papel, cpfHash: string, motivo: string) {
+  try {
+    banco.auditAppend({
+      ator, atorPapel: papel, acao: 'TITULAR_BUSCADO', recursoTipo: 'titular',
+      recursoId: (cpfHash ?? '').slice(0, 8), resultado: 'negado', campos: ['cpf_hash'],
+      justificativa: motivo,
+    });
+  } catch { /* a negativa não pode derrubar a resposta de negativa */ }
 }
 
 function registrarNegativa(banco: BancoMock, ator: string, papel: Papel, campo: string, motivo: string) {

@@ -4,6 +4,9 @@ import { BancoMock } from '../src/mock/db';
 import { request } from '../src/mock/api';
 import { pode } from '../src/mock/permissoes';
 import { CampoPII } from '../src/ui/primitivos';
+import T2 from '../src/screens/T2';
+import T4 from '../src/screens/T4';
+import T6 from '../src/screens/T6';
 import { useSessao } from '../src/store/sessao';
 import { sha256, hashCpf } from '../src/lib/sha256';
 import type { Papel } from '../src/mock/types';
@@ -241,7 +244,12 @@ describe('Privacy by default na interface', () => {
     expect(h).not.toContain('529');
     expect(h).toBe(sha256('52998224725:lastro-busca-v1'));
 
-    const res = chamar('dpo', { metodo: 'POST', caminho: '/v1/titulares/buscar', body: { cpfHash: h } });
+    // Adaptação de contrato do PR 1 (C-01): a busca passou a exigir finalidade
+    // declarada. O que este teste prova — que o documento viaja como hash —
+    // continua igual.
+    const res = chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/titulares/buscar', purpose: 'atendimento', body: { cpfHash: h },
+    });
     expect(res.status).toBe(200);
     expect((res.body as { id: string }).id).toBe('t1');
   });
@@ -271,6 +279,197 @@ describe('Cenários', () => {
       expect(b.cenario.gates.some((g) => g.bloqueouMerge), `${id}: PR bloqueado`).toBe(true);
       expect(b.cenario.riscos, `${id}: riscos`).toHaveLength(10);
       expect(b.auditVerificar().integro, `${id}: cadeia`).toBe(true);
+    }
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PR 1 — Controle de acesso (C-01, C-02, T6-02)
+// ═════════════════════════════════════════════════════════════════════════════
+
+const HASH_EXISTENTE = hashCpf('529.982.247-25');
+const HASH_INEXISTENTE = hashCpf('000.000.000-00');
+
+describe('C-01 · Regra 5b — busca por hash não é oráculo de existência', () => {
+  it('papel sem buscar_titular recebe 404, nunca 403', () => {
+    const res = chamar('produto', {
+      metodo: 'POST', caminho: '/v1/titulares/buscar', purpose: 'atendimento',
+      body: { cpfHash: HASH_EXISTENTE },
+    });
+    expect(res.status).toBe(404);
+    expect(res.status).not.toBe(403);
+    expect(pode('produto', 'buscar_titular')).toBe(false);
+  });
+
+  it('as respostas são indistinguíveis: fora de escopo e sem resultado', () => {
+    const foraDeEscopo = chamar('produto', {
+      metodo: 'POST', caminho: '/v1/titulares/buscar', purpose: 'atendimento',
+      body: { cpfHash: HASH_EXISTENTE },
+    });
+    const semResultado = chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/titulares/buscar', purpose: 'atendimento',
+      body: { cpfHash: HASH_INEXISTENTE },
+    });
+    expect(foraDeEscopo.status).toBe(semResultado.status);
+    expect(foraDeEscopo.body).toEqual(semResultado.body);
+  });
+
+  it('busca sem finalidade declarada é recusada (Art. 37)', () => {
+    const res = chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/titulares/buscar', body: { cpfHash: HASH_EXISTENTE },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('Regra 3b — a busca é registrada antes da resposta', () => {
+    const antes = banco.auditoria.length;
+    const res = chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/titulares/buscar', purpose: 'atendimento',
+      body: { cpfHash: HASH_EXISTENTE },
+    });
+    expect(res.status).toBe(200);
+
+    const registro = banco.auditoria.at(-1)!;
+    expect(banco.auditoria.length).toBe(antes + 1);
+    expect(registro.acao).toBe('TITULAR_BUSCADO');
+    expect(registro.finalidade).toBe('atendimento');
+    // Só o prefixo do hash entra no registro — nem documento, nem hash inteiro.
+    expect(registro.recursoId).toBe(HASH_EXISTENTE.slice(0, 8));
+    expect(registro.recursoId.length).toBe(8);
+  });
+
+  it('sem registro não há busca', () => {
+    banco.simularFalhaDeLog = true;
+    const res = chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/titulares/buscar', purpose: 'atendimento',
+      body: { cpfHash: HASH_EXISTENTE },
+    });
+    expect(res.status).toBe(503);
+    expect((res.body as { id?: string }).id).toBeUndefined();
+  });
+
+  it('a tentativa negada por papel também entra no trail', () => {
+    const antes = banco.auditoria.length;
+    chamar('produto', {
+      metodo: 'POST', caminho: '/v1/titulares/buscar', purpose: 'atendimento',
+      body: { cpfHash: HASH_EXISTENTE },
+    });
+    expect(banco.auditoria.length).toBe(antes + 1);
+    expect(banco.auditoria.at(-1)!.resultado).toBe('negado');
+  });
+
+  it('busca em rajada é enumeração: a sexta recebe 429', () => {
+    const buscar = (hash: string) => chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/titulares/buscar', purpose: 'atendimento', body: { cpfHash: hash },
+    });
+    for (let i = 0; i < 5; i++) expect(buscar(HASH_EXISTENTE).status).toBe(200);
+    expect(buscar(HASH_EXISTENTE).status).toBe(429);
+  });
+
+  it('o 429 também é indistinguível entre hash existente e inexistente', () => {
+    const buscar = (hash: string) => chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/titulares/buscar', purpose: 'atendimento', body: { cpfHash: hash },
+    });
+    for (let i = 0; i < 5; i++) buscar(HASH_EXISTENTE);
+    // Se a cota fosse consumida depois do `find`, o limite viraria o oráculo
+    // que o 404 acabou de fechar.
+    const existente = buscar(HASH_EXISTENTE);
+    const inexistente = buscar(HASH_INEXISTENTE);
+    expect(existente.status).toBe(429);
+    expect(inexistente.status).toBe(429);
+    expect(existente.body).toEqual(inexistente.body);
+  });
+
+  it('T2 não monta o campo de CPF para papel sem a ação', () => {
+    useSessao.setState({ papel: 'produto', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    render(<T2 />);
+    expect(screen.queryByLabelText(/^CPF$/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /calcular hash/i })).toBeNull();
+  });
+
+  it('T2 monta o campo de CPF para o DPO — contraprova', () => {
+    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    render(<T2 />);
+    expect(screen.getByLabelText(/^CPF$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/finalidade da busca/i)).toBeInTheDocument();
+  });
+
+  it('T4 não monta o campo de CPF para papel sem a ação', () => {
+    useSessao.setState({ papel: 'produto', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    render(<T4 />);
+    expect(screen.queryByLabelText(/^CPF$/i)).toBeNull();
+  });
+});
+
+describe('C-02 · Regra 7b — a guarda de escrita cobre também as rotas de auditoria', () => {
+  it('auditor externo não alcança PATCH nem DELETE do trail', () => {
+    expect(chamar('auditor', { metodo: 'PATCH', caminho: '/v1/audit/1', body: {} }).status).toBe(403);
+    expect(chamar('auditor', { metodo: 'DELETE', caminho: '/v1/audit/1' }).status).toBe(403);
+  });
+
+  it('auditor externo não alcança a rota de forjar', () => {
+    const res = chamar('auditor', { metodo: 'POST', caminho: '/v1/audit/forjar', body: { id: 2 } });
+    expect(res.status).toBe(403);
+    expect(banco.auditVerificar().integro).toBe(true);
+  });
+
+  it('verificar integridade continua sendo leitura, inclusive para o auditor', () => {
+    const res = chamar('auditor', { metodo: 'POST', caminho: '/v1/audit/verificar' });
+    expect(res.status).toBe(200);
+    expect((res.body as { integro: boolean }).integro).toBe(true);
+  });
+
+  it('forjar não existe fora do modo demonstração', () => {
+    banco.modoDemo = false;
+    const res = chamar('dpo', { metodo: 'POST', caminho: '/v1/audit/forjar', body: { id: 2 } });
+    expect(res.status).toBe(404);
+    expect(banco.auditVerificar().integro).toBe(true);
+  });
+
+  it('no modo demonstração, quem escreve ainda consegue forjar — e a cadeia acusa', () => {
+    expect(banco.modoDemo).toBe(true);
+    const res = chamar('dpo', { metodo: 'POST', caminho: '/v1/audit/forjar', body: { id: 2 } });
+    expect(res.status).toBe(200);
+    expect(banco.auditVerificar().integro).toBe(false);
+  });
+});
+
+describe('T6-02 — os controles de ataque não são renderizados para papel de leitura', () => {
+  it('auditor externo não recebe nenhum dos dois botões', () => {
+    useSessao.setState({ papel: 'auditor', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    render(<T6 />);
+    expect(screen.queryByRole('button', { name: /tentar editar/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /forjar/i })).toBeNull();
+  });
+
+  it('engenharia recebe os dois, agrupados no bloco de demonstração', () => {
+    useSessao.setState({ papel: 'engenharia', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    render(<T6 />);
+    expect(screen.getByRole('button', { name: /tentar editar/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /forjar/i })).toBeInTheDocument();
+    expect(screen.getByText(/demonstração de ataque/i)).toBeInTheDocument();
+  });
+
+  it('fora do modo demonstração o bloco some mesmo para quem escreve', () => {
+    const b = new BancoMock('banco');
+    b.modoDemo = false;
+    useSessao.setState({ papel: 'engenharia', banco: b, versao: 0, avisos: [] });
+    render(<T6 />);
+    expect(screen.queryByRole('button', { name: /forjar/i })).toBeNull();
+  });
+});
+
+describe('C-02 · invariante da rota que sai antes da guarda', () => {
+  it('quem tem buscar_titular também tem escrever — a rota não é um desvio da guarda', () => {
+    // A busca é tratada antes da guarda genérica para poder responder 404
+    // uniforme. Isso só é seguro enquanto `buscar_titular` for estritamente
+    // mais restritiva que `escrever`. Se alguém conceder a busca a um papel de
+    // leitura, este teste falha antes de a brecha chegar em produção.
+    const papeis: Papel[] = ['engenharia', 'dpo', 'produto', 'seguranca', 'auditor'];
+    for (const p of papeis) {
+      if (pode(p, 'buscar_titular')) {
+        expect(pode(p, 'escrever'), `${p} busca titular mas não escreve`).toBe(true);
+      }
     }
   });
 });

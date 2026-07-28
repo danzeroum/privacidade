@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Cabecalho, Cartao, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
 import { useSessao } from '../store/sessao';
-import { hashCpf, curto } from '../lib/sha256';
-import type { Campo, Categoria, TipoArmazenado } from '../mock/types';
+import { hashCpf } from '../lib/sha256';
+import type { Campo, Categoria, Finalidade, TipoArmazenado } from '../mock/types';
 
 const ICONE: Record<TipoArmazenado, string> = {
   hash: '🔒', hmac: '🎭', bruto: '📷', criptografado: '🔐', agregado: '📊',
@@ -36,6 +36,8 @@ export default function T2() {
   const [fRet, setFRet] = useState('Qualquer');
   const [selecionado, setSelecionado] = useState<Campo | null>(null);
   const [cpf, setCpf] = useState('');
+  const [finalidade, setFinalidade] = useState<Finalidade | ''>('');
+  const [ultimoHash, setUltimoHash] = useState<string | null>(null);
   const [buscaResultado, setBuscaResultado] = useState<string | null>(null);
 
   const papel = useSessao((s) => s.papel);
@@ -63,8 +65,12 @@ export default function T2() {
   const buscar = () => {
     const h = hashCpf(cpf);
     const res = chamar<{ id: string; pseudonimo: string }>({
-      metodo: 'POST', caminho: '/v1/titulares/buscar', body: { cpfHash: h },
+      metodo: 'POST', caminho: '/v1/titulares/buscar', purpose: finalidade || undefined, body: { cpfHash: h },
     });
+    // T2-01 — o documento sai da sessão assim que o hash é calculado. Guardar o
+    // CPF digitado em estado depois da busca é manter PII em memória sem razão.
+    setCpf('');
+    setUltimoHash(h.slice(0, 8));
     setBuscaResultado(res.status === 200 ? `${res.body.pseudonimo} · titular ${res.body.id}` : 'Não encontrado.');
   };
 
@@ -101,27 +107,63 @@ export default function T2() {
             })}
           </Cartao>
 
-          <Cartao titulo="Buscar titular por CPF">
-            <div className="field">
-              <label htmlFor="cat-cpf">CPF</label>
-              <input id="cat-cpf" type="text" value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="•••.•••.•••-••" />
-            </div>
-            <div className="row" style={{ marginTop: 10 }}>
-              <button className="btn primary" onClick={buscar} disabled={cpf.replace(/\D/g, '').length < 11}>
-                Calcular hash e buscar
-              </button>
-            </div>
-            {cpf.replace(/\D/g, '').length >= 11 && (
-              <p className="hash" style={{ marginTop: 10 }}>
-                sai do navegador: <b>{curto(hashCpf(cpf), 24)}</b>
-              </p>
-            )}
-            {buscaResultado && <p className="mono" style={{ marginTop: 6 }}>{buscaResultado}</p>}
-            <Nota>
-              O CPF digitado nunca entra na requisição. O navegador calcula o SHA-256 e envia só o hash —
-              sem PII na URL, no histórico ou no log do gateway.
-            </Nota>
-          </Cartao>
+          {/* C-01 — localizar um titular pelo documento é ato de atendimento.
+              Quem não atende não recebe o cartão: ele não é renderizado. */}
+          <Permitido
+            acao="buscar_titular"
+            alternativa={
+              <Cartao titulo="Buscar titular por CPF">
+                <Nota>
+                  Localizar um titular pelo documento é ato de atendimento e pertence ao DPO.
+                  O seu papel não recebe este campo — e a rota recusa a busca mesmo fora da tela.
+                </Nota>
+              </Cartao>
+            }
+          >
+            <Cartao titulo="Buscar titular por CPF">
+              <div className="field">
+                <label htmlFor="cat-cpf">CPF</label>
+                <input
+                  id="cat-cpf"
+                  type="text"
+                  value={cpf}
+                  onChange={(e) => setCpf(e.target.value)}
+                  placeholder="•••.•••.•••-••"
+                  autoComplete="off"
+                  inputMode="numeric"
+                />
+              </div>
+              <div className="field" style={{ marginTop: 10 }}>
+                <label htmlFor="cat-finalidade">Finalidade da busca</label>
+                <select id="cat-finalidade" value={finalidade} onChange={(e) => setFinalidade(e.target.value as Finalidade | '')}>
+                  <option value="">Selecione…</option>
+                  <option value="atendimento">atendimento — localizar solicitação do titular</option>
+                  <option value="cobranca">cobranca — negociação de dívida</option>
+                  <option value="auditoria">auditoria — verificação de conformidade</option>
+                </select>
+              </div>
+              <div className="row" style={{ marginTop: 10 }}>
+                <button
+                  className="btn primary"
+                  onClick={buscar}
+                  disabled={cpf.replace(/\D/g, '').length < 11 || !finalidade}
+                >
+                  Calcular hash e buscar
+                </button>
+              </div>
+              {ultimoHash && (
+                <p className="hash" style={{ marginTop: 10 }}>
+                  hash consultado: <b>{ultimoHash}…</b> · o documento saiu da sessão
+                </p>
+              )}
+              {buscaResultado && <p className="mono" style={{ marginTop: 6 }}>{buscaResultado}</p>}
+              <Nota>
+                O CPF digitado nunca entra na requisição: o navegador calcula o SHA-256 e envia só o hash.
+                O campo é limpo assim que a busca parte, e a consulta entra no audit trail com a
+                finalidade declarada antes de qualquer resposta.
+              </Nota>
+            </Cartao>
+          </Permitido>
 
           <Cartao titulo="Novo inventário">
             <div className="drop">
