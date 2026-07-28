@@ -4,9 +4,15 @@
 # repositório não tinha gate nenhum. Este é o mínimo: tipos e testes, rodando em
 # todo push e em todo pull request, sem nenhuma etapa tolerante a falha.
 #
-# Gate que não bloqueia merge é decoração. Para este arquivo valer alguma coisa,
-# o job `verificacao` precisa estar marcado como *required status check* na
-# proteção da branch `main` — instruções no corpo do PR que introduziu o gate.
+# Enquanto o job `verificacao` não estiver marcado como *required status check*
+# na proteção da branch `main`, este arquivo é conselho e não regra: ele informa
+# o vermelho e não impede o merge. A marcação é configuração do repositório, não
+# commit — instruções no corpo do PR que introduziu o gate.
+#
+# Este é o gate mínimo do repositório: prova que compila e que as 9 regras
+# continuam passando. Ele não verifica nada sobre dado pessoal. O gate de
+# privacidade que o produto descreve — varredura de PII em log, catálogo
+# declarado, checklist PbD lido pelo pipeline — é o PR 11 do MAPA-PROCESSOS.md.
 name: CI
 
 on:
