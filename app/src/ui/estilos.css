@@ -121,6 +121,9 @@ th { text-align: left; font-size: 10.5px; letter-spacing: .09em; text-transform:
 td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 tbody tr:hover { background: var(--surface-2); }
 tbody tr:last-child td { border-bottom: 0; }
+/* T4-01 — a linha em atendimento fica visível sem depender só da cor. */
+tbody tr.ativa { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+tbody tr.ativa td:first-child { font-weight: 600; }
 .num { font-variant-numeric: tabular-nums; text-align: right; }
 .mono { font-family: var(--font-mono); font-size: 12px; }
 .hash { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-3); }

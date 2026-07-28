@@ -300,12 +300,25 @@ function ValidadorInventario() {
   const [baseLegal, setBaseLegal] = useState('legitimo_interesse');
   const [internacional, setInternacional] = useState(false);
   const [mecanismo, setMecanismo] = useState('nao_aplicavel');
+  /**
+   * Nasce desligado de propósito. Campo novo sem finalidades declaradas é
+   * recusado pela API (C-03) — é a única forma de a lista existir em todo campo
+   * do catálogo, e é o que a revelação depende para não cair no "qualquer uma".
+   */
+  const [declaraFinalidades, setDeclaraFinalidades] = useState(false);
+  const [finalidades, setFinalidades] = useState<Finalidade[]>([]);
   const [saida, setSaida] = useState<string | null>(null);
+
+  const alternar = (f: Finalidade) =>
+    setFinalidades((atual) => (atual.includes(f) ? atual.filter((x) => x !== f) : [...atual, f]));
 
   const validar = () => {
     const res = chamar<{ erro?: string; valido?: boolean }>({
       metodo: 'POST', caminho: '/v1/catalog/validar',
-      body: { nome: 'campo_novo', tipoArmazenado: tipo, categoria, sensivel, baseLegal, internacional, mecanismo },
+      body: {
+        nome: 'campo_novo', tipoArmazenado: tipo, categoria, sensivel, baseLegal, internacional, mecanismo,
+        ...(declaraFinalidades ? { finalidadesCompativeis: finalidades } : {}),
+      },
     });
     setSaida(res.status === 200 ? '✅ Inventário aceito.' : `❌ ${(res.body as { erro: string }).erro}`);
   };
@@ -347,12 +360,31 @@ function ValidadorInventario() {
           <input type="checkbox" checked={internacional} onChange={(e) => setInternacional(e.target.checked)} />
           <span className="track" /> transferência internacional
         </label>
+        <label className="toggle">
+          <input type="checkbox" checked={declaraFinalidades}
+            onChange={(e) => setDeclaraFinalidades(e.target.checked)} />
+          <span className="track" /> declarar finalidades de acesso
+        </label>
         <button className="btn primary" onClick={validar}>Validar</button>
       </div>
+      {declaraFinalidades && (
+        <div className="row" style={{ marginTop: 10, flexWrap: 'wrap' }}>
+          {(['atendimento', 'cobranca', 'auditoria', 'seguranca'] as Finalidade[]).map((f) => (
+            <label key={f} className="toggle">
+              <input type="checkbox" checked={finalidades.includes(f)} onChange={() => alternar(f)} />
+              <span className="track" /> {f}
+            </label>
+          ))}
+          {finalidades.length === 0 && (
+            <span className="note">Lista vazia é declaração válida: o campo entra no ROPA como não revelável.</span>
+          )}
+        </div>
+      )}
       {saida && <p className="note" style={{ marginTop: 10 }}>{saida}</p>}
       <Nota>
-        Os toggles nascem desligados. Tente <span className="mono">hash + anonimizado</span> ou
-        {' '}<span className="mono">sensível + legítimo interesse</span>: o inventário é recusado inteiro.
+        Os toggles nascem desligados. Tente <span className="mono">hash + anonimizado</span>,
+        {' '}<span className="mono">sensível + legítimo interesse</span> ou simplesmente validar sem
+        declarar finalidades: o inventário é recusado inteiro.
       </Nota>
     </Permitido>
   );

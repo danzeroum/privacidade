@@ -26,9 +26,19 @@ interface Estado {
   /** Contador de escrita: o banco é mutável, então a UI precisa de um sinal para redesenhar. */
   versao: number;
   avisos: Aviso[];
+  /**
+   * T4-01 — o protocolo sob o qual a sessão está trabalhando.
+   *
+   * Mora aqui e não na T4 porque quem precisa dele é o diálogo de revelação, em
+   * `ui/primitivos.tsx`, que não conhece a fila. Sem esse carregador, a
+   * revelação acontecia sem protocolo e o registro no trail não dizia a serviço
+   * de qual atendimento o dado foi aberto.
+   */
+  protocoloSelecionado: string | null;
 
   setPapel: (p: Papel) => void;
   setCenario: (id: string) => void;
+  setProtocolo: (protocolo: string | null) => void;
   /** Chama a API mock já com o papel e o ator da sessão, e publica o aviso resultante. */
   chamar: <T = unknown>(req: Omit<Req, 'papel' | 'ator'>) => Res<T>;
   avisar: (tom: Aviso['tom'], texto: string, regra?: string) => void;
@@ -43,10 +53,16 @@ export const useSessao = create<Estado>((set, get) => ({
   banco: new BancoMock(CENARIO_PADRAO),
   versao: 0,
   avisos: [],
+  protocoloSelecionado: null,
 
   setPapel: (papel) => set({ papel }),
 
-  setCenario: (cenarioId) => set({ cenarioId, banco: new BancoMock(cenarioId), versao: 0, avisos: [] }),
+  // O protocolo é de outro cenário: mantê-lo faria a revelação registrar um
+  // atendimento que não existe mais.
+  setCenario: (cenarioId) =>
+    set({ cenarioId, banco: new BancoMock(cenarioId), versao: 0, avisos: [], protocoloSelecionado: null }),
+
+  setProtocolo: (protocoloSelecionado) => set({ protocoloSelecionado }),
 
   chamar: <T,>(req: Omit<Req, 'papel' | 'ator'>) => {
     const { banco, papel } = get();

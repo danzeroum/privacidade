@@ -36,7 +36,14 @@ export interface Campo {
   tipoArmazenado: TipoArmazenado;
   categoria: Categoria;
   sensivel: boolean;
+  /** Descrição para gente. Continua sendo prosa: é o que o DPO lê. */
   finalidade: string;
+  /**
+   * Finalidades sob as quais este campo pode ser acessado (C-03). Declarada,
+   * nunca derivada da prosa acima — ampliar é ato explícito, visível no diff do
+   * inventário. Lista vazia significa **não revelável**, jamais "qualquer uma".
+   */
+  finalidadesCompativeis: Finalidade[];
   baseLegal: BaseLegal;
   liaCodigo?: string;
   retencao: string;
@@ -178,6 +185,8 @@ export interface Lia {
   documentoHash?: string;
 }
 
+export type DesfechoSolicitacao = 'atendido' | 'atendido_parcialmente' | 'recusado_com_fundamento';
+
 export type Direito =
   | 'confirmacao' | 'acesso' | 'correcao' | 'anonimizacao' | 'bloqueio'
   | 'eliminacao' | 'portabilidade' | 'compartilhamentos' | 'revogacao' | 'revisao_decisao';
@@ -187,9 +196,37 @@ export interface Titular {
   cpfHash: string;
   /** Só existe no mock do backend. Nunca é serializado para a UI sem passar por /pseudonyms/resolve. */
   segredos: Record<string, string>;
-  campos: { chave: string; rotulo: string; grupo: string; sensivel: boolean; mascara: string; baseLegal: BaseLegal }[];
+  /**
+   * C-17 — todo campo exibível aponta para o catálogo. `chave` é rótulo de
+   * exibição, `campoCatalogoId` é o vínculo técnico com o ROPA. Campo sem
+   * vínculo não é revelável: se existe caminho de leitura fora do inventário,
+   * o inventário deixa de ser a fonte da verdade.
+   */
+  campos: {
+    chave: string;
+    rotulo: string;
+    grupo: string;
+    sensivel: boolean;
+    mascara: string;
+    baseLegal: BaseLegal;
+    campoCatalogoId?: string;
+  }[];
   compartilhamentos: { destino: string; finalidade: string; baseLegal: BaseLegal; internacional: boolean; mecanismo: Mecanismo; ultimaRemessa: string }[];
-  decisao?: { id: string; modelo: string; aprovado: boolean; shap: { feature: string; impacto: number }[] };
+  decisao?: {
+    id: string; modelo: string; aprovado: boolean; shap: { feature: string; impacto: number }[];
+    /** T4-03 — a revisão do Art. 20 só vale se deixar prova. Preenchida pela rota, nunca pela tela. */
+    revisao?: RevisaoRegistrada;
+  };
+}
+
+export type ResultadoRevisao = 'mantida' | 'revertida' | 'ajustada';
+
+export interface RevisaoRegistrada {
+  resultado: ResultadoRevisao;
+  /** Já redigido (C-04): o que entra aqui entrou antes no audit trail. */
+  fundamento: string;
+  revisadaPor: string;
+  quando: string;
 }
 
 export interface Solicitacao {
@@ -204,7 +241,12 @@ export interface Solicitacao {
   recebidaEm: string;
   prazoLimiteMs: number;
   metaInternaMs: number;
+  /** Exibição. O cálculo usa `concluidaEmMs`. */
   concluidaEm?: string;
+  /** T4-05 — para comparar com `prazoLimiteMs`. Rótulo e cálculo dizem a mesma coisa. */
+  concluidaEmMs?: number;
+  desfecho?: DesfechoSolicitacao;
+  fundamento?: string;
   mensagens: { remetente: 'titular' | 'dpo'; corpo: string; quando: string }[];
 }
 
@@ -264,6 +306,12 @@ export interface AuditLinha {
   recursoId: string;
   finalidade?: Finalidade;
   justificativa?: string;
+  /**
+   * T4-01 — o protocolo sob o qual o acesso aconteceu. Campo próprio, e dentro
+   * do payload do hash: campo fora do payload não é selado pela cadeia, e campo
+   * não selado é campo adulterável sem quebrar a prova que a T6 vende.
+   */
+  protocolo?: string;
   campos: string[];
   resultado: 'sucesso' | 'negado' | 'erro';
   hashAnterior: string | null;

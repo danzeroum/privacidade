@@ -1,7 +1,10 @@
 # Achados — checklist
 
-41 achados: **3 críticos · 6 altos · 23 médios · 9 baixos**. A coluna PR remete a `IMPLEMENTACAO.md`.
+42 achados: **4 críticos · 6 altos · 23 médios · 9 baixos**. A coluna PR remete a `IMPLEMENTACAO.md`.
 Evidência completa de cada item em `Validacao UX e LGPD.dc.html`.
+
+C-17 foi acrescentado durante o PR 2 — achado descoberto na implementação, com a evidência descrita
+aqui mesmo em vez de no relatório original.
 
 ## Transversais
 
@@ -23,6 +26,28 @@ Evidência completa de cada item em `Validacao UX e LGPD.dc.html`.
 | C-14 | Médio | CSS | Nenhum ponto de quebra de largura | `ui/estilos.css` | 6 |
 | C-15 | Baixo | T2 · T4 · T6 · T8 | Controles inertes sem distinção dos reais | telas | 5 |
 | C-16 | Baixo | todas | Voz de ensaio no cromo do produto | telas | 5 |
+| C-17 | Crítico | T4 · API | Campo revelável que não está no ROPA | `mock/types.ts`, `mock/scenarios.ts`, `mock/api.ts` | 2 |
+
+### C-17 · Crítico · Privacidade — campo revelável que não está no ROPA
+
+Achado descoberto durante a implementação do PR 2, não presente no relatório original.
+
+`titular.campos[].chave` é rótulo de exibição e não tinha vínculo nenhum com `Campo.nome`, o nome
+técnico do catálogo. Cinco chaves não casavam com nenhuma entrada, e `nome` e `plano` não existiam no
+inventário. Como `POST /v1/pseudonyms/resolve` procurava o campo em `titular.campos`, existia caminho
+de leitura de dado pessoal para campos que o ROPA desconhece — sem finalidade, base legal ou prazo
+declarados. É a classe de problema que o resto do projeto combate: o inventário deixa de ser a fonte
+da verdade no instante em que existe leitura fora dele.
+
+**Correção (PR 2), fail-closed em três pontos:**
+
+1. `campoCatalogoId` liga o campo exibível à entrada do ROPA. Os dois nomes continuam — `chave` para
+   gente, `Campo.nome` para máquina; renomear um para casar com o outro seria consertar pelo lado
+   errado.
+2. A revelação sem vínculo devolve **422**, não 200 com aviso. `nome` e `plano` foram catalogados —
+   isso não é escopo extra, é a correção.
+3. `POST /v1/catalog/validar` recusa campo sem `finalidadesCompativeis`, para que campo novo não
+   nasça sem política. Lista vazia é declaração válida de "não revelável"; lista ausente é erro.
 
 ## Por tela
 
