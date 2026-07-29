@@ -21,8 +21,8 @@ O repositório é um **protótipo de referência**: app React com API simulada e
 A auditoria (metodologia no Relatório Técnico §2) consolidou **40 riscos**: 1 P0, 14 P1, 22 P2, 3 P3 — sendo 25 lacunas reais, 11 divergências documentação × código e 4 limitações estruturais de protótipo (tratadas como **premissas de aceite**, §7.3).
 
 - **P0 (Risco-001):** o contrato de produção não tem rota de exercício para **nenhum** dos 10 direitos do titular que ele próprio enumera — inclusive o canal de oposição citado na LIA vigente. Análise de sanção no §7.2.
-- **Padrões P1:** o mock implementa o que o contrato e o schema de produção não materializam (consentimento, incidentes, revisão Art. 20); promessas de segurança sem instrumento (X-Purpose, MFA, HMAC com chave em KMS); o aparato de fiscalização não se autofiscaliza (gate varre 1 arquivo, cadeia de hash não cobre o campo mais sensível, main vermelha sem required checks); retenção sem motor de execução.
-- **Status de mitigação:** nenhum dos 40 riscos está mitigado nesta data; todos têm recomendação técnica concreta no Relatório Técnico §4. **38 dos 43 achados da rodada anterior de auditoria estão corrigidos com teste** — o histórico demonstra capacidade real de correção.
+- **Padrões P1:** o mock implementa o que o contrato e o schema de produção não materializam (consentimento, incidentes, revisão Art. 20); promessas de segurança sem instrumento (X-Purpose, MFA, HMAC com chave em KMS); o aparato de fiscalização não se autofiscaliza (gate varre 1 arquivo, cadeia de hash não cobre o campo mais sensível, main vermelha no commit auditado sem required checks); retenção sem motor de execução.
+- **Status de mitigação:** dos 40 riscos, **1 está parcialmente remediado** após o corte da auditoria (Risco-005: a main foi restaurada ao verde, a tela T11 foi entregue e há evidência comportamental de proteção de branch — ver Adendo no Relatório Técnico §1); os demais 39 permanecem abertos, todos com recomendação técnica concreta no Relatório Técnico §4. **38 dos 43 achados da rodada anterior de auditoria estão corrigidos com teste** — o histórico demonstra capacidade real de correção.
 
 **Conclusão:** o desenho conceitual é maduro e acima da média (privacy by default, prova executável, fail-closed). O sistema **não está apto a produção** enquanto o P0 e os P1 estruturais (Riscos 001–015) não forem tratados; a aprovação deste RIPD deve ser condicionada ao plano de ação do §7.
 
@@ -155,7 +155,7 @@ Nenhum risco está mitigado nesta data. Fichas completas com recomendação téc
 | Risco-002 | Consentimento sem persistência por titular no desenho de produção; revogação sem cascata de eliminação | P1 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-002 |
 | Risco-003 | Gate de privacidade cego: varre 1 arquivo do repositório e aprova com 40 CPFs formatados publicados em 7 arquivos | P1 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-003 |
 | Risco-004 | Cadeia de hash do audit trail não cobre justificativa nem base legal — o campo mais exposto é adulterável sem detecção | P1 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-004 |
-| Risco-005 | Governança de mudança rompida: upload manual reverteu PR revisado, a main está vermelha e nenhum workflow é required status check | P1 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-005 |
+| Risco-005 | Governança de mudança rompida: upload manual reverteu PR revisado, a main estava vermelha e nenhum workflow era required status check | P1 | Lacuna real | **Parcialmente remediado (pós-corte)** | Main restaurada (#19), T11 entregue (#18), proteção de branch evidenciada (#21–#25); permanecem gitleaks/CodeQL, `schedule` de vencimentos e schema/OpenAPI fora do CI — Relatório Técnico §1 (Adendo) e §4, Risco-005 |
 | Risco-006 | Retenção existe só como rótulo: sem retencao_ate, sem TTL, sem executor de expurgo — e o audit_log não tem prazo definido | P1 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-006 |
 | Risco-007 | Equidade algorítmica só declarada: teste de disparidade, remoção de proxies e AIA sem artefato executável ou versionado | P1 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-007 |
 | Risco-008 | Fornecedor não é entidade: DPA sem validação programática, expiração sem vigilância, sem chave por parceiro nem revogação com SLA | P1 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-008 |
@@ -209,7 +209,9 @@ Quatro riscos são limitações estruturais do protótipo — não defeitos a "c
 | Risco-037 | Sem autenticação real (papel por botão) | OIDC real com MFA, claims de propósito revogáveis e sessão servidor antes de qualquer dado real |
 | Risco-040 | PII sintética no bundle do cliente | Nenhum dado (nem fictício) embarcado; mock atrás de fronteira de rede real |
 
-### 7.4 Prazo de reavaliação
+### 7.4 Adendo pós-corte e prazo de reavaliação
+
+**Adendo (2026-07-29):** entre o corte da auditoria (`8d0548a`) e a publicação deste documento, a `main` avançou 7 commits: restauração do MAPA (#19, main verde), entrega da tela T11 · ciclo do achado (#18) e PRs-sonda de proteção de branch (#21–#25). O único risco afetado é o Risco-005 (ver §7.1); os demais 39 permanecem como descritos — o diff não toca contrato, schema, gate nem redator.
 
 Este RIPD deve ser reavaliado: (a) a cada release que toque contrato, schema ou gate; (b) na resolução do bloco P0/P1; (c) no máximo em **2027-01-29** (6 meses) — espelhando o campo `reavaliar_em` que o próprio schema do sistema exige dos RIPDs que gerencia.
 

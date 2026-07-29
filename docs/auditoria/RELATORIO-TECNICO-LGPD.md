@@ -32,13 +32,25 @@ A auditoria registra, antes dos riscos, que o núcleo do protótipo pratica o qu
 
 **2. Promessa sem instrumento.** `X-Purpose` é obrigatório em prosa e instrumentado em 1 de 25 operações (Risco-011); o MFA/step-up prometido em três camadas não tem nenhuma instrumentação (Risco-014); a pseudonimização vendida como "HMAC com chave no KMS" é SHA-256 com sal público constante no bundle (Risco-013); k-anonimato k≥5 e `data-hj-suppress` são prometidos e não implementados (Risco-031); documentos citam TTL/expurgo operantes que o código não contém — inclusive como evidência "verde" do checklist PbD (Risco-032).
 
-**3. O guardião não se vigia.** O gate de privacidade varre **1 arquivo** do repositório e aprova enquanto 40 CPFs formatados (fictícios) estão publicados em 7 arquivos (Risco-003); a cadeia de hash do trail não cobre justificativa nem base legal — o campo mais exposto é adulterável sem detecção (Risco-004); nenhum workflow é *required status check* e a main está vermelha **agora**: o commit HEAD, um upload manual, reverteu um PR revisado e quebrou 4 testes sem que nada o impedisse (Risco-005); o próprio gate retranscreve o valor de PII que encontra (Risco-020).
+**3. O guardião não se vigia.** O gate de privacidade varre **1 arquivo** do repositório e aprova enquanto 40 CPFs formatados (fictícios) estão publicados em 7 arquivos (Risco-003); a cadeia de hash do trail não cobre justificativa nem base legal — o campo mais exposto é adulterável sem detecção (Risco-004); nenhum workflow era *required status check* e a main estava vermelha no commit auditado: o commit HEAD, um upload manual, reverteu um PR revisado e quebrou 4 testes sem que nada o impedisse (Risco-005 — parcialmente remediado logo após o corte da auditoria; ver o Adendo abaixo); o próprio gate retranscreve o valor de PII que encontra (Risco-020).
 
 **4. Ciclo de vida sem motor.** Retenção existe só como rótulo: nenhuma coluna `retencao_ate`, nenhum TTL, nenhum executor de expurgo no repositório, e o `audit_log` guarda IP e user-agent sem prazo (Risco-006); a revogação de consentimento não dispara cascata de eliminação — o risco R9 do próprio seed está aberto (Risco-002); dado pessoal de colaborador fica fora do regime por desenho (Risco-022).
 
 ### Leitura recomendada
 
 Desenvolvedores: seção 4 (fichas), na ordem dos IDs. Gestão/DPO: este sumário + RIPD §1 e §7. A seção 6 mostra que **38 dos 43 achados prévios estão corrigidos e testados** — o histórico de correção é real; os riscos deste relatório são o que a rodada anterior não cobria.
+
+### Adendo pós-auditoria (2026-07-29, após o commit auditado)
+
+Os achados e a numeração deste relatório estão **congelados no commit `8d0548a`**. Entre o corte da auditoria e a abertura do PR desta entrega, a `main` avançou 7 commits que alteram o estado de parte do Risco-005:
+
+| Mudança na main | Efeito sobre a auditoria |
+|---|---|
+| `d4785f0` (#19) restaura o `MAPA-PROCESSOS.md` revertido pelo upload manual | Os 4 testes do bloco "PR 14" voltam a passar — o sub-item (a) do Risco-005 ("main vermelha") está **remediado**; a suíte completa está verde na main atual |
+| `ca252ed` (#18) adiciona a tela **T11 · ciclo do achado** (571 linhas + 405 linhas de teste) | A faceta "MAPA promete T11 que não existe" do Risco-005 está **resolvida** |
+| PRs-sonda #21–#25 ("sonda: verde, ramo defasado", "após Update branch") | Indicam **ruleset de proteção de branch** em vigor exigindo branch atualizado antes do merge (este PR ficou "behind" até o merge da main) — evidência comportamental de que a recomendação de *required checks* foi ao menos parcialmente adotada; a configuração não é verificável em arquivo do repositório |
+
+**Permanecem em aberto** os demais sub-itens do Risco-005: (b) sem gitleaks/secret-scanning, CodeQL ou `npm audit`; (c) sem workflow com `schedule` para vencimentos (`dpa_expira_em`, `reavaliar_em`, `rotacao_prevista`); (d) `db/schema.sql`/`db/tests.sql` e `api/openapi.yaml` continuam fora do CI. Os demais 39 riscos não são afetados pelas mudanças da main: o diff `8d0548a..main` não toca `api/openapi.yaml`, `db/`, o gate nem o redator — as alterações em `app/src/` são aditivas (a mecânica do ciclo do achado da T11, incluindo verificação independente com recusa de auto-verificação e evidência com hash encadeado — novo `hashEncadeado` em `sha256.ts`; o `hashCpf` citado no Risco-013 está intocado).
 
 ---
 
@@ -203,6 +215,7 @@ Uma ficha por risco, com os nove campos obrigatórios. Riscos que fundem achados
 | **Recomendação** | Corrigir a main (restaurar os 2 arquivos pós-PR17 e deixar E2 verde); marcar `verificacao` e `privacidade` como required status checks na proteção da main; adicionar ao ci.yml um job com serviço Postgres que roda db/schema.sql + db/tests.sql e um passo spectral/redocly no openapi.yaml; adicionar gitleaks e npm audit; criar workflow com `schedule` diário que falha listando linhas de dpa/reavaliação/rotação vencidas.<br>Adicionalmente: Reverter os 2 arquivos de 8d0548a para o estado do PR #17 (git checkout 326ef30 -- "docs/design_handoff_lastro_correcoes/MAPA-PROCESSOS.md" "docs/design_handoff_lastro_correcoes/Lastro Redesenho.dc.html") devolvendo a main ao verde; marcar os jobs `verificacao` e `privacidade` como required status checks na proteção da branch main e bloquear push direto — a instrução já está escrita em ci.yml:7-10, falta a configuração. |
 | **Evidência** | E2: `cd app && npm test` — 305 passam, 4 falham na main (HEAD 8d0548a, git show --stat confirma sobrescrita de 2 docs); ci.yml:7-9 'Enquanto o job `verificacao` não estiver marcado como *required status check* ... este arquivo é conselho e não regra'. — E2 "cd app && npm test": 305 passam, 4 FALHAM — todas do bloco PR 14; git show --stat 8d0548a: só MAPA-PROCESSOS.md e Lastro Redesenho.dc.html alterados |
 | **Achado prévio relacionado** | C-18 |
+| **Atualização (adendo)** | Parcialmente remediado após o commit auditado: #19 restaurou o MAPA (main verde), #18 entregou a T11, e os PRs-sonda #21–#25 indicam ruleset de proteção de branch em vigor. Permanecem: gitleaks/CodeQL/npm audit, `schedule` de vencimentos, e schema/OpenAPI fora do CI — ver "Adendo pós-auditoria" no §1. |
 
 ### Risco-006 — Retenção existe só como rótulo: sem retencao_ate, sem TTL, sem executor de expurgo — e o audit_log não tem prazo definido
 
