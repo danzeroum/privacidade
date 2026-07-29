@@ -241,6 +241,9 @@ sistema já declaradas (`--font-display`, `--font-ui`, `--font-mono`).
 | Arquivo | O que é |
 |---|---|
 | `README.md` | este documento |
+| `PORTAL-DO-TITULAR.md` | o lado de fora: 11 telas, verificação escalonada, 12 rotas novas (fecha o P0) |
+| ~~`MAPA-PROCESSOS.md`~~ | **não vem neste pacote.** O arquivo vive em `docs/design_handoff_lastro_correcoes/MAPA-PROCESSOS.md` no repositório e é mantido lá — o dev tem testes que o conferem contra o código. Subir uma cópia deste pacote por cima dele quebra o CI (aconteceu duas vezes). Leia a versão do repositório. |
+| `Portal do Titular.dc.html` | protótipo do portal do titular (referência de design, navegável) |
 | `IMPLEMENTACAO.md` | plano por PR, com arquivo, mudança e critério de aceite |
 | `ACHADOS.md` | os 41 achados como checklist |
 | `TOKENS.md` | tokens, tipografia e padrões de acessibilidade |
