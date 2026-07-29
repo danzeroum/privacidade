@@ -8,6 +8,9 @@ import {
 } from './decisoes';
 import type { DecisaoRegistrada, TabelaId, Valor } from './decisoes';
 import { contadoresDe, derivarFila, minhaFila } from './fila';
+import {
+  assinaturaDoFeed, cargaDoAno, diasAte, naAntecedencia, paraIcs,
+} from './calendario';
 import { redigir } from '../lib/redator';
 import { sha256 } from '../lib/sha256';
 import { BASES_PARA_SENSIVEL } from './types';
@@ -43,7 +46,21 @@ const erro = (status: number, mensagem: string, regra?: string): Res<{ erro: str
  */
 export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
   const { metodo, caminho, papel, ator } = req;
-  const partes = caminho.replace(/^\/v1\//, '').split('/');
+  /**
+   * PR 10 — a query entra aqui e em nenhum outro lugar.
+   *
+   * O feed ICS precisa dela porque é lido por um cliente sem sessão, e a URL é a
+   * credencial. Toda outra rota continua sem parâmetro: o caminho é separado da
+   * query **antes** de virar segmentos, para que `?papel=x` não possa aparecer
+   * colado num segmento e passar despercebido pela tabela de políticas.
+   */
+  const [semQuery, queryBruta = ''] = caminho.split('?');
+  const query: Record<string, string> = {};
+  for (const par of queryBruta.split('&').filter(Boolean)) {
+    const [k, v = ''] = par.split('=');
+    query[decodeURIComponent(k)] = decodeURIComponent(v);
+  }
+  const partes = semQuery.replace(/^\/v1\//, '').split('/');
   const raiz = partes[0];
   const body = (req.body ?? {}) as Record<string, any>;
 
@@ -569,6 +586,56 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
      * código de artefato, e o protocolo é o código da solicitação, nunca o
      * titular.
      */
+    /**
+     * PR 10 — T10 · o calendário do ano.
+     *
+     * Leitura ampla: as obrigações não carregam dado pessoal e o programa inteiro
+     * precisa enxergar o que está provisionado. O recorte "só as minhas" é da
+     * tela, não da rota — quem audita precisa ver o ano todo.
+     */
+    case 'GET calendario': {
+      if (partes[1] === 'assinatura') {
+        // A URL do feed **do próprio papel**, e de mais nenhum: a assinatura é a
+        // credencial, e mintar a de outro exigiria o segredo.
+        return ok({
+          papel,
+          token: assinaturaDoFeed(papel, sha256),
+          caminho: `/v1/calendario.ics?papel=${papel}&token=${assinaturaDoFeed(papel, sha256)}`,
+        }) as Res<T>;
+      }
+      if (partes[1]) break;
+      const agora = Date.now();
+      return ok({
+        obrigacoes: banco.cenario.obrigacoes,
+        carga: cargaDoAno(banco.cenario.obrigacoes),
+        naAntecedencia: banco.cenario.obrigacoes
+          .filter((o) => naAntecedencia(o, agora)).map((o) => o.codigo),
+      }) as Res<T>;
+    }
+
+    /**
+     * O feed, somente leitura e assinado por papel.
+     *
+     * Quem consome é um cliente de calendário sem sessão, então a URL é a
+     * credencial — como em qualquer ICS. Sem a assinatura certa, 403: assim o
+     * feed não vira a janela para a fila alheia que o PR 9 fechou.
+     */
+    case 'GET calendario.ics': {
+      const alvo = String(query.papel ?? '');
+      const token = String(query.token ?? '');
+      if (!PAPEIS_VALIDOS.includes(alvo) || token !== assinaturaDoFeed(alvo, sha256)) {
+        return erro(403, 'Assinatura de feed inválida.',
+          'A URL do ICS é a credencial: cada papel assina a própria, e o segredo não sai da plataforma.') as Res<T>;
+      }
+      const minhas = banco.cenario.obrigacoes.filter((o) => pode(alvo as Papel, o.acao));
+      return ok(paraIcs(minhas, alvo, 'https://lastro.exemplo/')) as Res<T>;
+    }
+
+    case 'POST calendario': {
+      if (partes[2] !== 'prorrogar') break;
+      return prorrogarObrigacao<T>(banco, req, partes[1] ?? '');
+    }
+
     case 'GET fila': {
       // Um segmento a mais é rota que não existe, e não um recorte silencioso:
       // `/v1/fila/dpo` precisa cair no 404 do fim, não devolver a fila de quem
@@ -957,6 +1024,64 @@ function alvoDaTransicao(banco: BancoMock, artefato: Artefato, id: string, body:
  * mundo que o catálogo desconhece — o mesmo problema do escopo do incidente no
  * C-07 — e transforma "reproduzível" em promessa sem lastro.
  */
+const PAPEIS_VALIDOS = ['engenharia', 'dpo', 'produto', 'seguranca', 'auditor'];
+
+/**
+ * PR 10 — prorrogar é ato registrado, não arrastar o mouse.
+ *
+ * Mesma disciplina da reclassificação de risco: justificativa obrigatória,
+ * redigida antes de guardar, gravada no trail **antes** de a data nova valer. É
+ * o que impede prazo legal de virar negociável — e é a razão de o feed ICS ser
+ * somente leitura, porque mover a data no Teams não tem por onde voltar.
+ */
+function prorrogarObrigacao<T>(banco: BancoMock, req: Req, codigo: string): Res<T> {
+  const body = (req.body ?? {}) as Record<string, any>;
+  const o = banco.cenario.obrigacoes.find((x) => x.codigo === codigo);
+  if (!o) return erro(404, 'Não encontrado.') as Res<T>;
+
+  if (!pode(req.papel, o.acao)) {
+    return erro(403, 'Prorrogar é de quem responde pela obrigação.',
+      'Na interface o controle não é renderizado para quem não responde por ela.') as Res<T>;
+  }
+
+  const justificativa = String(body.justificativa ?? '').trim();
+  if (justificativa.length < 20) {
+    return erro(422, 'Prorrogar exige justificativa de ao menos 20 caracteres.',
+      'Sem ela o prazo legal vira negociável no arrastar do mouse — e o histórico não explica por quê.') as Res<T>;
+  }
+
+  const para = String(body.para ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(para)) {
+    return erro(422, 'Data nova inválida: use AAAA-MM-DD.') as Res<T>;
+  }
+  if (para <= o.vence) {
+    return erro(422, `Prorrogar move a data para frente: ${para} não é depois de ${o.vence}.`,
+      'Antecipar é outro ato, e não se chama prorrogação.') as Res<T>;
+  }
+
+  const redigida = redigir(justificativa).texto;
+  try {
+    banco.auditAppend({
+      ator: req.ator, atorPapel: req.papel, acao: 'OBRIGACAO_PRORROGADA',
+      recursoTipo: 'obrigacao', recursoId: o.codigo,
+      justificativa: redigida,
+      // A data antiga e a nova entram no payload do hash: prorrogação fora da
+      // cadeia seria prorrogação adulterável sem quebrar a prova.
+      campos: [o.vence, para],
+    });
+  } catch (e) {
+    const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a prorrogação.';
+    return erro(503, msg, 'Sem registro não há prorrogação: a data antiga continua valendo.') as Res<T>;
+  }
+
+  const de = o.vence;
+  o.prorrogacoes = [...(o.prorrogacoes ?? []), {
+    de, para, justificativa: redigida, ator: req.ator, quando: new Date().toISOString(),
+  }];
+  o.vence = para;
+  return ok({ codigo: o.codigo, de, para, diasAte: diasAte(o, Date.now()) }) as Res<T>;
+}
+
 function catalogoDmn() {
   return {
     tabelas: TABELAS_IDS.map((id) => {

@@ -23,6 +23,8 @@ export type Acao =
   | 'ver_pipeline_rotacao'
   | 'ver_log_kms'
   | 'gerenciar_risco'
+  | 'gerenciar_achado'
+  | 'conduzir_ciclo'
   | 'rodar_expurgo'
   | 'ver_portal_titular'
   | 'ver_total_itens'
@@ -53,12 +55,25 @@ export type Acao =
  * dever de prestar contas. Exportar registro de acesso é, ele mesmo, acesso a
  * dado pessoal.
  */
+/**
+ * `gerenciar_achado` é de engenharia e do DPO (PR 10).
+ *
+ * Antes, o achado caía em `escrever` e aparecia também para segurança — a
+ * permissão larga escolhendo o dono por omissão. Quem apura causa raiz e executa
+ * o plano é engenharia; quem valida o critério de eficácia é o DPO.
+ *
+ * `conduzir_ciclo` é do DPO, e nasceu do calendário: treze das obrigações do ano
+ * são condução do programa — indicadores trimestrais, roadmap, orçamento,
+ * políticas, fechamento — e a tabela não tinha ação para isso. Sem ela essas
+ * obrigações cairiam em `escrever` e entrariam na fila de engenharia e de
+ * segurança, que é o defeito que o `gerenciar_achado` acabou de corrigir.
+ */
 const MAPA: Record<Papel, Acao[]> = {
   engenharia: ['gerar_ripd', 'ver_gate_detalhe', 'ver_pipeline_rotacao', 'ver_log_kms',
     'rodar_expurgo', 'ver_portal_titular', 'ver_total_itens', 'verificar_integridade',
-    'abrir_incidente', 'escrever'],
+    'abrir_incidente', 'gerenciar_achado', 'escrever'],
   dpo: ['revelar_pii', 'buscar_titular', 'concluir_solicitacao', 'revisar_decisao',
-    'aprovar_ripd', 'assinar_lia', 'gerenciar_risco',
+    'aprovar_ripd', 'assinar_lia', 'gerenciar_risco', 'gerenciar_achado', 'conduzir_ciclo',
     'ver_portal_titular', 'ver_total_itens', 'rodar_expurgo',
     'verificar_integridade', 'exportar_auditoria',
     'comunicar_incidente', 'revogar_consentimento', 'escrever'],

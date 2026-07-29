@@ -1,9 +1,11 @@
 import { estadosDe } from './estados';
 import { ultimaDecisao } from './decisoes';
 import { pode } from './permissoes';
+import { naAntecedencia } from './calendario';
 import type { Artefato } from './estados';
 import type { Acao } from './permissoes';
 import type { Cenario, DecisaoRegistrada, Papel } from './types';
+import type { Obrigacao } from './calendario';
 
 /**
  * T0 · Minha fila — a fila **derivada**, nunca digitada.
@@ -50,8 +52,16 @@ export const ROTULO_URGENCIA: Record<Urgencia, string> = {
   vencido: 'Prazo vencido', agora: 'Para hoje', '30d': 'Próximos 30 dias',
 };
 
-/** Quando o estado sozinho não basta e é o relógio do artefato que decide. */
-export type Relogio = 'sempre' | 'vencendo';
+/**
+ * Quando o estado sozinho não basta.
+ *
+ * Vocabulário fechado de propósito. `ripd em_revisao` com P0 aberta é trabalho de
+ * engenharia; a mesma `em_revisao` com as P0 fechadas é a aprovação do DPO — e a
+ * máquina do PR 7 não distingue as duas, porque é o mesmo estado. A saída não
+ * podia ser um `if` na fila: seria a sopa de condições que o PR 7 fechou. É uma
+ * condição **declarada**, do mesmo jeito que `vencendo` já era para o relógio.
+ */
+export type Quando = 'sempre' | 'vencendo' | 'com_pendencia' | 'sem_pendencia';
 
 /** Janela do "vencendo": o que cabe planejar, mas não cabe esquecer. */
 const JANELA_DIAS = 30;
@@ -62,7 +72,7 @@ export interface RegraDaFila {
   estado: string;
   /** A permissão que a próxima ação exige — e, por consequência, de quem é o item. */
   acao: Acao;
-  quando: Relogio;
+  quando: Quando;
   urgencia: Urgencia;
   tipo: string;
   /** O que está travado por causa dele. Aceita `{chave}` do contexto do artefato. */
@@ -75,9 +85,8 @@ export interface RegraDaFila {
 /**
  * A tabela. Um item por (artefato, estado) que exige ação — e nada mais.
  *
- * Estados ausentes daqui são deliberados: `ripd vigente` e `solicitacao
- * concluida` não pedem nada, e `achado causa_raiz` está sendo trabalhado por
- * quem o abriu. A ausência é a declaração.
+ * Estados ausentes daqui são deliberados: `ripd vigente`, `solicitacao
+ * concluida` e `achado encerrado` não pedem nada. A ausência é a declaração.
  */
 export const REGRAS: RegraDaFila[] = [
   // ── parecer técnico ───────────────────────────────────────────────────────
@@ -118,10 +127,15 @@ export const REGRAS: RegraDaFila[] = [
     travado: '{codigo} está deliberado e ainda não vigente — o tratamento segue sem RIPD válido.',
     proximaAcao: 'Colocar o RIPD em vigência',
     proximo: 'depois de você: o status check do PR #{pr} volta a verde' },
-  { artefato: 'ripd', estado: 'em_revisao', acao: 'aprovar_ripd', quando: 'sempre', urgencia: '30d',
+  { artefato: 'ripd', estado: 'em_revisao', acao: 'gerar_ripd', quando: 'com_pendencia', urgencia: '30d',
     tipo: 'RIPD', tela: '/t3',
-    travado: 'O merge do PR #{pr} está travado por {codigo}, em revisão com {p0} recomendação(ões) P0 em aberto.',
-    proximaAcao: 'Aprovar o RIPD depois que as P0 fecharem',
+    travado: 'O merge do PR #{pr} está travado por {codigo}: {p0} recomendação(ões) P0 em aberto.',
+    proximaAcao: 'Fechar as recomendações P0 — a aprovação do DPO é recusada enquanto houver uma aberta',
+    proximo: 'depois de você: o DPO aprova e o status check volta a verde' },
+  { artefato: 'ripd', estado: 'em_revisao', acao: 'aprovar_ripd', quando: 'sem_pendencia', urgencia: '30d',
+    tipo: 'RIPD', tela: '/t3',
+    travado: 'O merge do PR #{pr} está travado por {codigo}, em revisão e sem P0 pendente.',
+    proximaAcao: 'Aprovar o RIPD',
     proximo: 'depois de você: o status check do PR #{pr} volta a verde e o merge libera' },
 
   // ── LIA ───────────────────────────────────────────────────────────────────
@@ -171,12 +185,43 @@ export const REGRAS: RegraDaFila[] = [
     proximo: 'a conclusão para o cronômetro e envia a devolutiva ao titular' },
 
   // ── achado de auditoria ───────────────────────────────────────────────────
-  { artefato: 'achado', estado: 'aberto', acao: 'escrever', quando: 'sempre', urgencia: '30d',
+  /**
+   * PR 10 — o achado ganhou ação própria (`gerenciar_achado`, de engenharia e do
+   * DPO). Antes caía em `escrever` e aparecia também para segurança: permissão
+   * larga escolhendo o dono por omissão.
+   *
+   * E todos os estados abertos entram, ao contrário do `risco em_tratamento`.
+   * A diferença é do modelo, não de gosto: risco declara dono e prazo, então
+   * `em_tratamento` é trabalho **andando**; achado não tem dono declarado, então
+   * todo estado aberto dele é alguém esperando. No dia em que `Achado` ganhar um
+   * dono, esta lista encolhe.
+   */
+  { artefato: 'achado', estado: 'aberto', acao: 'gerenciar_achado', quando: 'sempre', urgencia: '30d',
     tipo: 'Achado de auditoria', tela: '/t6',
     travado: '{codigo} ({criticidade}) está aberto sem causa raiz — o plano não tem em que se apoiar.',
     proximaAcao: 'Registrar a causa raiz',
     proximo: 'depois de você: o plano com critério de eficácia' },
-  { artefato: 'achado', estado: 'verificado', acao: 'escrever', quando: 'sempre', urgencia: '30d',
+  { artefato: 'achado', estado: 'causa_raiz', acao: 'gerenciar_achado', quando: 'sempre', urgencia: '30d',
+    tipo: 'Achado de auditoria', tela: '/t6',
+    travado: '{codigo} ({criticidade}) tem causa raiz registrada e nenhum plano.',
+    proximaAcao: 'Propor o plano com critério de eficácia verificável',
+    proximo: 'depois de você: a execução e a verificação independente' },
+  { artefato: 'achado', estado: 'plano', acao: 'gerenciar_achado', quando: 'sempre', urgencia: '30d',
+    tipo: 'Achado de auditoria', tela: '/t6',
+    travado: '{codigo} tem plano aprovado e não executado.',
+    proximaAcao: 'Executar o plano e anexar a evidência',
+    proximo: 'depois de você: a verificação independente de eficácia' },
+  { artefato: 'achado', estado: 'executado', acao: 'gerenciar_achado', quando: 'sempre', urgencia: '30d',
+    tipo: 'Achado de auditoria', tela: '/t6',
+    travado: '{codigo} foi executado e ainda não verificado — executar não é comprovar que resolveu.',
+    proximaAcao: 'Verificar a eficácia de forma independente',
+    proximo: 'depois de você: encerrar ou reabrir' },
+  { artefato: 'achado', estado: 'reaberto', acao: 'gerenciar_achado', quando: 'sempre', urgencia: '30d',
+    tipo: 'Achado de auditoria', tela: '/t6',
+    travado: '{codigo} foi reaberto — {reincidencias} reincidência(s), criticidade {criticidade}.',
+    proximaAcao: 'Reapurar a causa raiz: reincidência não recomeça do plano antigo',
+    proximo: 'o encerramento de reincidente vai ao comitê' },
+  { artefato: 'achado', estado: 'verificado', acao: 'gerenciar_achado', quando: 'sempre', urgencia: '30d',
     tipo: 'Achado de auditoria', tela: '/t6',
     travado: '{codigo} foi verificado e segue aberto: encerrar ou reabrir é decisão pendente.',
     proximaAcao: 'Encerrar, ou reabrir se a evidência não comprova o controle',
@@ -232,10 +277,18 @@ export const REGRAS: RegraDaFila[] = [
     proximo: 'chave vencida não quebra o sistema: para de proteger em silêncio' },
 ];
 
+/**
+ * De onde o item veio. `obrigacao` **não** é um artefato: não tem máquina de
+ * estados e nunca terá — é compromisso agendado, a outra natureza de trabalho do
+ * MAPA §4. Enfiá-la em `Artefato` obrigaria a inventar uma máquina para ela só
+ * para caber no tipo.
+ */
+export type Origem = Artefato | 'obrigacao';
+
 export interface ItemDaFila {
-  /** Código do artefato. Nunca titular, nunca pseudônimo, nunca documento. */
+  /** Código do artefato ou da obrigação. Nunca titular, nunca pseudônimo. */
   id: string;
-  artefato: Artefato;
+  artefato: Origem;
   tipo: string;
   /** A permissão que decidiu de quem é o item. */
   acao: Acao;
@@ -264,6 +317,13 @@ type Candidato = {
   id: string;
   estado: string;
   contexto: Record<string, string | number>;
+  /**
+   * O artefato tem trabalho pendente que impede o próximo passo? `null` quando a
+   * noção não existe para ele — e aí nenhuma regra com `com_pendencia` ou
+   * `sem_pendencia` casa, que é o comportamento certo: condição indefinida não
+   * libera regra nenhuma.
+   */
+  pendencia: boolean | null;
   /** Milissegundos até o vencimento. `null` quando o artefato não tem relógio. */
   restanteMs: number | null;
   prazoTexto: string;
@@ -295,27 +355,27 @@ function candidatos(c: Cenario, agora: number): Candidato[] {
   const lista: Candidato[] = [];
 
   for (const p of c.pareceres) {
-    lista.push({ artefato: 'parecer', id: p.codigo, estado: p.status, restanteMs: null,
+    lista.push({ artefato: 'parecer', id: p.codigo, estado: p.status, restanteMs: null, pendencia: null,
       prazoTexto: 'sem prazo declarado', decisao: null,
       contexto: { codigo: p.codigo, devolucoes: p.devolucoes } });
   }
 
   for (const r of c.ripds) {
     const p0 = r.recomendacoes.filter((x) => x.prioridade === 'P0' && !x.concluida).length;
-    lista.push({ artefato: 'ripd', id: r.codigo, estado: r.status, restanteMs: null,
+    lista.push({ artefato: 'ripd', id: r.codigo, estado: r.status, restanteMs: null, pendencia: p0 > 0,
       prazoTexto: 'sem prazo declarado', decisao: ultimaDecisao(r.decisoes, 'd1'),
       contexto: { codigo: r.codigo, pr: r.prNumero, p0, sistema: r.sistema } });
   }
 
   for (const l of c.lias) {
-    lista.push({ artefato: 'lia', id: l.codigo, estado: l.status,
+    lista.push({ artefato: 'lia', id: l.codigo, estado: l.status, pendencia: null,
       restanteMs: l.diasParaVencer * DIA_MS,
       prazoTexto: emDias(l.diasParaVencer * DIA_MS), decisao: null,
       contexto: { codigo: l.codigo, dias: l.diasParaVencer, campos: l.camposIds.length } });
   }
 
   for (const r of c.riscos) {
-    lista.push({ artefato: 'risco', id: r.codigo, estado: r.status, restanteMs: null,
+    lista.push({ artefato: 'risco', id: r.codigo, estado: r.status, restanteMs: null, pendencia: null,
       prazoTexto: 'sem prazo declarado', decisao: ultimaDecisao(r.decisoes, 'd2'),
       contexto: { codigo: r.codigo, score: r.probabilidade * r.impacto, dominio: r.dominio } });
   }
@@ -323,14 +383,14 @@ function candidatos(c: Cenario, agora: number): Candidato[] {
   for (const s of c.solicitacoes) {
     // O protocolo é o código do artefato. O titular e o pseudônimo dele não
     // entram no contexto — nem como chave que ninguém usou hoje.
-    lista.push({ artefato: 'solicitacao', id: s.protocolo, estado: s.status,
+    lista.push({ artefato: 'solicitacao', id: s.protocolo, estado: s.status, pendencia: null,
       restanteMs: s.prazoLimiteMs - agora,
       prazoTexto: emHoras(s.prazoLimiteMs - agora), decisao: null,
       contexto: { direito: s.direito.replace(/_/g, ' '), sistemas: s.sistemas.length } });
   }
 
   for (const a of c.achados) {
-    lista.push({ artefato: 'achado', id: a.codigo, estado: a.status, restanteMs: null,
+    lista.push({ artefato: 'achado', id: a.codigo, estado: a.status, restanteMs: null, pendencia: null,
       prazoTexto: 'sem prazo declarado', decisao: null,
       contexto: { codigo: a.codigo, criticidade: a.criticidade, reincidencias: a.reincidencias } });
   }
@@ -340,7 +400,7 @@ function candidatos(c: Cenario, agora: number): Candidato[] {
     // inventar um número aqui, a fila diz o que sabe — há quanto tempo corre — e
     // o item entra na frente da própria faixa por não ter relógio.
     const horas = Math.floor((agora - new Date(i.detectadoEm).getTime()) / 3_600_000);
-    lista.push({ artefato: 'incidente', id: i.id, estado: i.estado, restanteMs: null,
+    lista.push({ artefato: 'incidente', id: i.id, estado: i.estado, restanteMs: null, pendencia: null,
       prazoTexto: `correndo há ${horas} h · Art. 48 sem prazo declarado no sistema`, decisao: null,
       contexto: { id: i.id, titulares: i.titularesEstimados } });
   }
@@ -351,7 +411,7 @@ function candidatos(c: Cenario, agora: number): Candidato[] {
     // prazo de promover o canary, que é outra coisa — rótulo que promete o que
     // o número não quer dizer.
     const restante = k.status === 'ativa' && k.rotacaoEmDias !== null ? k.rotacaoEmDias * DIA_MS : null;
-    lista.push({ artefato: 'chave', id: k.alias, estado: k.status, restanteMs: restante,
+    lista.push({ artefato: 'chave', id: k.alias, estado: k.status, restanteMs: restante, pendencia: null,
       prazoTexto: restante !== null ? emDias(restante)
         : k.rotacaoEmDias === null ? 'sem rotação programada' : 'sem prazo declarado', decisao: null,
       contexto: { alias: k.alias, dias: k.rotacaoEmDias ?? 0, dependencias: k.dependencias.length } });
@@ -360,13 +420,20 @@ function candidatos(c: Cenario, agora: number): Candidato[] {
   return lista;
 }
 
-const regraDe = (cand: Candidato): RegraDaFila | null => {
-  const daVez = REGRAS.filter((r) => r.artefato === cand.artefato && r.estado === cand.estado);
-  return daVez.find((r) => (
-    r.quando === 'sempre'
-    || (cand.restanteMs !== null && cand.restanteMs <= JANELA_DIAS * DIA_MS)
-  )) ?? null;
+const casaAcondicao = (cand: Candidato, quando: Quando): boolean => {
+  switch (quando) {
+    case 'sempre': return true;
+    case 'vencendo': return cand.restanteMs !== null && cand.restanteMs <= JANELA_DIAS * DIA_MS;
+    case 'com_pendencia': return cand.pendencia === true;
+    case 'sem_pendencia': return cand.pendencia === false;
+    default: return false;
+  }
 };
+
+const regraDe = (cand: Candidato): RegraDaFila | null =>
+  REGRAS.find((r) => (
+    r.artefato === cand.artefato && r.estado === cand.estado && casaAcondicao(cand, r.quando)
+  )) ?? null;
 
 /**
  * O rito, citando a regra que produziu o item.
@@ -384,8 +451,55 @@ const ritoDe = (cand: Candidato): ItemDaFila['rito'] => (
     }
 );
 
+/**
+ * PR 10 — a obrigação promovida a item.
+ *
+ * **Derivação, nunca cópia.** O item não é gravado em lugar nenhum: ele é a
+ * leitura de uma obrigação que entrou na antecedência declarada. Prorrogar a
+ * data faz o item sair da fila no mesmo ciclo, sem ninguém apagar nada — e é
+ * essa propriedade que uma cópia perderia.
+ *
+ * A faixa de passos fica vazia de propósito: obrigação não tem máquina de
+ * estados, e desenhar uma barra falsa só para o cartão ficar simétrico seria
+ * inventar processo onde há compromisso.
+ */
+function daObrigacao(o: Obrigacao, agora: number): ItemDaFila {
+  const dias = Math.round((new Date(`${o.vence}T12:00:00Z`).getTime() - agora) / DIA_MS);
+  const prorrogada = (o.prorrogacoes ?? []).length;
+  return {
+    id: o.codigo,
+    artefato: 'obrigacao',
+    tipo: o.tipo === 'prazo' ? 'Prazo do calendário' : 'Compromisso do calendário',
+    acao: o.acao,
+    // A consequência declarada é o que está em jogo — "revalidar consentimento
+    // em março" não diz a ninguém por que largar o que está fazendo.
+    travado: `${o.titulo}. Se passar: ${o.seFalhar}.`,
+    prazo: {
+      texto: dias < 0 ? `vencido há ${Math.abs(dias)} dia(s)` : dias === 0 ? 'vence hoje' : `em ${dias} dia(s)`,
+      urgencia: dias < 0 ? 'vencido' : '30d',
+      restanteMs: dias * DIA_MS,
+    },
+    proximaAcao: o.preparar,
+    proximo: o.tipo === 'prazo'
+      ? 'depois da data não há próximo: a consequência acima é o que acontece'
+      : 'depois de você: o compromisso acontece na data e vira registro',
+    rito: {
+      texto: `Obrigação do calendário promovida a item: entrou na antecedência de ${o.antecedenciaDias} dias.`
+        + (prorrogada ? ` Prorrogada ${prorrogada}× com justificativa registrada.` : ''),
+      fonte: `calendario.ts · ${o.trilha}`,
+    },
+    estados: [],
+    estadoAtual: -1,
+    tela: o.tela,
+  };
+}
+
 export function derivarFila(cenario: Cenario, agora: number): ItemDaFila[] {
   const itens: ItemDaFila[] = [];
+
+  for (const o of cenario.obrigacoes) {
+    if (naAntecedencia(o, agora)) itens.push(daObrigacao(o, agora));
+  }
 
   for (const cand of candidatos(cenario, agora)) {
     const regra = regraDe(cand);
