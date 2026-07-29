@@ -5,7 +5,8 @@ import { tmpdir } from 'os';
 import { render, screen, fireEvent, act, cleanup, within } from '@testing-library/react';
 import { BancoMock } from '../src/mock/db';
 import { request } from '../src/mock/api';
-import { pode } from '../src/mock/permissoes';
+import { ACOES, pode } from '../src/mock/permissoes';
+import type { Acao } from '../src/mock/permissoes';
 import { POLITICAS, POLITICA_PADRAO, politicaDe } from '../src/mock/politicas';
 import {
   ARTEFATOS, MAQUINAS, TRANSICOES_INCIDENTE, estadosDe, motivoDaRecusa, proximosDe,
@@ -18,7 +19,7 @@ import {
   CATEGORIAS, GATILHOS, TABELAS, TABELAS_IDS, aplicar, condicoesDe, nivelDoRisco,
   reproduzir, tomDoRisco, ultimaDecisao, vigenteDe,
 } from '../src/mock/decisoes';
-import { REGRAS, derivarFila, minhaFila } from '../src/mock/fila';
+import { REGRAS, derivarFila, eDe, minhaFila } from '../src/mock/fila';
 import type { ContadoresDaFila, ItemDaFila } from '../src/mock/fila';
 import {
   CAPACIDADE_DIAS_MES, RESERVA_DEMANDA, assinaturaDoFeed, cargaDoAno, mesDe,
@@ -2748,7 +2749,7 @@ describe('PR 9 · a rota da fila', () => {
       );
       expect(res.status, papel).toBe(200);
       const meus = res.body.itens;
-      expect(meus.every((i) => pode(papel, i.acao)), papel).toBe(true);
+      expect(meus.every((i) => eDe(i.titularidade, papel)), papel).toBe(true);
       expect(res.body.contadores.deOutrosPapeis, papel).toBe(todos.length - meus.length);
       // Contagem, nunca lista: o corpo não traz nada dos itens alheios.
       expect(Object.keys(res.body)).toEqual(['itens', 'contadores']);
@@ -2890,7 +2891,7 @@ describe('PR 10 · o calendário como dado, e a promoção à fila', () => {
     trilha: 'legal', tipo: 'prazo', vence: emDias(60), antecedenciaDias: 30,
     preparar: 'Campanha de revalidação aberta 30 dias antes',
     seFalhar: 'o campo perde base legal e o gate bloqueia dois repositórios',
-    cargaDias: 6, acao: 'assinar_lia', tela: '/t2', ...over,
+    cargaDias: 6, responsavel: 'dpo', tela: '/t2', ...over,
   });
 
   it('obrigação fora da antecedência não está na fila; dentro, está', () => {
@@ -2928,11 +2929,12 @@ describe('PR 10 · o calendário como dado, e a promoção à fila', () => {
 
   it('a obrigação só entra na fila de quem responde por ela', () => {
     const b = new BancoMock('banco');
-    b.cenario.obrigacoes = [obrigacao({ vence: emDias(10), acao: 'ver_pipeline_rotacao' })];
+    b.cenario.obrigacoes = [obrigacao({ vence: emDias(10), responsavel: 'seguranca' })];
     const todos = derivarFila(b.cenario, HOJE);
     const alcanca = (['engenharia', 'dpo', 'produto', 'seguranca', 'auditor'] as Papel[])
       .filter((p) => minhaFila(todos, p).some((i) => i.artefato === 'obrigacao'));
-    expect(alcanca).toEqual(['engenharia', 'seguranca']);
+    // Declarado, não derivado: só quem foi nomeado, e mais ninguém.
+    expect(alcanca).toEqual(['seguranca']);
   });
 
   it('a carga do mês é somada das obrigações, não digitada', () => {
@@ -2972,6 +2974,7 @@ describe('PR 10 · o calendário como dado, e a promoção à fila', () => {
         expect(o.seFalhar.length, `${o.codigo}: consequência`).toBeGreaterThan(20);
         expect(o.preparar.length, `${o.codigo}: preparar`).toBeGreaterThan(10);
         expect(o.antecedenciaDias, `${o.codigo}`).toBeGreaterThan(0);
+        expect(o.responsavel, `${o.codigo}: sem responsável declarado`).toBeTruthy();
         expect(o.cargaDias, `${o.codigo}`).toBeGreaterThan(0);
         expect(o.vence, `${o.codigo}`).toMatch(/^\d{4}-\d{2}-\d{2}$/);
         expect(codigos.has(o.codigo), `código repetido: ${o.codigo}`).toBe(false);
@@ -2992,7 +2995,7 @@ describe('PR 10 · o feed ICS', () => {
       const res = feed(papel);
       expect(res.status, papel).toBe(200);
       const uids = [...res.body.matchAll(/UID:(OBR-[^@]+)@lastro/g)].map((m) => m[1]);
-      const esperados = banco.cenario.obrigacoes.filter((o) => pode(papel, o.acao)).map((o) => o.codigo);
+      const esperados = banco.cenario.obrigacoes.filter((o) => o.responsavel === papel).map((o) => o.codigo);
       expect(uids.sort(), papel).toEqual(esperados.sort());
       expect(uids.length, `${papel}: feed vazio não prova nada`).toBeGreaterThan(0);
     }
@@ -3071,7 +3074,7 @@ describe('PR 10 · o feed ICS', () => {
 });
 
 describe('PR 10 · prorrogar é ato registrado', () => {
-  const alvo = () => banco.cenario.obrigacoes.find((o) => !o.cumpridaEm && o.acao === 'conduzir_ciclo')!;
+  const alvo = () => banco.cenario.obrigacoes.find((o) => !o.cumpridaEm && o.responsavel === 'dpo')!;
   const prorrogar = (papel: Papel, body: Record<string, unknown>, codigo?: string) =>
     chamar<{ de: string; para: string }>(papel, {
       metodo: 'POST', caminho: `/v1/calendario/${codigo ?? alvo().codigo}/prorrogar`, body,
@@ -3125,14 +3128,15 @@ describe('PR 10 · prorrogar é ato registrado', () => {
     expect(prorrogar('dpo', { para: o.vence, justificativa }).status).toBe(422);
     expect(prorrogar('dpo', { para: '2020-01-01', justificativa }).status).toBe(422);
     expect(prorrogar('dpo', { para: '15/01/2027', justificativa }).status).toBe(422);
-    // `conduzir_ciclo` é do DPO: engenharia escreve, mas não responde por esta.
+    // Titularidade declarada: engenharia escreve, mas não responde por esta.
     expect(prorrogar('engenharia', { para: '2027-01-15', justificativa }).status).toBe(403);
     expect(prorrogar('dpo', { para: '2027-01-15', justificativa }, 'OBR-INEXISTENTE').status).toBe(404);
   });
 
   it('prorrogar tira o item da fila quando a data sai da antecedência', () => {
     const b = new BancoMock('banco');
-    const o = b.cenario.obrigacoes.find((x) => !x.cumpridaEm)!;
+    // A obrigação precisa ser do papel que prorroga: titularidade é declarada.
+    const o = b.cenario.obrigacoes.find((x) => !x.cumpridaEm && x.responsavel === 'dpo')!;
     const agora = Date.now();
     o.vence = new Date(agora + 5 * 86_400_000).toISOString().slice(0, 10);
     o.antecedenciaDias = 30;
@@ -3159,13 +3163,13 @@ describe('PR 10 · as duas decisões do PR 9', () => {
     expect(ripd.recomendacoes.some((r) => r.prioridade === 'P0' && !r.concluida)).toBe(true);
 
     const comP0 = derivarFila(b.cenario, Date.now()).find((i) => i.id === ripd.codigo)!;
-    expect(comP0.acao).toBe('gerar_ripd');
-    expect(pode('engenharia', comP0.acao)).toBe(true);
-    expect(pode('dpo', comP0.acao)).toBe(false);
+    expect(comP0.titularidade).toEqual({ tipo: 'derivada', acao: 'gerar_ripd' });
+    expect(eDe(comP0.titularidade, 'engenharia')).toBe(true);
+    expect(eDe(comP0.titularidade, 'dpo')).toBe(false);
 
     ripd.recomendacoes.forEach((r) => { r.concluida = true; });
     const semP0 = derivarFila(b.cenario, Date.now()).find((i) => i.id === ripd.codigo)!;
-    expect(semP0.acao).toBe('aprovar_ripd');
+    expect(semP0.titularidade).toEqual({ tipo: 'derivada', acao: 'aprovar_ripd' });
     expect(semP0.proximaAcao).toBe('Aprovar o RIPD');
     // O mesmo estado: quem mudou foi a condição, não a máquina.
     expect(ripd.status).toBe('em_revisao');
@@ -3200,7 +3204,8 @@ describe('PR 10 · as duas decisões do PR 9', () => {
     const alcanca = (['engenharia', 'dpo', 'produto', 'seguranca', 'auditor'] as Papel[])
       .filter((p) => minhaFila(todos, p).some((i) => i.id === achado.codigo));
     expect(alcanca).toEqual(['engenharia', 'dpo']);
-    expect(todos.find((i) => i.id === achado.codigo)!.acao).toBe('gerenciar_achado');
+    expect(todos.find((i) => i.id === achado.codigo)!.titularidade)
+      .toEqual({ tipo: 'derivada', acao: 'gerenciar_achado' });
   });
 
   it('todo estado aberto do achado tem regra, e o encerrado não tem', () => {
@@ -3235,7 +3240,7 @@ describe('PR 10 · T10 na tela', () => {
   it('o cartão da obrigação não monta faixa de estados vazia', () => {
     limparBancosDaSessao();
     const b = new BancoMock('banco');
-    const o = b.cenario.obrigacoes.find((x) => !x.cumpridaEm)!;
+    const o = b.cenario.obrigacoes.find((x) => !x.cumpridaEm && x.responsavel === 'dpo')!;
     o.vence = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
     o.antecedenciaDias = 30;
     useSessao.setState({ papel: 'dpo', banco: b, versao: 0, avisos: [] });
@@ -3897,5 +3902,120 @@ describe('PR 12 · a página "Como funciona" é referência, não operação', (
     render(<MemoryRouter initialEntries={['/como-funciona']}><Casca /></MemoryRouter>);
     expect(screen.getByRole('heading', { level: 1, name: 'Como funciona' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Como funciona/ })).toBeInTheDocument();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('PR 13 · declarado × derivado, travado como invariante', () => {
+  const PAPEIS_TODOS: Papel[] = ['engenharia', 'dpo', 'produto', 'seguranca', 'auditor'];
+  const cenarios = ['banco', 'varejo', 'midia'];
+
+  it('item de artefato deriva o dono da Acao — e de nada mais', () => {
+    // O lado derivado: quem vê o item é exatamente quem a tabela de permissões
+    // alcança. Se algum dia entrar um campo de dono escrito à mão no caminho do
+    // artefato, este teste acusa, porque os dois conjuntos deixam de coincidir.
+    for (const id of cenarios) {
+      const todos = derivarFila(new BancoMock(id).cenario, Date.now());
+      const deArtefato = todos.filter((i) => i.artefato !== 'obrigacao');
+      expect(deArtefato.length, id).toBeGreaterThan(0);
+
+      for (const item of deArtefato) {
+        expect(item.titularidade.tipo, `${id} · ${item.id}`).toBe('derivada');
+        const acao = (item.titularidade as { acao: Acao }).acao;
+        const veem = PAPEIS_TODOS.filter((p) => minhaFila(todos, p).some((i) => i === item));
+        const podem = PAPEIS_TODOS.filter((p) => pode(p, acao));
+        expect(veem, `${id} · ${item.id}: quem vê ≠ quem pode`).toEqual(podem);
+      }
+    }
+  });
+
+  it('a tabela de artefatos não tem campo de papel, dono ou responsável', () => {
+    // Estruturalmente, e não só por tipo: um campo a mais aqui seria a porta de
+    // entrada para o dono escrito à mão que a regra proíbe.
+    const permitidos = ['artefato', 'estado', 'acao', 'quando', 'urgencia', 'tipo',
+      'travado', 'proximaAcao', 'proximo', 'tela'];
+    for (const r of REGRAS) {
+      expect(Object.keys(r).sort(), `${r.artefato}:${r.estado}`).toEqual([...permitidos].sort());
+    }
+  });
+
+  it('item de obrigação herda o responsável declarado, e só ele vê', () => {
+    for (const id of cenarios) {
+      const b = new BancoMock(id);
+      // Traz todas para dentro da antecedência: o teste é de titularidade, não
+      // de relógio, e uma varredura com uma obrigação só provaria pouco.
+      b.cenario.obrigacoes.forEach((o) => { o.antecedenciaDias = 400; delete o.cumpridaEm; });
+      const todos = derivarFila(b.cenario, Date.now());
+
+      for (const o of b.cenario.obrigacoes) {
+        const item = todos.find((i) => i.id === o.codigo)!;
+        expect(item, `${id} · ${o.codigo} não foi promovida`).toBeDefined();
+        expect(item.titularidade).toEqual({ tipo: 'declarada', responsavel: o.responsavel });
+        const veem = PAPEIS_TODOS.filter((p) => minhaFila(todos, p).some((i) => i.id === o.codigo));
+        expect(veem, `${id} · ${o.codigo}`).toEqual([o.responsavel]);
+      }
+    }
+  });
+
+  it('toda obrigação promovível declara responsável — nenhuma cai por omissão', () => {
+    for (const id of cenarios) {
+      for (const o of new BancoMock(id).cenario.obrigacoes) {
+        expect(o.responsavel, `${id} · ${o.codigo}: responsável vazio`).toBeTruthy();
+        expect(PAPEIS_TODOS, `${id} · ${o.codigo}: papel desconhecido`).toContain(o.responsavel);
+      }
+    }
+  });
+
+  it('as três de condução saíram de escrever para o dono nomeado', () => {
+    const b = new BancoMock('banco');
+    const de = (curto: string) => b.cenario.obrigacoes.find((o) => o.curto === curto)!;
+    expect(de('Diagnóstico AS-IS').responsavel).toBe('engenharia');
+    expect(de('Trilha técnica').responsavel).toBe('engenharia');
+    expect(de('Tabletop').responsavel).toBe('seguranca');
+
+    // O DPO deixa de vê-las na fila, e elas continuam no calendário do ano.
+    b.cenario.obrigacoes.forEach((o) => { o.antecedenciaDias = 400; delete o.cumpridaEm; });
+    const todos = derivarFila(b.cenario, Date.now());
+    const naFilaDo = (papel: Papel) => minhaFila(todos, papel).map((i) => i.id);
+    for (const curto of ['Diagnóstico AS-IS', 'Trilha técnica', 'Tabletop']) {
+      expect(naFilaDo('dpo'), `${curto} ainda na fila do DPO`).not.toContain(de(curto).codigo);
+    }
+    expect(naFilaDo('engenharia')).toContain(de('Diagnóstico AS-IS').codigo);
+    expect(naFilaDo('engenharia')).toContain(de('Trilha técnica').codigo);
+    expect(naFilaDo('seguranca')).toContain(de('Tabletop').codigo);
+
+    // Nenhuma sumiu do calendário: a titularidade mudou, o ano não.
+    expect(cargaDoAno(b.cenario.obrigacoes).reduce((s, c) => s + c.obrigacoes.length, 0)).toBe(22);
+  });
+
+  it('a fila filtra pela abstração, não pelo papel concreto nem pela natureza', () => {
+    // Aberto/fechado: uma terceira natureza de titularidade não tocaria em
+    // `minhaFila` nem em `contadoresDe`. Substituição: as duas variantes
+    // respondem à mesma pergunta, e o filtro não pergunta qual é qual.
+    const fonte = readFileSync('src/mock/fila.ts', 'utf8');
+    const filtro = fonte.slice(fonte.indexOf('export const minhaFila'));
+    expect(filtro).toContain('eDe(i.titularidade, papel)');
+    expect(filtro).not.toContain("tipo === 'declarada'");
+    expect(filtro).not.toContain("tipo === 'derivada'");
+    expect(filtro).not.toMatch(/'(dpo|engenharia|seguranca|produto|auditor)'/);
+
+    // E `eDe` responde por qualquer variante sem o chamador saber qual é.
+    expect(eDe({ tipo: 'derivada', acao: 'gerar_ripd' }, 'engenharia')).toBe(true);
+    expect(eDe({ tipo: 'derivada', acao: 'gerar_ripd' }, 'dpo')).toBe(false);
+    expect(eDe({ tipo: 'declarada', responsavel: 'seguranca' }, 'seguranca')).toBe(true);
+    expect(eDe({ tipo: 'declarada', responsavel: 'seguranca' }, 'engenharia')).toBe(false);
+  });
+
+  it('nenhuma permissão declarada fica sem quem a exerça', () => {
+    // `conduzir_ciclo` saiu porque perdeu o único usuário. Permissão que não
+    // habilita nada sugere um recorte que o sistema não faz — e este invariante
+    // é o que impede a próxima de ficar para trás.
+    const fontes = ['src/mock/fila.ts', 'src/mock/politicas.ts', 'src/mock/api.ts',
+      ...['T0', 'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10'].map((t) => `src/screens/${t}.tsx`)]
+      .map((f) => readFileSync(f, 'utf8')).join('\n');
+
+    for (const acao of ACOES) {
+      expect(new RegExp(`'${acao}'|"${acao}"`).test(fontes), `a ação "${acao}" não é exercida em lugar nenhum`).toBe(true);
+    }
   });
 });

@@ -6,7 +6,6 @@ import { useSessao } from '../store/sessao';
 import {
   CAPACIDADE_DIAS_MES, MESES, RESERVA_DEMANDA, TRILHAS, diasAte, mesDe,
 } from '../mock/calendario';
-import { pode } from '../mock/permissoes';
 import type { CargaDoMes, Obrigacao, Trilha } from '../mock/calendario';
 
 interface Resposta {
@@ -46,10 +45,10 @@ export default function T10() {
   const todas = cal.dados?.obrigacoes ?? [];
   const naFila = new Set(cal.dados?.naAntecedencia ?? []);
   const visiveis = todas.filter((o) => (
-    (trilha === 'todas' || o.trilha === trilha) && (!soMeus || pode(papel, o.acao))
+    (trilha === 'todas' || o.trilha === trilha) && (!soMeus || o.responsavel === papel)
   ));
 
-  const meus = todas.filter((o) => pode(papel, o.acao)).length;
+  const meus = todas.filter((o) => o.responsavel === papel).length;
   const prazos = todas.filter((o) => o.tipo === 'prazo').length;
 
   return (
@@ -185,7 +184,7 @@ export default function T10() {
                     <td>
                       {/* Direção única: prorrogar é ato registrado, e só de quem
                           responde pela obrigação. Para os demais, ausência. */}
-                      {!o.cumpridaEm && pode(papel, o.acao) && (
+                      {!o.cumpridaEm && o.responsavel === papel && (
                         <button className="reveal" onClick={() => setProrrogando(o)}>Prorrogar</button>
                       )}
                     </td>
