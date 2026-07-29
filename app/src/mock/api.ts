@@ -1,5 +1,6 @@
 import { BancoMock, FalhaDeAuditoria, LogImutavel } from './db';
 import { pode } from './permissoes';
+import { EH_DEMONSTRACAO } from '../lib/perfil';
 import { POLITICA_PADRAO, politicaDe } from './politicas';
 import { ACESSO_SEM_FINALIDADE, campoAlcancado, recusaDeFinalidade } from './finalidade';
 import { TENTATIVAS_MAXIMAS, motivoDaFaltaDeStepUp } from './stepup';
@@ -668,10 +669,17 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
 
     case 'POST audit': {
       // `verificar` já foi atendido antes da guarda de escrita, como leitura.
-      if (partes[1] === 'forjar') {
-        // Simula um DBA comprometido editando o log direto. Duas condições, não
-        // uma: fora do modo demonstração a rota não existe, e mesmo dentro dele
-        // continua exigindo `escrever` — checado aqui além da guarda de topo,
+      //
+      // Risco-035 — `EH_DEMONSTRACAO` vem **primeiro** na conjunção, e isso não
+      // é estilo. Ela é constante de build: no perfil de produção o esbuild dobra
+      // a comparação e apaga o bloco inteiro, e a palavra `forjar` deixa de
+      // existir no artefato. Com a checagem por último, a rota continuaria
+      // publicada — só que respondendo 404, que é uma checagem que alguém
+      // remove, não código que não foi publicado.
+      if (EH_DEMONSTRACAO && partes[1] === 'forjar') {
+        // Simula um DBA comprometido editando o log direto. Três condições, não
+        // uma: o perfil do build, o interruptor do banco em tempo de execução, e
+        // a permissão de escrita — esta checada aqui além da guarda de topo,
         // para que reintroduzir uma exceção lá não reabra esta porta.
         if (!banco.modoDemo) {
           return erro(404, 'Rota não encontrada.',

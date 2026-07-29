@@ -1,5 +1,5 @@
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
+import { describe, expect, it, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { parse as parseYaml } from 'yaml';
 import { dirname, join, resolve } from 'path';
 import { tmpdir } from 'os';
@@ -36,6 +36,13 @@ import {
 import { TENTATIVAS_MAXIMAS, motivoDaFaltaDeStepUp, stepUpVigente } from '../src/mock/stepup';
 import { recusaDeFinalidade } from '../src/mock/finalidade';
 import { SEGREDOS_HISTORICOS, varrerBundle, varrerFonte } from '../src/lib/segredos';
+import { execSync } from 'node:child_process';
+import {
+  EH_DEMONSTRACAO, SELO_DE_DEMONSTRACAO, SELO_DO_SELETOR_DE_PAPEL, perfilDe,
+} from '../src/lib/perfil';
+import {
+  IDENTIDADES_DE_DEMONSTRACAO, piiDeclarada, relatorioDaCatraca, rodarCatraca,
+} from '../src/lib/catraca-producao';
 import { requestPortal } from '../src/mock/portal';
 import { DIREITOS, REGIME, nivelExigido } from '../src/mock/direitos';
 import {
@@ -7335,5 +7342,261 @@ describe('PR 23 · aceitação — contrato e política dizem a mesma coisa', ()
     expect(yml).toContain('npm run varredura:segredos');
     // Depois do build: metade da prova só existe no artefato construído.
     expect(yml.indexOf('npm run build')).toBeLessThan(yml.indexOf('npm run varredura:segredos'));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 24 · RIPD §7.3 — as quatro premissas de aceite viram catraca
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('PR 24 · unidade — o perfil do build, e o padrão que ele escolhe', () => {
+  it('só `producao` é produção; qualquer outra coisa é demonstração', () => {
+    expect(perfilDe({ VITE_PERFIL: 'producao' })).toBe('producao');
+    expect(perfilDe({ VITE_PERFIL: 'demonstracao' })).toBe('demonstracao');
+    // Erro de digitação cai em demonstração, e não o contrário: cair em produção
+    // publicaria um artefato mudo e daria a impressão de que a catraca aprovou.
+    expect(perfilDe({ VITE_PERFIL: 'producaoo' })).toBe('demonstracao');
+    expect(perfilDe({ VITE_PERFIL: '' })).toBe('demonstracao');
+    expect(perfilDe({})).toBe('demonstracao');
+    expect(perfilDe(undefined)).toBe('demonstracao');
+  });
+
+  it('na suíte o perfil é demonstração — e as quatro condições valem de propósito', () => {
+    // A catraca é sobre o artefato de produção. Aqui elas continuam verdadeiras,
+    // porque é isso que o protótipo existe para demonstrar.
+    expect(EH_DEMONSTRACAO).toBe(true);
+    expect(new BancoMock('banco').modoDemo).toBe(true);
+  });
+
+  it('modoDemo deixou de ser escrito à mão: ele deriva do perfil', () => {
+    // O RIPD §7.3 pedia "amarrar a import.meta.env e testar o build".
+    const fonte = readFileSync('src/mock/db.ts', 'utf8');
+    expect(fonte).toContain('modoDemo = EH_DEMONSTRACAO');
+    expect(fonte).not.toMatch(/modoDemo\s*=\s*true/);
+  });
+
+  it('a rota de forja tem a constante de build primeiro na conjunção', () => {
+    // Com ela por último, o bloco não é dobrado e a rota continua publicada —
+    // respondendo 404, que é uma checagem que alguém remove.
+    const fonte = readFileSync('src/mock/api.ts', 'utf8');
+    expect(fonte).toContain("EH_DEMONSTRACAO && partes[1] === 'forjar'");
+  });
+});
+
+describe('PR 24 · unidade — a catraca reprova o que promete reprovar', () => {
+  const raizes: string[] = [];
+  const artefato = (arquivos: Record<string, string>): string => {
+    const raiz = mkdtempSync(join(tmpdir(), 'catraca-'));
+    raizes.push(raiz);
+    for (const [rel, conteudo] of Object.entries(arquivos)) {
+      const alvo = join(raiz, rel);
+      mkdirSync(dirname(alvo), { recursive: true });
+      writeFileSync(alvo, conteudo);
+    }
+    return raiz;
+  };
+  afterEach(() => { for (const r of raizes.splice(0)) rmSync(r, { recursive: true, force: true }); });
+
+  const INVENTARIO = resolve('../.privacy/pii-sintetica.yaml');
+  const LIMPO = { 'assets/app.js': 'const x=1;\nexport default x;\n' };
+
+  it('artefato limpo passa, e a varredura leu alguma coisa', () => {
+    const r = rodarCatraca(artefato(LIMPO), INVENTARIO);
+    expect(r.achados, relatorioDaCatraca(r)).toEqual([]);
+    expect(r.aprovado).toBe(true);
+    expect(r.arquivosVarridos).toBe(1);
+  });
+
+  it('modo demonstração no artefato reprova nomeando o Risco-035', () => {
+    const r = rodarCatraca(artefato({
+      'assets/app.js': `const a=1;\nconst selo="${SELO_DE_DEMONSTRACAO}";\n`,
+    }), INVENTARIO);
+    expect(r.aprovado).toBe(false);
+    const a = r.achados.find((x) => x.regra === 'aceite/modo-demonstracao')!;
+    expect(a.risco).toBe('Risco-035');
+    expect(a.arquivo).toBe('assets/app.js');
+    expect(a.linha).toBe(2);
+  });
+
+  it('a rota de forja no artefato reprova; ausente, passa — as duas direções', () => {
+    const com = rodarCatraca(artefato({ 'assets/app.js': 'fetch("/v1/audit/forjar")\n' }), INVENTARIO);
+    expect(com.achados.map((a) => a.regra)).toContain('aceite/rota-de-forja');
+    expect(com.achados[0].risco).toBe('Risco-035');
+    // Sem a contraprova, o teste acima passaria com a catraca reprovando tudo.
+    expect(rodarCatraca(artefato(LIMPO), INVENTARIO).achados).toEqual([]);
+  });
+
+  it('seletor de papel e identidade fabricada reprovam nomeando o Risco-037', () => {
+    const r = rodarCatraca(artefato({
+      'assets/app.js': `x="${SELO_DO_SELETOR_DE_PAPEL}"\n`,
+      'assets/b.js': `const ator="${IDENTIDADES_DE_DEMONSTRACAO[1]}"\n`,
+    }), INVENTARIO);
+    const regras = r.achados.map((a) => a.regra);
+    expect(regras).toContain('aceite/papel-por-botao');
+    expect(regras).toContain('aceite/sessao-sem-credencial');
+    expect(r.achados.every((a) => a.risco === 'Risco-037')).toBe(true);
+  });
+
+  it('um CPF do inventário sintético no artefato reprova com arquivo e linha', () => {
+    const cpf = piiDeclarada(INVENTARIO)[0];
+    const r = rodarCatraca(artefato({
+      'assets/dados.js': `const t=[];\nconst c="${cpf}";\n`,
+    }), INVENTARIO);
+    const a = r.achados.find((x) => x.regra === 'aceite/pii-sintetica-no-bundle')!;
+    expect(a.risco).toBe('Risco-040');
+    expect(a.arquivo).toBe('assets/dados.js');
+    expect(a.linha).toBe(2);
+    // O valor não é reimpresso no relatório: o log do CI é um sistema como outro.
+    expect(relatorioDaCatraca(r)).not.toContain(cpf);
+  });
+
+  it('a lista de PII vem do inventário do PR 4, e não de uma segunda cópia', () => {
+    // Duas listas divergiriam, e a que valeria seria a que ninguém está olhando.
+    const declarada = piiDeclarada(INVENTARIO);
+    const inventario = parseYaml(readFileSync('../.privacy/pii-sintetica.yaml', 'utf8')) as {
+      cpf: { valor: string }[]; telefone: { valor: string }[];
+      email: { dominios: { dominio: string }[] };
+    };
+    for (const c of inventario.cpf) expect(declarada).toContain(c.valor);
+    for (const t of inventario.telefone) expect(declarada).toContain(t.valor);
+    for (const d of inventario.email.dominios) expect(declarada).toContain(d.dominio);
+  });
+
+  it('artefato inexistente ou vazio reprova — não se aprova por não ter olhado', () => {
+    const ausente = rodarCatraca(join(tmpdir(), 'nao-existe-catraca'), INVENTARIO);
+    expect(ausente.aprovado).toBe(false);
+    expect(ausente.achados[0].regra).toBe('aceite/artefato-ausente');
+    expect(ausente.arquivosVarridos).toBe(0);
+
+    // Diretório que existe e não tem nada varrível aprovaria as quatro
+    // premissas de uma vez, sem ter lido uma linha.
+    const vazio = rodarCatraca(artefato({ 'leia-me.txt': 'nada aqui\n' }), INVENTARIO);
+    expect(vazio.aprovado).toBe(false);
+    expect(vazio.achados[0].regra).toBe('aceite/artefato-vazio');
+  });
+
+  it('as identidades da catraca são as mesmas que a sessão fabrica', () => {
+    // A cópia em `catraca-producao.ts` existe para a varredura não arrastar o
+    // aplicativo para dentro dela. Divergir seria procurar nomes que ninguém usa.
+    const fonte = readFileSync('src/store/sessao.ts', 'utf8');
+    const mapa = fonte.slice(fonte.indexOf('const NOME_POR_PAPEL'), fonte.indexOf('interface Estado'));
+    for (const nome of IDENTIDADES_DE_DEMONSTRACAO) expect(mapa, nome).toContain(nome);
+    expect(mapa.match(/'[^']+',/g)?.length).toBe(IDENTIDADES_DE_DEMONSTRACAO.length);
+  });
+});
+
+describe('PR 24 · sistema — o artefato de produção, construído e varrido', () => {
+  /**
+   * O único teste da suíte que roda um build.
+   *
+   * Vale o custo: as quatro premissas falam do que é **publicado**, e a única
+   * prova disso é o que sai do build. Um teste que afirmasse "o workflow tem o
+   * passo" provaria que alguém escreveu YAML — que é precisamente a diferença
+   * entre premissa documentada e premissa cobrada.
+   */
+  const dist = join(tmpdir(), 'lastro-dist-producao-teste');
+  let construiu = false;
+
+  beforeAll(() => {
+    rmSync(dist, { recursive: true, force: true });
+    execSync(`npx vite build --outDir ${dist}`, {
+      env: { ...process.env, VITE_PERFIL: 'producao' }, stdio: 'pipe',
+    });
+    construiu = true;
+  }, 120_000);
+
+  afterAll(() => { rmSync(dist, { recursive: true, force: true }); });
+
+  it('o build de produção passa nas quatro premissas', () => {
+    expect(construiu).toBe(true);
+    const r = rodarCatraca(dist, resolve('../.privacy/pii-sintetica.yaml'));
+    expect(r.achados, relatorioDaCatraca(r)).toEqual([]);
+    // Zero arquivo varrido seria uma catraca que aprova por não ter olhado.
+    expect(r.arquivosVarridos).toBeGreaterThan(0);
+  });
+
+  it('o cenário inteiro fica de fora — nenhum titular fictício no artefato', () => {
+    const bundle = readdirSync(join(dist, 'assets'))
+      .filter((f) => f.endsWith('.js'))
+      .map((f) => readFileSync(join(dist, 'assets', f), 'utf8')).join('\n');
+
+    // Não é só o CPF declarado: os valores reveláveis dos nove titulares dos três
+    // cenários — nome, e-mail, telefone e endereço — vivem em `segredos`, que é
+    // justamente o que nunca deveria ter saído do servidor.
+    const identificaveis = Object.values(CENARIOS)
+      .flatMap((c) => c.titulares)
+      .flatMap((t) => Object.values(t.segredos))
+      // Valores curtos ficam de fora: um score de crédito de três dígitos casa
+      // com qualquer sequência de um bundle minificado, e o vermelho falso
+      // ensinaria a equipe a ignorar este teste.
+      .filter((v) => v.length >= 8);
+    expect(identificaveis.length, 'a massa encolheu: o teste passaria por não ter o que procurar')
+      .toBeGreaterThan(20);
+    for (const valor of identificaveis) {
+      expect(bundle, `"${valor.slice(0, 4)}…" vazou para o artefato de produção`).not.toContain(valor);
+    }
+    // E as afordâncias que o RIPD §7.3 nomeia.
+    expect(bundle).not.toContain('forjar');
+    expect(bundle).not.toContain(SELO_DE_DEMONSTRACAO);
+    expect(bundle).not.toContain(SELO_DO_SELETOR_DE_PAPEL);
+    for (const nome of IDENTIDADES_DE_DEMONSTRACAO) expect(bundle, nome).not.toContain(nome);
+  });
+
+  it('o que ele carrega no lugar é a recusa, com o risco nomeado', () => {
+    const bundle = readdirSync(join(dist, 'assets'))
+      .filter((f) => f.endsWith('.js'))
+      .map((f) => readFileSync(join(dist, 'assets', f), 'utf8')).join('\n');
+    // Não é uma tela de erro: é a resposta correta quando não há identidade.
+    expect(bundle).toContain('Autenticação não configurada');
+    expect(bundle).toContain('Risco-037');
+  });
+
+  it('a catraca reprova o artefato de demonstração — nos dois sentidos', () => {
+    // O perfil de demonstração continua carregando as quatro coisas, de
+    // propósito. Se a catraca aprovasse os dois, ela não estaria olhando nada.
+    const demo = join(tmpdir(), 'lastro-dist-demo-teste');
+    rmSync(demo, { recursive: true, force: true });
+    execSync(`npx vite build --outDir ${demo}`, { stdio: 'pipe' });
+    const r = rodarCatraca(demo, resolve('../.privacy/pii-sintetica.yaml'));
+    expect(r.aprovado).toBe(false);
+    const riscos = new Set(r.achados.map((a) => a.risco));
+    expect([...riscos].sort()).toEqual(['Risco-035', 'Risco-037', 'Risco-040']);
+    rmSync(demo, { recursive: true, force: true });
+  }, 120_000);
+});
+
+describe('PR 24 · aceitação — o RIPD aponta para a catraca, não para prosa', () => {
+  const ripd = readFileSync('../docs/auditoria/RIPD.md', 'utf8');
+
+  it('cada premissa do §7.3 cita o comando que a cobra', () => {
+    const secao = ripd.slice(ripd.indexOf('### 7.3'), ripd.indexOf('### 7.4'));
+    for (const risco of ['Risco-035', 'Risco-036', 'Risco-037', 'Risco-040']) {
+      expect(secao, risco).toContain(risco);
+    }
+    // O que muda uma premissa de aceite em catraca é ela apontar para um
+    // comando que reprova, e não para uma frase que aconselha.
+    expect(secao).toContain('npm run catraca:producao');
+    expect(secao).toContain('npm run varredura:segredos');
+  });
+
+  it('o workflow roda a catraca, e nenhuma etapa tolera falha', () => {
+    const yml = readFileSync('../.github/workflows/privacy-ci-gate.yml', 'utf8');
+    expect(yml).not.toContain('continue-on-error');
+    expect(yml).toContain('npm run catraca:producao');
+  });
+
+  it('os scripts existem com o nome que o documento promete', () => {
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
+    expect(pkg.scripts['build:producao']).toContain('VITE_PERFIL=producao');
+    // A catraca constrói antes de varrer: varrer um artefato velho provaria o
+    // estado de ontem.
+    expect(pkg.scripts['catraca:producao']).toContain('build:producao');
+    expect(pkg.scripts['catraca:producao']).toContain('scripts/catraca.ts');
+  });
+
+  it('o artefato de produção não é o que o repositório versiona', () => {
+    // `dist-producao/` é saída de build; versioná-lo colocaria no repositório
+    // exatamente o que a catraca existe para manter fora dele.
+    expect(readFileSync('.gitignore', 'utf8')).toContain('dist-producao/');
   });
 });

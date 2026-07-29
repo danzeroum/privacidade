@@ -84,3 +84,15 @@ jobs:
       - name: Varredura de segredo estático
         run: npm run varredura:segredos
         working-directory: app
+
+      # RIPD §7.3 — as quatro premissas de aceite viram condição de build. O
+      # artefato de produção é gerado com `VITE_PERFIL=producao` e varrido: se
+      # encontrar modo demonstração, rota de forja, papel por botão ou PII
+      # sintética, reprova nomeando o risco, o arquivo e a linha.
+      #
+      # Nota deliberada: o artefato varrido aqui **não** é o que a demonstração
+      # publica. O perfil de demonstração continua carregando as quatro coisas,
+      # de propósito — é o que ele existe para mostrar.
+      - name: Catraca das premissas de aceite
+        run: npm run catraca:producao
+        working-directory: app

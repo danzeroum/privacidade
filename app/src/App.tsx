@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { HashRouter, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import './ui/estilos.css';
+import { EH_DEMONSTRACAO, SELO_DE_DEMONSTRACAO, SELO_DO_SELETOR_DE_PAPEL } from './lib/perfil';
 import { useSessao } from './store/sessao';
 import { PAPEIS, TELAS_BLOQUEADAS } from './mock/permissoes';
 import type { Papel } from './mock/types';
@@ -105,6 +106,10 @@ export function Casca() {
 
   return (
     <div className="app">
+      {/* Risco-035 — o selo do perfil vive dentro do invólucro que só a
+          demonstração renderiza. Achá-lo no artefato prova que o console de
+          demonstração foi publicado; não achá-lo prova que ele ficou de fora. */}
+      {EH_DEMONSTRACAO && <span hidden data-selo={SELO_DE_DEMONSTRACAO} />}
       <nav className="rail" aria-label="Telas">
         <div className="brand">
           <span className="brand-name">Lastro</span>
@@ -142,19 +147,31 @@ export function Casca() {
 
       <div>
         <header className="topbar">
-          <span className="topbar-label">Público</span>
-          <div className="seg">
-            {PAPEIS.map((p) => (
-              <button
-                key={p.id}
-                aria-pressed={papel === p.id}
-                title={p.resumo}
-                onClick={() => setPapel(p.id)}
-              >
-                {p.rotulo}
-              </button>
-            ))}
-          </div>
+          {/*
+            Risco-037 — o papel escolhido por botão é a afordância que o RIPD
+            §7.3 manda não existir em produção, e por isso o controle inteiro
+            vive atrás da constante de build. O selo viaja **dentro** dele: se o
+            controle chegar ao artefato, o selo chega junto, e é isso que a
+            catraca procura. Selo colado longe do que marca provaria apenas que
+            alguém escreveu uma string.
+          */}
+          {EH_DEMONSTRACAO && (
+            <>
+              <span className="topbar-label" data-selo={SELO_DO_SELETOR_DE_PAPEL}>Público</span>
+              <div className="seg">
+                {PAPEIS.map((p) => (
+                  <button
+                    key={p.id}
+                    aria-pressed={papel === p.id}
+                    title={p.resumo}
+                    onClick={() => setPapel(p.id)}
+                  >
+                    {p.rotulo}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
 
           <span className="topbar-label">Cenário</span>
           <select

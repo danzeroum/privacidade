@@ -200,14 +200,22 @@ Os riscos P1 002–015, embora não classificados como P0 isoladamente, compõem
 
 ### 7.3 Premissas de aceite (limitações de protótipo)
 
-Quatro riscos são limitações estruturais do protótipo — não defeitos a "corrigir", mas **condições que precisam deixar de ser verdade antes de qualquer produção**:
+Quatro riscos são limitações estruturais do protótipo — não defeitos a "corrigir", mas **condições que precisam deixar de ser verdade antes de qualquer produção**.
 
-| Risco | Limitação | Condição de não-produção |
-|---|---|---|
-| Risco-035 | `modoDemo=true` embarcado; rota de forja do trail viva | Nenhum build de produção pode conter a rota `/v1/audit/forjar` nem as afordâncias de ataque; amarrar a `import.meta.env` e testar o build |
-| Risco-036 | Feed ICS com credencial em query string e segredo no bundle | Reemitir como token opaco por papel, com expiração e revogação, assinado no servidor |
-| Risco-037 | Sem autenticação real (papel por botão) | OIDC real com MFA, claims de propósito revogáveis e sessão servidor antes de qualquer dado real |
-| Risco-040 | PII sintética no bundle do cliente | Nenhum dado (nem fictício) embarcado; mock atrás de fronteira de rede real |
+Até a série de remediação, esta seção era uma tabela: quatro frases dizendo o que não podia acontecer, e nenhuma delas impedindo que acontecesse. Uma tabela num documento não barra um deploy. A coluna da direita passou a apontar para o comando que reprova o build, com o risco, o arquivo e a linha na saída:
+
+| Risco | Limitação | Condição de não-produção | Cobrada por |
+|---|---|---|---|
+| Risco-035 | `modoDemo=true` embarcado; rota de forja do trail viva | Nenhum build de produção contém `/v1/audit/forjar` nem as afordâncias de ataque. `modoDemo` deriva de `import.meta.env` (`VITE_PERFIL`) e o bloco da rota é apagado em tempo de build | `npm run catraca:producao` — regras `aceite/modo-demonstracao` e `aceite/rota-de-forja` |
+| Risco-036 | Feed ICS com credencial em query string e segredo no bundle | **Fechado no PR 5:** token com papel e prazo no caminho, assinatura inteira, segredo gerado por instância — rotacioná-lo revoga os feeds emitidos | `npm run varredura:segredos` — literal de segredo no fonte e no artefato publicado |
+| Risco-037 | Sem autenticação real (papel por botão) | OIDC real com MFA, claims de propósito revogáveis e sessão servidor antes de qualquer dado real. Enquanto não existir, o perfil de produção **não embarca identidade**: carrega a recusa que diz o que falta | `npm run catraca:producao` — regras `aceite/papel-por-botao` e `aceite/sessao-sem-credencial` |
+| Risco-040 | PII sintética no bundle do cliente | Nenhum dado — nem fictício — embarcado. O console entra por `import()` dinâmico atrás da constante de build, e o perfil de produção não o alcança | `npm run catraca:producao` — regra `aceite/pii-sintetica-no-bundle`, com os valores lidos do inventário fechado `.privacy/pii-sintetica.yaml` |
+
+Três observações que a tabela não carrega:
+
+1. **O perfil de demonstração continua com as quatro condições verdadeiras, de propósito** — é o que ele existe para mostrar. A catraca é sobre o artefato de produção, e há teste que a exercita nos dois sentidos: ela reprova o artefato de demonstração e aprova o de produção. Uma catraca que aprovasse os dois não estaria olhando nada.
+2. **Artefato ausente ou vazio reprova.** Este repositório já pagou o preço de um controle que aprovava por não ter olhado (Risco-003: o gate varria um arquivo e imprimia "nenhum achado").
+3. **O Risco-037 não está fechado.** O que a catraca garante é que a identidade fabricada não chega a um artefato de produção — não que exista autenticação. Sem provedor de identidade real, o perfil de produção é uma recusa que se explica, e é assim que deve permanecer até haver OIDC de verdade.
 
 ### 7.4 Adendo pós-corte e prazo de reavaliação
 
