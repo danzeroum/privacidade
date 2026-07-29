@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PR-02 · RIPD e análise algorítmica — ciclo de vida do artefato "ripd".
+
+  Especificação de referência. O runtime que a executa é app/src/mock/estados.ts,
+  e o teste de conformidade (app/tests/regras.test.tsx) reprova o build quando
+  os dois divergem — em qualquer direção.
+
+  Cada <task> é um estado; cada <sequenceFlow> entre tasks é uma transição legal.
+  O que este arquivo NÃO diz, de propósito: o conteúdo que cada transição exige
+  (fundamento, dono, prazo). Isso é validação e vive em app/src/mock/api.ts —
+  misturar as duas produz 422 onde devia ser 409.
+-->
+<bpmn:definitions
+    xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    id="definicoes-ripd"
+    targetNamespace="https://lastro.exemplo/processos">
+  <bpmn:process id="ripd" name="PR-02 · RIPD e análise algorítmica" isExecutable="false">
+    <bpmn:documentation>A triagem bifurca: ou dispensa com justificativa e gatilho de reabertura, ou entra em elaboração. Vigente volta a em_revisao no aniversário ou por gatilho antecipado, e de lá retoma a elaboração.</bpmn:documentation>
+    <bpmn:startEvent id="inicio" name="RIPD e análise algorítmica aberto">
+      <bpmn:outgoing>flow-inicio</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:task id="triagem" name="triagem">
+      <bpmn:incoming>flow-inicio</bpmn:incoming>
+      <bpmn:outgoing>flow-triagem-dispensado</bpmn:outgoing>
+      <bpmn:outgoing>flow-triagem-elaboracao</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="dispensado" name="dispensado">
+      <bpmn:incoming>flow-triagem-dispensado</bpmn:incoming>
+      <bpmn:outgoing>flow-dispensado-elaboracao</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="elaboracao" name="elaboracao">
+      <bpmn:incoming>flow-triagem-elaboracao</bpmn:incoming>
+      <bpmn:incoming>flow-dispensado-elaboracao</bpmn:incoming>
+      <bpmn:incoming>flow-em_revisao-elaboracao</bpmn:incoming>
+      <bpmn:outgoing>flow-elaboracao-parecer_juridico</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="parecer_juridico" name="parecer juridico">
+      <bpmn:incoming>flow-elaboracao-parecer_juridico</bpmn:incoming>
+      <bpmn:outgoing>flow-parecer_juridico-deliberado</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="deliberado" name="deliberado">
+      <bpmn:incoming>flow-parecer_juridico-deliberado</bpmn:incoming>
+      <bpmn:outgoing>flow-deliberado-vigente</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="vigente" name="vigente">
+      <bpmn:incoming>flow-deliberado-vigente</bpmn:incoming>
+      <bpmn:outgoing>flow-vigente-em_revisao</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="em_revisao" name="em revisao">
+      <bpmn:incoming>flow-vigente-em_revisao</bpmn:incoming>
+      <bpmn:outgoing>flow-em_revisao-elaboracao</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:sequenceFlow id="flow-inicio" sourceRef="inicio" targetRef="triagem" />
+    <bpmn:sequenceFlow id="flow-triagem-dispensado" sourceRef="triagem" targetRef="dispensado" name="dispensar com justificativa e gatilho" />
+    <bpmn:sequenceFlow id="flow-triagem-elaboracao" sourceRef="triagem" targetRef="elaboracao" name="elaborar" />
+    <bpmn:sequenceFlow id="flow-dispensado-elaboracao" sourceRef="dispensado" targetRef="elaboracao" name="gatilho de reabertura disparou" />
+    <bpmn:sequenceFlow id="flow-elaboracao-parecer_juridico" sourceRef="elaboracao" targetRef="parecer_juridico" name="submeter ao jurídico" />
+    <bpmn:sequenceFlow id="flow-parecer_juridico-deliberado" sourceRef="parecer_juridico" targetRef="deliberado" name="deliberar" />
+    <bpmn:sequenceFlow id="flow-deliberado-vigente" sourceRef="deliberado" targetRef="vigente" name="colocar em vigência" />
+    <bpmn:sequenceFlow id="flow-vigente-em_revisao" sourceRef="vigente" targetRef="em_revisao" name="revisão anual ou gatilho antecipado" />
+    <bpmn:sequenceFlow id="flow-em_revisao-elaboracao" sourceRef="em_revisao" targetRef="elaboracao" name="retomar a elaboração" />
+  </bpmn:process>
+</bpmn:definitions>

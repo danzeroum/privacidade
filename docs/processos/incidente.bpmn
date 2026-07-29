@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PR-05 · Incidente de segurança (Art. 48) — ciclo de vida do artefato "incidente".
+
+  Especificação de referência. O runtime que a executa é app/src/mock/estados.ts,
+  e o teste de conformidade (app/tests/regras.test.tsx) reprova o build quando
+  os dois divergem — em qualquer direção.
+
+  Cada <task> é um estado; cada <sequenceFlow> entre tasks é uma transição legal.
+  O que este arquivo NÃO diz, de propósito: o conteúdo que cada transição exige
+  (fundamento, dono, prazo). Isso é validação e vive em app/src/mock/api.ts —
+  misturar as duas produz 422 onde devia ser 409.
+-->
+<bpmn:definitions
+    xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    id="definicoes-incidente"
+    targetNamespace="https://lastro.exemplo/processos">
+  <bpmn:process id="incidente" name="PR-05 · Incidente de segurança (Art. 48)" isExecutable="false">
+    <bpmn:documentation>Decidir exige fundamento registrado — inclusive para não comunicar. Comunicar antes de conter e apurar o escopo comunica o número errado.</bpmn:documentation>
+    <bpmn:startEvent id="inicio" name="Incidente de segurança (Art. 48) aberto">
+      <bpmn:outgoing>flow-inicio</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:task id="aberto" name="aberto">
+      <bpmn:incoming>flow-inicio</bpmn:incoming>
+      <bpmn:outgoing>flow-aberto-contido</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="contido" name="contido">
+      <bpmn:incoming>flow-aberto-contido</bpmn:incoming>
+      <bpmn:outgoing>flow-contido-decidido</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="decidido" name="decidido">
+      <bpmn:incoming>flow-contido-decidido</bpmn:incoming>
+      <bpmn:outgoing>flow-decidido-comunicado</bpmn:outgoing>
+      <bpmn:outgoing>flow-decidido-nao_comunicado</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="comunicado" name="comunicado">
+      <bpmn:incoming>flow-decidido-comunicado</bpmn:incoming>
+      <bpmn:outgoing>flow-comunicado-encerrado</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="nao_comunicado" name="nao comunicado">
+      <bpmn:incoming>flow-decidido-nao_comunicado</bpmn:incoming>
+      <bpmn:outgoing>flow-nao_comunicado-encerrado</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="encerrado" name="encerrado">
+      <bpmn:incoming>flow-comunicado-encerrado</bpmn:incoming>
+      <bpmn:incoming>flow-nao_comunicado-encerrado</bpmn:incoming>
+      <bpmn:outgoing>flow-encerrado-fim</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:endEvent id="fim-encerrado" name="encerrado">
+      <bpmn:incoming>flow-encerrado-fim</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="flow-inicio" sourceRef="inicio" targetRef="aberto" />
+    <bpmn:sequenceFlow id="flow-aberto-contido" sourceRef="aberto" targetRef="contido" name="conter" />
+    <bpmn:sequenceFlow id="flow-contido-decidido" sourceRef="contido" targetRef="decidido" name="decidir com fundamento" />
+    <bpmn:sequenceFlow id="flow-decidido-comunicado" sourceRef="decidido" targetRef="comunicado" name="comunicar" />
+    <bpmn:sequenceFlow id="flow-decidido-nao_comunicado" sourceRef="decidido" targetRef="nao_comunicado" name="registrar a não comunicação" />
+    <bpmn:sequenceFlow id="flow-comunicado-encerrado" sourceRef="comunicado" targetRef="encerrado" name="encerrar" />
+    <bpmn:sequenceFlow id="flow-nao_comunicado-encerrado" sourceRef="nao_comunicado" targetRef="encerrado" name="encerrar" />
+    <bpmn:sequenceFlow id="flow-encerrado-fim" sourceRef="encerrado" targetRef="fim-encerrado" />
+  </bpmn:process>
+</bpmn:definitions>

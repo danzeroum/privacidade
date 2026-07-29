@@ -7,6 +7,7 @@ import type { Papel } from './mock/types';
 import { CENARIOS } from './mock/scenarios';
 import { Modal, Nota } from './ui/primitivos';
 import T0 from './screens/T0';
+import ComoFunciona from './screens/ComoFunciona';
 import T1 from './screens/T1';
 import T10 from './screens/T10';
 import T2 from './screens/T2';
@@ -118,6 +119,14 @@ export function Casca() {
           </div>
         ))}
 
+        {/* PR 12 — "Como funciona" fica fora do trilho de propósito: não é tela
+            de operação, não lê o banco e não tem controle. Entrar em `TELAS`
+            faria dela a décima segunda tela de trabalho, que é o contrário do
+            que o MAPA §5 pede. */}
+        <NavLink to="/como-funciona" className={({ isActive }) => `rail-ref ${isActive ? 'ativo' : ''}`}>
+          Como funciona →
+        </NavLink>
+
         <div className="rail-foot">
           Protótipo navegável · {banco.cenario.nome}<br />
           Dados de demonstração — nenhum titular real.
@@ -212,6 +221,7 @@ export function Casca() {
               <Route path="/t8" element={<T8 />} />
               <Route path="/t9" element={<T9 />} />
               <Route path="/t10" element={<T10 />} />
+              <Route path="/como-funciona" element={<ComoFunciona />} />
               <Route path="*" element={<Navigate to="/t0" replace />} />
             </Routes>
           )}

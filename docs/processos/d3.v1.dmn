@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  D3@1 — O RIPD é obrigatório? A análise algorítmica é exigida?
+
+  Especificação de referência. O runtime que a executa é app/src/mock/decisoes.ts,
+  e o teste de conformidade varre todas as combinações de entrada exigindo a
+  mesma saída. Divergência é build vermelho.
+
+  Vigência declarada: a partir de 2025-09-01.
+  Primeira publicação: unifica os gatilhos da triagem do CI com os do cenário.
+
+  O que este arquivo NÃO diz: entrada ausente cai no cenário mais restritivo.
+  Isso é contrato de aplicar(), em volta da tabela, e não linha da tabela — a
+  tabela recebe entradas já preenchidas.
+-->
+<definitions
+    xmlns="https://www.omg.org/spec/DMN/20211108/MODEL/"
+    xmlns:dmndi="https://www.omg.org/spec/DMN/20230324/DMNDI/"
+    id="definicoes-d3-v1"
+    name="D3 versao 1"
+    namespace="https://lastro.exemplo/decisoes">
+  <decision id="d3" name="O RIPD é obrigatório? A análise algorítmica é exigida?">
+    <decisionTable id="tabela-d3-v1" hitPolicy="FIRST">
+      <input id="entrada-gatilhos" label="gatilhos">
+        <inputExpression id="expr-gatilhos" typeRef="Any"><text>gatilhos</text></inputExpression>
+      </input>
+      <input id="entrada-gatilhosCriticos" label="gatilhosCriticos">
+        <inputExpression id="expr-gatilhosCriticos" typeRef="number"><text>gatilhosCriticos</text></inputExpression>
+      </input>
+      <input id="entrada-gatilhosTotal" label="gatilhosTotal">
+        <inputExpression id="expr-gatilhosTotal" typeRef="number"><text>gatilhosTotal</text></inputExpression>
+      </input>
+      <output id="saida-ripd" label="ripd" name="ripd" typeRef="string" />
+      <output id="saida-analiseAlgoritmica" label="analiseAlgoritmica" name="analiseAlgoritmica" typeRef="string" />
+      <rule id="regra-1">
+        <inputEntry id="i-0-gatilhos"><text>list contains(?, "T3")</text></inputEntry>
+        <inputEntry id="i-0-gatilhosCriticos"><text>-</text></inputEntry>
+        <inputEntry id="i-0-gatilhosTotal"><text>-</text></inputEntry>
+        <outputEntry id="o-0-ripd"><text>"obrigatorio"</text></outputEntry>
+        <outputEntry id="o-0-analiseAlgoritmica"><text>true</text></outputEntry>
+      </rule>
+      <rule id="regra-2">
+        <inputEntry id="i-1-gatilhos"><text>-</text></inputEntry>
+        <inputEntry id="i-1-gatilhosCriticos"><text>&gt;= 1</text></inputEntry>
+        <inputEntry id="i-1-gatilhosTotal"><text>-</text></inputEntry>
+        <outputEntry id="o-1-ripd"><text>"obrigatorio"</text></outputEntry>
+        <outputEntry id="o-1-analiseAlgoritmica"><text>false</text></outputEntry>
+      </rule>
+      <rule id="regra-3">
+        <inputEntry id="i-2-gatilhos"><text>-</text></inputEntry>
+        <inputEntry id="i-2-gatilhosCriticos"><text>-</text></inputEntry>
+        <inputEntry id="i-2-gatilhosTotal"><text>&gt;= 2</text></inputEntry>
+        <outputEntry id="o-2-ripd"><text>"obrigatorio"</text></outputEntry>
+        <outputEntry id="o-2-analiseAlgoritmica"><text>false</text></outputEntry>
+      </rule>
+      <rule id="regra-4">
+        <inputEntry id="i-3-gatilhos"><text>-</text></inputEntry>
+        <inputEntry id="i-3-gatilhosCriticos"><text>-</text></inputEntry>
+        <inputEntry id="i-3-gatilhosTotal"><text>&lt;= 1</text></inputEntry>
+        <outputEntry id="o-3-ripd"><text>"dispensavel_com_justificativa"</text></outputEntry>
+        <outputEntry id="o-3-analiseAlgoritmica"><text>false</text></outputEntry>
+      </rule>
+      <rule id="regra-5">
+        <inputEntry id="i-4-gatilhos"><text>-</text></inputEntry>
+        <inputEntry id="i-4-gatilhosCriticos"><text>-</text></inputEntry>
+        <inputEntry id="i-4-gatilhosTotal"><text>-</text></inputEntry>
+        <outputEntry id="o-4-ripd"><text>"obrigatorio"</text></outputEntry>
+        <outputEntry id="o-4-analiseAlgoritmica"><text>true</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+</definitions>
