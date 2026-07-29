@@ -214,6 +214,46 @@ SELECT id,'dec_9f21c7','credit-scoring v2.3.1', false,
        '{"top_features":[{"feature":"tempo_emprego","impacto":-0.34},{"feature":"score_serasa","impacto":-0.21},{"feature":"renda","impacto":0.12}]}'
 FROM solicitacao_titular WHERE protocolo = '2026-0729';
 
+-- ---------- consentimento como entidade -------------------------------------
+-- Texto versionado, aceites por titular e uma revogação. O agregado
+-- (`titulares: number`) não existe mais: a contagem sai daqui, somada.
+INSERT INTO consentimento_texto (id, tenant_id, campo_id, versao, texto, texto_hash, validade, validade_fonte, publicado_em) VALUES
+ ('cc000000-0000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','77777777-7777-4777-8777-000000000007','v2',
+  'Autorizo o uso da minha imagem facial para verificacao de identidade na abertura de conta.',
+  '9a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b','P1Y',NULL, current_date - 400),
+ ('cc000000-0000-4000-8000-000000000002','11111111-1111-4111-8111-111111111111','77777777-7777-4777-8777-000000000007','v3',
+  'Autorizo o uso da minha imagem facial para prova de vida, com descarte em 30 dias.',
+  '1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c','P1Y',NULL, current_date - 120),
+ ('cc000000-0000-4000-8000-000000000003','11111111-1111-4111-8111-111111111111','77777777-7777-4777-8777-000000000006','v1',
+  'Aceito receber comunicacoes transacionais por e-mail enquanto eu for cliente.',
+  '3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d','indeterminado',
+  'Adesao ao servico, revogavel a qualquer tempo (Art. 8, par. 5)', current_date - 200);
+
+-- Três aceites: um ativo, um já vencido (aceitou o texto antigo há mais de um
+-- ano) e um que será revogado logo abaixo.
+INSERT INTO consentimento (id, tenant_id, titular_pseudonimo, texto_id, canal, coletado_em, prova_hash, validade) VALUES
+ ('cd000000-0000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','hmac:9f4c…a71b',
+  'cc000000-0000-4000-8000-000000000002','app', current_date - 30,'prova:9f4c','P1Y'),
+ ('cd000000-0000-4000-8000-000000000002','11111111-1111-4111-8111-111111111111','hmac:3b81…cc02',
+  'cc000000-0000-4000-8000-000000000001','app', current_date - 400,'prova:3b81','P1Y'),
+ ('cd000000-0000-4000-8000-000000000003','11111111-1111-4111-8111-111111111111','hmac:d20e…8f13',
+  'cc000000-0000-4000-8000-000000000003','web', current_date - 150,'prova:d20e','indeterminado');
+
+-- Revogar é fato novo: o aceite acima continua ali, legível.
+INSERT INTO consentimento_revogacao (id, consentimento_id, revogado_em, canal, motivo) VALUES
+ ('ce000000-0000-4000-8000-000000000001','cd000000-0000-4000-8000-000000000003',
+  now() - INTERVAL '26 hours','portal','Nao quero mais receber nada por e-mail.');
+
+-- A cascata: cessação confirmada, expurgo pendente há 26 h — acima do limite de
+-- 24 h, e portanto matéria de achado.
+INSERT INTO revogacao_propagacao (revogacao_id, alvo, tipo, efeito, estado, iniciada_em, confirmada_em) VALUES
+ ('ce000000-0000-4000-8000-000000000001','Onboarding e cadastro','cessacao',
+  'Comunicacao transacional para este titular para imediatamente.','propagado',
+  now() - INTERVAL '26 hours', now() - INTERVAL '26 hours'),
+ ('ce000000-0000-4000-8000-000000000001','Eliminacao do que ja foi coletado','expurgo',
+  'Os registros ja coletados entram no proximo expurgo, com prova de execucao.','pendente',
+  now() - INTERVAL '26 hours', NULL);
+
 -- ---------- expurgo ---------------------------------------------------------
 -- `registros_total` saiu da tabela: o total vem de gov.expurgo_run_resumo,
 -- somando os lotes. Contador diverge do que foi contado; soma, não.

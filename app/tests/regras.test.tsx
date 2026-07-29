@@ -6,6 +6,12 @@ import { tmpdir } from 'os';
 import { render, screen, fireEvent, act, cleanup, within } from '@testing-library/react';
 import { BancoMock, FalhaDeAuditoria } from '../src/mock/db';
 import { varrerVencimentos } from '../src/mock/expurgo';
+import {
+  estadoDe, expiraEm, motivoDaCessacao, temProvaVersionada, titularesAtivos, validadeJustificada,
+} from '../src/mock/consentimento';
+import type {
+  Consentimento as ConsentimentoEntidade, TextoDeConsentimento,
+} from '../src/mock/consentimento';
 import { CENARIOS } from '../src/mock/scenarios';
 import { request } from '../src/mock/api';
 import { ACOES, pode } from '../src/mock/permissoes';
@@ -5818,5 +5824,76 @@ describe('PR 18 · T6 na tela — os três estados do desenho, e o quarto que el
     useSessao.setState({ papel: 'produto', banco: new BancoMock('banco'), versao: 0, avisos: [], recusas: {} });
     render(<MemoryRouter><T6 /></MemoryRouter>);
     expect(screen.queryByRole('button', { name: /executar expurgo do dia/i })).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 19 · consentimento como entidade (Risco-002)
+//
+// A entidade e a imutabilidade do aceite primeiro, como no PR do ciclo de vida:
+// o que decide o desenho é a regra de que revogar cria fato novo, e ela precisa
+// existir antes de haver tabela para violá-la.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('PR 19 · unidade — o estado é derivado dos fatos, nos limites', () => {
+  const texto = (validade: string): TextoDeConsentimento => ({
+    id: 't1', campoId: 'v-tel', versao: 'v2', texto: 'Aceito receber SMS.',
+    hash: 'abc', publicadoEm: '2026-01-01', validade, vigente: true,
+  });
+  const aceite = (coletadoEm: string): ConsentimentoEntidade => ({
+    id: 'c1', titularId: 'tX', textoId: 't1', canal: 'checkout web',
+    coletadoEm, provaHash: 'def',
+  });
+
+  it('expira hoje ainda vale; expirou ontem, não', () => {
+    // O prazo é o último dia, não a véspera dele. Um dia de diferença aqui é um
+    // dia de tratamento sem base legal — ou um dia de serviço negado sem razão.
+    const t = texto('P2Y');
+    expect(estadoDe(t, aceite('2024-07-29'), undefined, '2026-07-29')).toBe('ativo');
+    expect(estadoDe(t, aceite('2024-07-29'), undefined, '2026-07-30')).toBe('expirado');
+    expect(estadoDe(t, aceite('2024-07-29'), undefined, '2026-07-28')).toBe('ativo');
+  });
+
+  it('revogado precede expirado — o ato do titular não some porque o relógio correu', () => {
+    const t = texto('P2Y');
+    const revogacao = { id: 'r1', consentimentoId: 'c1', revogadoEmMs: Date.parse('2024-08-01'), canal: 'portal' };
+    expect(estadoDe(t, aceite('2024-07-29'), revogacao, '2027-01-01')).toBe('revogado');
+  });
+
+  it('validade indeterminada não expira — e exige justificativa, como no ROPA', () => {
+    const t = texto('indeterminado');
+    expect(expiraEm(t, aceite('2019-01-01'))).toBeNull();
+    expect(estadoDe(t, aceite('2019-01-01'), undefined, '2026-07-29')).toBe('ativo');
+    expect(validadeJustificada(t)).toBe(false);
+    expect(validadeJustificada({ ...t, validadeFonte: 'Adesão ao programa, revogável a qualquer tempo' })).toBe(true);
+    expect(validadeJustificada(texto('P2Y'))).toBe(true);
+  });
+
+  it('o motivo distingue revogado de expirado, com a mesma consequência', () => {
+    expect(motivoDaCessacao('revogado', 'telefone', null)).toContain('retirou a autorização');
+    const expirado = motivoDaCessacao('expirado', 'telefone', '2026-07-28');
+    expect(expirado).toContain('expirou');
+    expect(expirado).toContain('2026-07-28');
+    expect(expirado).not.toContain('retirou');
+  });
+
+  it('a contagem de titulares é somada da entidade, nunca um campo', () => {
+    const t = texto('P2Y');
+    const cs = [aceite('2025-01-01'), { ...aceite('2025-01-01'), id: 'c2', titularId: 'tY' },
+      { ...aceite('2019-01-01'), id: 'c3', titularId: 'tZ' }];
+    const revs = [{ id: 'r1', consentimentoId: 'c2', revogadoEmMs: 0, canal: 'portal' }];
+    // tX ativo, tY revogado, tZ expirado → 1.
+    expect(titularesAtivos([t], cs, revs, 'v-tel', '2026-07-29')).toBe(1);
+    // E o tipo não tem por onde guardar um contador.
+    expect(Object.keys(t)).not.toContain('titulares');
+  });
+
+  it('prova versionada é sobre o texto publicado, não sobre quantos aceitaram', () => {
+    const t = texto('P2Y');
+    expect(temProvaVersionada([t], 'v-tel')).toBe(true);
+    expect(temProvaVersionada([t], 'v-email')).toBe(false);
+    // Campo cujo último titular revogou continua no ROPA: o tratamento dos
+    // demais é que cessou, e a base legal do campo não depende de contagem.
+    expect(temProvaVersionada([{ ...t, vigente: false }], 'v-tel')).toBe(false);
   });
 });

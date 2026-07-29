@@ -793,6 +793,151 @@ LEFT JOIN expurgo_entrada e ON e.expurgo_run_id = r.id
 GROUP BY r.id;
 
 -- ---------------------------------------------------------------------
+-- 8b. Consentimento como entidade                          [Portal, telas 08-10]
+--
+-- Não havia tabela: consentimento era valor de enum e um contador
+-- (`titulares: number`) na camada de demonstração. Assim não se responde às
+-- duas perguntas que o Art. 8º faz — *esta pessoa consentiu?* e *com qual
+-- texto?* — nem se executa a revogação individual do Art. 18, VIII, porque
+-- revogar mudava o registro do campo inteiro.
+--
+-- São três fatos com donos distintos, e por isso três tabelas. A terceira é a
+-- que custa: revogar **cria fato novo** e nunca edita o aceite. Se apagasse, a
+-- organização perderia justamente a prova de que houve consentimento enquanto
+-- houve tratamento — que é o que o Art. 8º, §2º cobra, inclusive depois.
+-- ---------------------------------------------------------------------
+
+CREATE TABLE consentimento_texto (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id      UUID NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
+  campo_id       UUID NOT NULL REFERENCES campo(id) ON DELETE CASCADE,
+  versao         TEXT NOT NULL,
+  texto          TEXT NOT NULL CHECK (length(btrim(texto)) > 0),
+  texto_hash     TEXT NOT NULL,
+  -- Quanto o aceite vale, no mesmo domínio do ciclo de vida. `indeterminado` é
+  -- legítimo aqui — há consentimento sem prazo —, e exige a mesma justificativa
+  -- que o ROPA exige: prazo sem fim por omissão é o que faz um aceite de 2019
+  -- sustentar um tratamento de hoje.
+  validade       retencao NOT NULL,
+  validade_fonte TEXT,
+  publicado_em   DATE NOT NULL DEFAULT current_date,
+  UNIQUE (campo_id, versao),
+  CONSTRAINT texto_indeterminado_exige_fonte CHECK (
+    validade <> 'indeterminado' OR validade_fonte IS NOT NULL
+  )
+);
+
+-- Vigente é **derivado**, não um campo que alguém desliga: é a última versão
+-- publicada do campo. Coluna `vigente` exigiria UPDATE numa tabela que não pode
+-- ser editada, e a saída seria abrir a exceção justamente onde ela não cabe.
+CREATE VIEW gov.consentimento_texto_vigente AS
+SELECT DISTINCT ON (campo_id) *
+FROM consentimento_texto
+ORDER BY campo_id, publicado_em DESC, versao DESC;
+
+CREATE TABLE consentimento (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id          UUID NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
+  -- O titular do produto, pseudonimizado — a plataforma não hospeda o cadastro.
+  titular_pseudonimo TEXT NOT NULL,
+  texto_id           UUID NOT NULL REFERENCES consentimento_texto(id) ON DELETE RESTRICT,
+  canal              TEXT NOT NULL CHECK (canal IN ('app','web','checkout','presencial','telefone')),
+  coletado_em        DATE NOT NULL,
+  prova_hash         TEXT NOT NULL,
+  /*
+   * `validade` é copiada do texto no instante do aceite, de propósito.
+   *
+   * Denormalização deliberada, e não descuido: publicar uma versão nova do
+   * texto com prazo maior **não pode** estender em silêncio os aceites já
+   * dados. O que vale é o prazo que estava em vigor quando a pessoa disse sim —
+   * e congelá-lo aqui é o que permite `expira_em` ser coluna gerada.
+   */
+  validade           retencao NOT NULL,
+  expira_em          DATE GENERATED ALWAYS AS (gov.retencao_ate(validade, coletado_em)) STORED,
+  UNIQUE (tenant_id, titular_pseudonimo, texto_id)
+);
+
+CREATE INDEX consentimento_texto_idx   ON consentimento (texto_id);
+CREATE INDEX consentimento_expira_idx  ON consentimento (expira_em) WHERE expira_em IS NOT NULL;
+
+-- O aceite copia o prazo que estava valendo. Divergir dele é erro de escrita,
+-- não uma escolha do chamador.
+CREATE OR REPLACE FUNCTION consentimento_congela_validade() RETURNS TRIGGER AS $$
+DECLARE v_validade TEXT;
+BEGIN
+  SELECT validade INTO v_validade FROM consentimento_texto WHERE id = NEW.texto_id;
+  IF NEW.validade IS DISTINCT FROM v_validade THEN
+    RAISE EXCEPTION 'consentimento: a validade (%) precisa ser a do texto aceito (%).',
+      NEW.validade, v_validade;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER consentimento_valida_prazo
+  BEFORE INSERT ON consentimento
+  FOR EACH ROW EXECUTE FUNCTION consentimento_congela_validade();
+
+-- Revogar cria fato novo. O UNIQUE é o que impede revogar duas vezes; o
+-- ON DELETE RESTRICT é o que impede o aceite sumir por baixo da revogação.
+CREATE TABLE consentimento_revogacao (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  consentimento_id UUID NOT NULL UNIQUE REFERENCES consentimento(id) ON DELETE RESTRICT,
+  revogado_em      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  canal            TEXT NOT NULL,
+  motivo           TEXT,
+  /*
+   * O expurgo do que já foi coletado nasce daqui, com a data derivada do marco
+   * de revogação — o `fato_gerador` que o ciclo de vida declarou e que até
+   * agora não tinha quem o usasse. Trinta dias de carência: o tempo de propagar
+   * a cascata antes de eliminar, senão a prova de execução chega depois de o
+   * dado sumir.
+   */
+  retencao         retencao NOT NULL DEFAULT 'consentimento_revogado',
+  retencao_ate     DATE GENERATED ALWAYS AS (
+                     gov.retencao_ate(retencao, (revogado_em AT TIME ZONE 'UTC')::DATE)
+                   ) STORED,
+  CONSTRAINT revogacao_tem_prazo_de_expurgo CHECK (retencao_ate IS NOT NULL)
+);
+
+CREATE INDEX revogacao_expurgo_idx ON consentimento_revogacao (retencao_ate);
+
+-- A cascata, persistida. No estágio atual nascem duas frentes: a cessação onde
+-- o dado mora e o expurgo do que já foi coletado. A notificação de quem
+-- recebeu ganha alvo de verdade quando fornecedor virar entidade — hoje ela
+-- aponta para um nome em texto livre, e um nome não tem DPA nem SLA.
+CREATE TABLE revogacao_propagacao (
+  id             BIGSERIAL PRIMARY KEY,
+  revogacao_id   UUID NOT NULL REFERENCES consentimento_revogacao(id) ON DELETE CASCADE,
+  alvo           TEXT NOT NULL,
+  tipo           TEXT NOT NULL CHECK (tipo IN ('cessacao','notificacao','expurgo')),
+  efeito         TEXT NOT NULL,
+  estado         TEXT NOT NULL DEFAULT 'pendente' CHECK (estado IN ('propagado','pendente')),
+  iniciada_em    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  confirmada_em  TIMESTAMPTZ,
+  UNIQUE (revogacao_id, alvo, tipo),
+  CONSTRAINT propagado_tem_confirmacao CHECK (estado <> 'propagado' OR confirmada_em IS NOT NULL)
+);
+
+CREATE INDEX propagacao_pendente_idx ON revogacao_propagacao (iniciada_em)
+  WHERE estado = 'pendente';
+
+-- O estado vigente de cada aceite, derivado. Revogado precede expirado: o ato
+-- do titular não some porque o relógio também correu.
+CREATE VIEW gov.consentimento_estado AS
+SELECT c.id, c.tenant_id, c.titular_pseudonimo, c.canal, c.coletado_em, c.expira_em,
+       t.campo_id, t.versao, t.texto, t.texto_hash,
+       r.id AS revogacao_id, r.revogado_em, r.retencao_ate AS expurgo_ate,
+       CASE
+         WHEN r.id IS NOT NULL THEN 'revogado'
+         WHEN c.expira_em IS NOT NULL AND c.expira_em < current_date THEN 'expirado'
+         ELSE 'ativo'
+       END AS estado
+FROM consentimento c
+JOIN consentimento_texto t ON t.id = c.texto_id
+LEFT JOIN consentimento_revogacao r ON r.consentimento_id = c.id;
+
+-- ---------------------------------------------------------------------
 -- 9b. Achado de auditoria                                           [Tela T11]
 --
 -- O achado existia na interface e na máquina de estados do protótipo, e em
@@ -1133,6 +1278,17 @@ CREATE TRIGGER risco_reclassificacao_imutavel
 
 CREATE TRIGGER linhagem_imutavel
   BEFORE UPDATE OR DELETE ON linhagem
+  FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
+
+-- Append-only nos dois fatos que provam: o aceite e o texto aceito. Ficam aqui,
+-- e não junto das tabelas, porque `bloqueia_mutacao()` só existe a partir desta
+-- seção — e um schema que só aplica na ordem certa é um schema que aplica.
+CREATE TRIGGER consentimento_imutavel
+  BEFORE UPDATE OR DELETE ON consentimento
+  FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
+
+CREATE TRIGGER consentimento_texto_imutavel
+  BEFORE UPDATE OR DELETE ON consentimento_texto
   FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
 
 -- Botão "Verificar integridade" da T6 chama esta função.
