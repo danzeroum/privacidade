@@ -7,6 +7,11 @@ import { render, screen, fireEvent, act, cleanup, within } from '@testing-librar
 import { BancoMock, FalhaDeAuditoria } from '../src/mock/db';
 import { varrerPropagacoes, varrerVencimentos } from '../src/mock/expurgo';
 import {
+  codigoDoAchadoDeDpa, criticidadeDoDpa, dpaVigente, estadoDoDpa, motivoDaRecusaDeTransferencia,
+  varrerDpas,
+} from '../src/mock/fornecedor';
+import type { Fornecedor } from '../src/mock/fornecedor';
+import {
   estadoDe, expiraEm, motivoDaCessacao, temProvaVersionada, titularesAtivos, validadeJustificada,
 } from '../src/mock/consentimento';
 import type {
@@ -6196,5 +6201,207 @@ describe('PR 20 · sistema — a cascata pendente é vigiada, não só exibida',
     });
     expect(p.body.alerta).toBe(true);
     expect(varejo.cenario.achados.some((a) => a.codigo.startsWith('PROP-'))).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 21 · fornecedor como entidade, DPA no banco (Risco-008)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('PR 21 · unidade — a vigência do DPA, na fronteira de um dia', () => {
+  const f = (extra: Partial<Fornecedor> = {}): Fornecedor => ({
+    id: 'f1', slug: 'sendgrid', nome: 'SendGrid', papel: 'operador', pais: 'EUA',
+    dpaAssinado: true, dpaExpiraEm: '2026-09-30', ...extra,
+  });
+
+  it('vence hoje ainda vale; venceu ontem, não', () => {
+    // O contrato cobre o último dia, não a véspera dele. Um dia de diferença
+    // aqui é um dia de transferência sem base contratual — ou um dia de
+    // integração derrubada sem razão.
+    expect(estadoDoDpa(f(), '2026-09-30')).toBe('vigente');
+    expect(estadoDoDpa(f(), '2026-10-01')).toBe('vencido');
+    expect(estadoDoDpa(f(), '2026-09-29')).toBe('vigente');
+  });
+
+  it('sem assinatura nunca vale — nem com prazo no futuro', () => {
+    expect(estadoDoDpa(f({ dpaAssinado: false, dpaExpiraEm: '2099-01-01' }), '2026-07-29'))
+      .toBe('nao_assinado');
+    expect(dpaVigente(f({ dpaAssinado: false, dpaExpiraEm: '2099-01-01' }), '2026-07-29')).toBe(false);
+  });
+
+  it('evidência anexada não é contrato firmado', () => {
+    const comPdf = f({ dpaAssinado: false, dpaUri: 'dpa/meta-scc.pdf', dpaExpiraEm: undefined });
+    expect(estadoDoDpa(comPdf, '2026-07-29')).toBe('nao_assinado');
+    // E a recusa diz isso, porque é a confusão que produz conformidade de papel.
+    expect(motivoDaRecusaDeTransferencia(comPdf, '2026-07-29')).toContain('evidência não é contrato');
+  });
+
+  it('assinado sem prazo não é vigente: contrato sem vencimento não se vigia', () => {
+    expect(estadoDoDpa(f({ dpaExpiraEm: undefined }), '2026-07-29')).toBe('sem_prazo');
+  });
+
+  it('a recusa carrega a data quando ela existe', () => {
+    const vencido = motivoDaRecusaDeTransferencia(f({ dpaExpiraEm: '2026-01-31' }), '2026-07-29');
+    expect(vencido).toContain('2026-01-31');
+    expect(motivoDaRecusaDeTransferencia(f(), '2026-09-30')).toBeNull();
+  });
+
+  it('sem contrato é crítico desde o primeiro dia; vencido escala com o tempo', () => {
+    expect(criticidadeDoDpa('vigente', 0)).toBeNull();
+    expect(criticidadeDoDpa('nao_assinado', 0)).toBe('critica');
+    expect(criticidadeDoDpa('vencido', 1)).toBe('baixa');
+    expect(criticidadeDoDpa('vencido', 7)).toBe('media');
+    expect(criticidadeDoDpa('vencido', 30)).toBe('alta');
+    expect(criticidadeDoDpa('vencido', 90)).toBe('critica');
+  });
+
+  it('o código do achado é determinístico e legível', () => {
+    expect(codigoDoAchadoDeDpa('meta-ads')).toBe('DPA-META_ADS');
+    expect(codigoDoAchadoDeDpa('transportadora norte')).toBe('DPA-TRANSPORTADORA_NORTE');
+  });
+});
+
+describe('PR 21 · integração — a varredura pega o que o trigger não alcança', () => {
+  let varejo: BancoMock;
+  const HOJE = () => new Date().toISOString().slice(0, 10);
+  const emDias = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+
+  beforeEach(() => { varejo = new BancoMock('varejo'); });
+
+  it('os cinco sem contrato aparecem como o que são, e abrem achado', () => {
+    // Modelar a ausência, e não inventar contrato: Meta Ads, Transportadora
+    // Norte e Zenvia recebem dado e não têm DPA assinado.
+    const semDpa = varejo.cenario.fornecedores.filter((f) => !f.dpaAssinado);
+    expect(semDpa).toHaveLength(3);
+
+    const abertos = varrerDpas(varejo, HOJE());
+    expect(abertos).toHaveLength(3);
+    expect(abertos.map((a) => a.codigo).sort())
+      .toEqual(['DPA-META_ADS', 'DPA-TRANSPORTADORA_NORTE', 'DPA-ZENVIA']);
+    // Sem contrato é crítico desde o primeiro dia: não há prazo correndo.
+    expect(abertos.every((a) => a.criticidade === 'critica')).toBe(true);
+  });
+
+  it('evidência anexada não salva ninguém: Meta Ads tem PDF e segue em achado', () => {
+    const meta = varejo.cenario.fornecedores.find((f) => f.slug === 'meta-ads')!;
+    expect(meta.dpaUri).toBeTruthy();
+    expect(meta.dpaAssinado).toBe(false);
+    const achado = varrerDpas(varejo, HOJE()).find((a) => a.codigo === 'DPA-META_ADS')!;
+    expect(achado.descricao).toContain('não é contrato');
+  });
+
+  it('a segunda varredura no mesmo vencimento continua sendo um achado só', () => {
+    varrerDpas(varejo, HOJE());
+    const antes = varejo.cenario.achados.filter((a) => a.codigo.startsWith('DPA-')).length;
+    varrerDpas(varejo, HOJE());
+    expect(varejo.cenario.achados.filter((a) => a.codigo.startsWith('DPA-'))).toHaveLength(antes);
+  });
+
+  it('renovar o DPA encerra o achado — com a data como evidência, não apagando', () => {
+    varrerDpas(varejo, HOJE());
+    const zenvia = varejo.cenario.fornecedores.find((f) => f.slug === 'zenvia')!;
+    zenvia.dpaAssinado = true;
+    zenvia.dpaExpiraEm = emDias(365);
+
+    const tocados = varrerDpas(varejo, HOJE());
+    const achado = tocados.find((a) => a.codigo === 'DPA-ZENVIA')!;
+    expect(achado.status).toBe('encerrado');
+    expect(achado.eficaciaAtingida).toBe(true);
+    // O achado não some: a prova de que houve período sem contrato é o que uma
+    // auditoria procura depois.
+    expect(varejo.cenario.achados.some((a) => a.codigo === 'DPA-ZENVIA')).toBe(true);
+    expect(achado.evidencias.at(-1)!.arquivo).toContain('dpa-renovado');
+    expect(achado.evidencias.at(-1)!.hash).toBeTruthy();
+  });
+
+  it('o contrato que vence DEPOIS da escrita: a varredura pega, e reabre se já fechara', () => {
+    const banco2 = new BancoMock('banco');
+    // SendGrid vence em 2026-09-30 — data do próprio cenário, nada forjado.
+    const sendgrid = banco2.cenario.fornecedores.find((f) => f.slug === 'sendgrid')!;
+    expect(sendgrid.dpaExpiraEm).toBe('2026-09-30');
+
+    // Antes do vencimento: nada a apontar.
+    expect(varrerDpas(banco2, '2026-09-30')).toEqual([]);
+    // No dia seguinte, a mesma transferência gravada vira achado.
+    const depois = varrerDpas(banco2, '2026-10-01');
+    expect(depois.map((a) => a.codigo)).toContain('DPA-SENDGRID');
+    expect(depois.find((a) => a.codigo === 'DPA-SENDGRID')!.criticidade).toBe('baixa');
+    // Noventa dias depois, o mesmo achado escala.
+    expect(varrerDpas(banco2, '2026-12-31').find((a) => a.codigo === 'DPA-SENDGRID')!.criticidade)
+      .toBe('critica');
+
+    // Renovado e depois irregular de novo: reabre e conta reincidência.
+    sendgrid.dpaExpiraEm = '2027-12-31';
+    expect(varrerDpas(banco2, '2026-12-31').find((a) => a.codigo === 'DPA-SENDGRID')!.status)
+      .toBe('encerrado');
+    sendgrid.dpaAssinado = false;
+    const reaberto = varrerDpas(banco2, '2026-12-31').find((a) => a.codigo === 'DPA-SENDGRID')!;
+    expect(reaberto.status).toBe('reaberto');
+    expect(reaberto.reincidencias).toBe(1);
+  });
+
+  it('parceiro cadastrado e sem uso não é achado — é cadastro', () => {
+    varejo.cenario.fornecedores.push({
+      id: 'fo-novo', slug: 'novo', nome: 'Parceiro Novo', papel: 'operador', dpaAssinado: false,
+    });
+    const abertos = varrerDpas(varejo, HOJE());
+    expect(abertos.map((a) => a.codigo)).not.toContain('DPA-NOVO');
+  });
+});
+
+describe('PR 21 · sistema — a entidade chega às telas e à cascata', () => {
+  it('a T2 mostra o contrato de cada parceiro, e nomeia o que não tem', () => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'dpo', banco: new BancoMock('varejo'), versao: 0, avisos: [], recusas: {} });
+    render(<MemoryRouter><T2 /></MemoryRouter>);
+    expect(screen.getByText('Fornecedores e contratos')).toBeInTheDocument();
+    expect(screen.getAllByText('sem DPA assinado').length).toBe(3);
+    expect(screen.getByText(/evidência não é contrato firmado/)).toBeInTheDocument();
+  });
+
+  it('a cascata da revogação notifica por entidade, e diz quando o parceiro não tem DPA', () => {
+    const varejo = new BancoMock('varejo');
+    const { token } = sessaoDoPortal(varejo, 'revogacao', 2);
+    const res = requestPortal<any>(varejo, {
+      metodo: 'POST', caminho: '/v1/me/consentimentos/v-tel/revogacao', sessao: token,
+    });
+    const notificacao = res.body.cascata.find((c: any) => c.tipo === 'notificacao');
+    expect(notificacao.alvo).toBe('Zenvia');
+    expect(notificacao.efeito).toContain('sem DPA assinado');
+  });
+
+  it('nenhum destino em texto livre sobrou no modelo', () => {
+    for (const id of ['banco', 'varejo', 'midia']) {
+      const b = new BancoMock(id);
+      expect(b.cenario.fornecedores.length, id).toBeGreaterThan(0);
+      for (const campo of b.cenario.campos) {
+        for (const c of campo.compartilhamentos) {
+          expect(b.fornecedor(c.fornecedorId), `${id}: ${campo.id} aponta para fornecedor inexistente`)
+            .toBeTruthy();
+        }
+      }
+      for (const t of b.cenario.titulares) {
+        for (const c of t.compartilhamentos) {
+          expect(b.fornecedor(c.fornecedorId), `${id}: titular ${t.id} com fornecedor órfão`).toBeTruthy();
+        }
+      }
+    }
+  });
+
+  it('o db/tests.sql deixou de ignorar o DPA', () => {
+    // O grep que voltava vazio. É o invariante do PR inteiro.
+    const sql = readFileSync(join('..', 'db', 'tests.sql'), 'utf8');
+    expect(/dpa/i.test(sql)).toBe(true);
+    expect(sql).toContain('transferência com DPA vencido ontem');
+    expect(sql).toContain('transferência com DPA vencendo hoje');
+    // E o schema declara, em prosa, o que o trigger NÃO faz. A asserção roda
+    // sobre o texto normalizado: o comentário quebra em 80 colunas, e reformatar
+    // o arquivo não pode quebrar o teste que protege a frase.
+    const schema = readFileSync(join('..', 'db', 'schema.sql'), 'utf8')
+      // Bloco de comentário quebra em 80 colunas com `*` de continuação: o
+      // marcador sai antes de colapsar o espaço, senão a frase nunca casa.
+      .replace(/^\s*\*/gm, '').replace(/\s+/g, ' ');
+    expect(schema).toContain('ele não vigia');
+    expect(schema).toContain('Quem pega o que envelhece é a varredura');
   });
 });

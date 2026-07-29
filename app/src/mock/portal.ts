@@ -622,7 +622,7 @@ function oQueSePerde(banco: BancoMock, campoId: string, rotulo: string): string[
   if (!campo) return [`${rotulo} deixa de ser usado.`];
   return [
     `${campo.finalidade} deixa de acontecer para você.`,
-    ...campo.compartilhamentos.map((c) => `${c.destino} para de receber este dado.`),
+    ...campo.compartilhamentos.map((c) => `${banco.nomeDoFornecedor(c.fornecedorId)} para de receber este dado.`),
     'O que já foi coletado entra na fila de eliminação, com prova de execução.',
   ];
 }
@@ -711,10 +711,19 @@ function montarCascata(banco: BancoMock, campoId: string, agora: number): ItemDa
   });
 
   for (const c of campo?.compartilhamentos ?? []) {
+    /**
+     * A notificação passa a ter **alvo com chave**, e não um nome digitado.
+     * O que ela ganha com isso não é cosmético: o parceiro agora carrega o DPA
+     * e o SLA de incidente, e é possível perguntar se ele ainda pode receber
+     * dado antes de mandar o aviso.
+     */
+    const fornecedor = banco.fornecedor(c.fornecedorId);
+    const nome = fornecedor?.nome ?? c.fornecedorId;
     itens.push({
-      alvo: c.destino,
+      alvo: nome,
       tipo: 'notificacao',
-      efeito: `${c.destino} é avisado para parar de usar o dado que recebeu.`,
+      efeito: `${nome} é avisado para parar de usar o dado que recebeu`
+        + `${fornecedor && !fornecedor.dpaAssinado ? ' — e este parceiro está sem DPA assinado' : ''}.`,
       estado: 'propagado',
       iniciadaEmMs: agora,
       confirmadaEmMs: agora,

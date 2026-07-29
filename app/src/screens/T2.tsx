@@ -5,6 +5,7 @@ import { useSessao } from '../store/sessao';
 import { hashCpf } from '../lib/sha256';
 import { redigir, resumoDaRedacao } from '../lib/redator';
 import { titularesAtivos } from '../mock/consentimento';
+import { estadoDoDpa } from '../mock/fornecedor';
 import type { Campo, Categoria, Finalidade, TipoArmazenado } from '../mock/types';
 
 const ICONE: Record<TipoArmazenado, string> = {
@@ -510,6 +511,41 @@ function RegistrosDeConsentimento() {
         A base “consentimento” só é aceita no inventário com um registro vivo aqui. Revogar bloqueia o
         tratamento e aciona o gate, como a LIA vencida.
       </Nota>
+      {/*
+        Fornecedor como entidade, com o estado do contrato de cada um.
+        Cinco dos oito parceiros dos cenários não têm DPA declarado em lugar
+        nenhum — e a tela mostra isso em vez de omitir. O vermelho aqui não é
+        excesso: é o Risco-008 deixando de ser descrição.
+      */}
+      <div style={{ paddingTop: 12, borderTop: '1px solid var(--line)', marginTop: 12 }}>
+        <label>Fornecedores e contratos</label>
+        <Tabela cabecalho={['Parceiro', 'Papel', 'País', 'DPA', 'SLA']}>
+          {banco.cenario.fornecedores.map((f) => {
+            const estado = estadoDoDpa(f, hoje);
+            const tom = estado === 'vigente' ? 'ok' : estado === 'sem_prazo' ? 'warn' : 'crit';
+            return (
+              <tr key={f.id}>
+                <td>{f.nome}</td>
+                <td className="mono" style={{ fontSize: 12.5 }}>{f.papel}</td>
+                <td>{f.pais ?? '—'}</td>
+                <td>
+                  <Pill tom={tom}>
+                    {estado === 'vigente' ? `vigente até ${f.dpaExpiraEm}`
+                      : estado === 'vencido' ? `venceu em ${f.dpaExpiraEm}`
+                        : estado === 'sem_prazo' ? 'assinado sem prazo'
+                          : 'sem DPA assinado'}
+                  </Pill>
+                  {f.dpaUri && !f.dpaAssinado && (
+                    <div className="hint">há {f.dpaUri} anexado — evidência não é contrato firmado</div>
+                  )}
+                </td>
+                <td>{f.slaIncidenteHoras ? `${f.slaIncidenteHoras} h` : '—'}</td>
+              </tr>
+            );
+          })}
+        </Tabela>
+      </div>
+
       {registros.map((c) => {
         const campo = banco.cenario.campos.find((x) => x.id === c.campoId);
         // Vivo é ter ao menos um aceite de pé: o campo perde a base legal
@@ -629,6 +665,8 @@ function AreaDeInventario() {
 function TabelaDeCampos({ filtrados, aoSelecionar }: {
   filtrados: Campo[]; aoSelecionar: (c: Campo) => void;
 }) {
+  // O destino virou chave; quem resolve o nome é o banco, e não a tela.
+  const banco = useSessao((s) => s.banco);
   return (
       <Tabela dense cabecalho={['Campo', 'Guarda', 'Finalidade', 'Base legal', 'Retenção', 'Destino', 'Estado']}>
         {filtrados.map((c) => {
@@ -660,9 +698,9 @@ function TabelaDeCampos({ filtrados, aoSelecionar }: {
                   ? <span style={{ color: 'var(--text-3)' }}>—</span>
                   : intl
                     ? <span title={`Mecanismo: ${intl.mecanismo} — Art. 33 · evidência ${intl.evidencia ?? 'ausente'}`}>
-                        <Pill tom="warn">🌎 {intl.destino}</Pill>
+                        <Pill tom="warn">🌎 {banco.nomeDoFornecedor(intl.fornecedorId)}</Pill>
                       </span>
-                    : <Pill tom="neutral">{c.compartilhamentos[0].destino}</Pill>}
+                    : <Pill tom="neutral">{banco.nomeDoFornecedor(c.compartilhamentos[0].fornecedorId)}</Pill>}
               </td>
               <td><Pill tom={conf.tom}>{conf.texto}</Pill></td>
             </tr>

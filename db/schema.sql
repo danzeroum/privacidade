@@ -286,20 +286,55 @@ CREATE INDEX campo_lia_idx           ON campo (lia_id) WHERE lia_id IS NOT NULL;
 -- execução sobre a tabela inteira.
 CREATE INDEX campo_retencao_ate_idx  ON campo (retencao_ate) WHERE retencao_ate IS NOT NULL;
 
+-- ---------------------------------------------------------------------
+-- 3b. Fornecedor — o destino como entidade, e o DPA como fato com prazo
+--
+-- `compartilhamento.destino` era TEXT livre: "OpenAI" repetido em várias
+-- linhas, sem chave, sem contrato. `dpa_assinado` e `dpa_expira_em` existiam
+-- ali desde sempre, sem uma constraint e sem um teste — e por isso a pergunta
+-- "posso mandar dado pessoal para este parceiro hoje?" não tinha onde ser
+-- feita: cada linha carregava a própria cópia da resposta, e nada garantia que
+-- as cópias concordassem.
+-- ---------------------------------------------------------------------
+CREATE TABLE fornecedor (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id           UUID NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
+  slug                TEXT NOT NULL,             -- 'openai'
+  nome                TEXT NOT NULL,             -- 'OpenAI'
+  papel               TEXT NOT NULL CHECK (papel IN ('operador','controlador','controlador_conjunto')),
+  pais                TEXT,
+  -- `dpa_uri` aponta para um arquivo; `dpa_assinado` diz que ele foi firmado.
+  -- Tratar os dois como a mesma coisa é como a conformidade de papel nasce:
+  -- alguém vê o anexo, marca o item, e ninguém mais pergunta se foi assinado.
+  dpa_assinado        BOOLEAN NOT NULL DEFAULT false,
+  dpa_uri             TEXT,
+  dpa_hash            TEXT,
+  dpa_expira_em       DATE,
+  sla_incidente_horas INT CHECK (sla_incidente_horas BETWEEN 1 AND 72),
+  -- Chave por parceiro (Risco-008). A coluna liga fornecedor a kms_chave; a
+  -- revogação com SLA — desligar o parceiro destruindo a chave dele — é máquina
+  -- própria e continua sendo resíduo declarado, não insinuada por esta linha.
+  kms_chave_id        UUID,
+  UNIQUE (tenant_id, slug),
+  -- Contrato assinado sem prazo não se vigia: não há o que vencer, e o que não
+  -- vence não entra em varredura nenhuma.
+  CONSTRAINT dpa_assinado_tem_prazo CHECK (NOT dpa_assinado OR dpa_expira_em IS NOT NULL)
+);
+
+CREATE INDEX fornecedor_dpa_idx ON fornecedor (dpa_expira_em) WHERE dpa_assinado;
+
 CREATE TABLE compartilhamento (
   id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   campo_id                    UUID NOT NULL REFERENCES campo(id) ON DELETE CASCADE,
-  destino                     TEXT NOT NULL,     -- 'OpenAI'
-  papel_destino               TEXT NOT NULL CHECK (papel_destino IN ('operador','controlador','controlador_conjunto')),
+  -- `destino` saiu. Sem entidade, o mesmo parceiro era uma string diferente em
+  -- cada linha, e o DPA dele não tinha dono.
+  fornecedor_id               UUID NOT NULL REFERENCES fornecedor(id) ON DELETE RESTRICT,
   finalidade                  TEXT NOT NULL,
   transferencia_internacional BOOLEAN NOT NULL DEFAULT false,
   pais_destino                TEXT,
   mecanismo                   mecanismo_transferencia NOT NULL DEFAULT 'nao_aplicavel',
   evidencia_uri               TEXT,              -- s3://.../openai-scc.pdf
   evidencia_hash              TEXT,
-  dpa_assinado                BOOLEAN NOT NULL DEFAULT false,
-  dpa_expira_em               DATE,
-  sla_incidente_horas         INT CHECK (sla_incidente_horas BETWEEN 1 AND 72),
 
   -- Art. 33: transferência internacional exige mecanismo declarado e evidência.
   CONSTRAINT transferencia_exige_mecanismo CHECK (
@@ -629,6 +664,69 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER campo_exige_lia_vigente
   BEFORE INSERT OR UPDATE ON campo
   FOR EACH ROW EXECUTE FUNCTION exige_lia_vigente();
+
+/*
+ * O DPA recusa a **escrita** da transferência (Risco-008).
+ *
+ * Mesmo molde do `exige_lia_vigente()` acima, e pelo mesmo motivo: a condição
+ * que sustenta o tratamento é conferida na entrada, não confiada à disciplina
+ * de quem escreve.
+ *
+ * O que este trigger NÃO faz, e é importante que não se leia nele: ele não
+ * vigia. Dispara sobre a linha que está sendo escrita e nunca sobre a que já
+ * está parada — a transferência gravada hoje com contrato válido continua
+ * gravada quando o contrato vencer amanhã. Quem pega o que envelhece é a
+ * varredura (`varrerDpas`), que abre achado. Chamar isto de vigilância seria
+ * exatamente a promessa sem instrumento que a auditoria mapeou.
+ */
+CREATE OR REPLACE FUNCTION exige_dpa_vigente() RETURNS TRIGGER AS $$
+DECLARE f RECORD;
+BEGIN
+  SELECT nome, dpa_assinado, dpa_expira_em, dpa_uri INTO f
+    FROM fornecedor WHERE id = NEW.fornecedor_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Transferência para fornecedor inexistente (%).', NEW.fornecedor_id;
+  END IF;
+
+  -- Sem assinatura não há contrato, e prazo futuro não conserta isso.
+  -- Evidência anexada também não: um PDF numa pasta não é um contrato firmado.
+  IF NOT f.dpa_assinado THEN
+    RAISE EXCEPTION 'Transferência para %: sem DPA assinado (Art. 39)%.',
+      f.nome,
+      CASE WHEN f.dpa_uri IS NOT NULL
+        THEN ' — há evidência anexada, mas evidência não é contrato firmado'
+        ELSE '' END;
+  END IF;
+
+  -- Vence **hoje** ainda vale: o contrato cobre o último dia, não a véspera.
+  IF f.dpa_expira_em < current_date THEN
+    RAISE EXCEPTION 'Transferência para %: o DPA venceu em % (Art. 39).',
+      f.nome, f.dpa_expira_em;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER compartilhamento_exige_dpa_vigente
+  BEFORE INSERT OR UPDATE ON compartilhamento
+  FOR EACH ROW EXECUTE FUNCTION exige_dpa_vigente();
+
+-- O que o trigger não alcança: transferência viva sob contrato que venceu
+-- depois de gravada. É esta view que a varredura lê para abrir achado.
+CREATE VIEW gov.transferencia_sem_dpa AS
+SELECT c.id AS compartilhamento_id, c.campo_id, c.finalidade,
+       f.id AS fornecedor_id, f.slug, f.nome, f.dpa_assinado, f.dpa_expira_em,
+       greatest(0, current_date - f.dpa_expira_em) AS atraso_dias,
+       CASE
+         WHEN NOT f.dpa_assinado THEN 'nao_assinado'
+         WHEN f.dpa_expira_em < current_date THEN 'vencido'
+         ELSE 'vigente'
+       END AS estado_dpa
+FROM compartilhamento c
+JOIN fornecedor f ON f.id = c.fornecedor_id
+WHERE NOT f.dpa_assinado OR f.dpa_expira_em < current_date;
 
 -- ---------------------------------------------------------------------
 -- 8. Direitos do titular (Art. 18)                                   [Tela T4]
@@ -1407,11 +1505,15 @@ SELECT s.slug                AS sistema,
        c.retencao,
        c.lia_id,
        bool_or(sh.transferencia_internacional) AS transferencia_internacional,
-       array_remove(array_agg(DISTINCT sh.destino), NULL) AS destinos
+       -- O destino agora tem nome porque tem entidade. O ROPA passa a poder
+       -- responder "com quem" e "sob qual contrato" pela mesma junção.
+       array_remove(array_agg(DISTINCT fo.nome), NULL) AS destinos,
+       bool_and(coalesce(fo.dpa_assinado, true)) AS todos_com_dpa
 FROM campo c
 JOIN dataset d ON d.id = c.dataset_id AND d.vigente
 JOIN sistema s ON s.id = d.sistema_id
 LEFT JOIN compartilhamento sh ON sh.campo_id = c.id
+LEFT JOIN fornecedor fo ON fo.id = sh.fornecedor_id
 GROUP BY s.slug, s.repositorio, d.nome, d.zona_lake, c.nome, c.tipo_armazenado,
          c.categoria, c.sensivel, c.base_legal, c.finalidade, c.retencao, c.lia_id;
 

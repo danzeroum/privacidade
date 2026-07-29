@@ -32,6 +32,8 @@ export type { Obrigacao, Prorrogacao, Trilha, TipoObrigacao } from './calendario
 import type { Obrigacao } from './calendario';
 import type { FatoGerador } from './retencao';
 import type { Consentimento, TextoDeConsentimento } from './consentimento';
+import type { Fornecedor } from './fornecedor';
+export type { Fornecedor } from './fornecedor';
 export type { FatoGerador } from './retencao';
 
 export type Papel = 'engenharia' | 'dpo' | 'produto' | 'seguranca' | 'auditor';
@@ -60,7 +62,12 @@ export type Mecanismo = 'pais_adequado' | 'clausulas_padrao_anpd' | 'normas_corp
   | 'consentimento_especifico' | 'nao_aplicavel';
 
 export interface Compartilhamento {
-  destino: string;
+  /**
+   * O parceiro, por chave. `destino: string` saiu: sem entidade, "OpenAI" era
+   * uma string diferente em cada linha e o DPA dele não tinha dono — a pergunta
+   * "posso mandar dado para este parceiro hoje?" não tinha onde ser feita.
+   */
+  fornecedorId: string;
   finalidade: string;
   internacional: boolean;
   pais?: string;
@@ -362,7 +369,7 @@ export interface Titular {
     baseLegal: BaseLegal;
     campoCatalogoId?: string;
   }[];
-  compartilhamentos: { destino: string; finalidade: string; baseLegal: BaseLegal; internacional: boolean; mecanismo: Mecanismo; ultimaRemessa: string }[];
+  compartilhamentos: { fornecedorId: string; finalidade: string; baseLegal: BaseLegal; internacional: boolean; mecanismo: Mecanismo; ultimaRemessa: string }[];
   decisao?: {
     id: string; modelo: string; aprovado: boolean; shap: { feature: string; impacto: number }[];
     /** T4-03 — a revisão do Art. 20 só vale se deixar prova. Preenchida pela rota, nunca pela tela. */
@@ -748,6 +755,8 @@ export interface Cenario {
   achados: Achado[];
   incidentes: Incidente[];
   /** As versões publicadas do texto, por campo. Imutáveis. */
+  /** Os parceiros que recebem dado, com o contrato de cada um. */
+  fornecedores: Fornecedor[];
   consentimentoTextos: TextoDeConsentimento[];
   /** Os aceites, um por titular e por versão. Append-only. */
   consentimentos: Consentimento[];

@@ -79,10 +79,23 @@ INSERT INTO campo (id, dataset_id, nome, tipo_armazenado, categoria, sensivel, o
   ('77777777-7777-4777-8777-000000000006','55555555-5555-4555-8555-000000000003','email','hmac','pseudonimizado',false,'frontend_form','Comunicação transacional','execucao_contrato',NULL,'consentimento_revogado','Art. 7º, V','revogacao_do_consentimento',31207, NULL),
   ('77777777-7777-4777-8777-000000000007','55555555-5555-4555-8555-000000000003','biometria_facial','criptografado','sensivel',true,'app mobile','Prova de vida no onboarding','consentimento',NULL,'P30D','Art. 11, I','coleta',8412, current_date - INTERVAL '12 days');
 
-INSERT INTO compartilhamento (campo_id, destino, papel_destino, finalidade, transferencia_internacional, pais_destino, mecanismo, evidencia_uri, evidencia_hash, dpa_assinado, dpa_expira_em, sla_incidente_horas) VALUES
-  ('77777777-7777-4777-8777-000000000004','OpenAI','operador','Enriquecimento textual para o modelo de scoring',true,'EUA','clausulas_padrao_anpd','s3://gov-docs/dpa/openai-scc.pdf','d4e5f60718293a4b5c6d7e8f9012345678abcdef0123456789abcdef01234567',true,DATE '2027-08-01',24),
-  ('77777777-7777-4777-8777-000000000003','Serasa','controlador','Consulta de score para proteção ao crédito',false,NULL,'nao_aplicavel',NULL,NULL,true,DATE '2027-03-15',24),
-  ('77777777-7777-4777-8777-000000000006','SendGrid','operador','Entrega de e-mail transacional',true,'EUA','clausulas_padrao_anpd','s3://gov-docs/dpa/sendgrid-scc.pdf','ef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd',true,DATE '2026-09-30',48);
+-- ---------- fornecedores ----------------------------------------------------
+-- Precisam existir ANTES de compartilhamento: a FK é obrigatória e o trigger de
+-- DPA consulta esta tabela na escrita. Os dados vieram das colunas que já
+-- estavam em `compartilhamento` — nada aqui foi inventado.
+INSERT INTO fornecedor (id, tenant_id, slug, nome, papel, pais, dpa_assinado, dpa_uri, dpa_hash, dpa_expira_em, sla_incidente_horas) VALUES
+  ('f0000000-0000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','openai','OpenAI','operador','EUA',
+   true,'s3://gov-docs/dpa/openai-scc.pdf','d4e5f60718293a4b5c6d7e8f9012345678abcdef0123456789abcdef01234567',DATE '2027-08-01',24),
+  ('f0000000-0000-4000-8000-000000000002','11111111-1111-4111-8111-111111111111','serasa','Serasa','controlador','Brasil',
+   true,NULL,NULL,DATE '2027-03-15',24),
+  -- Vence em 2026-09-30. É o caso natural da varredura: nenhuma data forjada.
+  ('f0000000-0000-4000-8000-000000000003','11111111-1111-4111-8111-111111111111','sendgrid','SendGrid','operador','EUA',
+   true,'s3://gov-docs/dpa/sendgrid-scc.pdf','ef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd',DATE '2026-09-30',48);
+
+INSERT INTO compartilhamento (campo_id, fornecedor_id, finalidade, transferencia_internacional, pais_destino, mecanismo, evidencia_uri, evidencia_hash) VALUES
+  ('77777777-7777-4777-8777-000000000004','f0000000-0000-4000-8000-000000000001','Enriquecimento textual para o modelo de scoring',true,'EUA','clausulas_padrao_anpd','s3://gov-docs/dpa/openai-scc.pdf','d4e5f60718293a4b5c6d7e8f9012345678abcdef0123456789abcdef01234567'),
+  ('77777777-7777-4777-8777-000000000003','f0000000-0000-4000-8000-000000000002','Consulta de score para proteção ao crédito',false,NULL,'nao_aplicavel',NULL,NULL),
+  ('77777777-7777-4777-8777-000000000006','f0000000-0000-4000-8000-000000000003','Entrega de e-mail transacional',true,'EUA','clausulas_padrao_anpd','s3://gov-docs/dpa/sendgrid-scc.pdf','ef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd');
 
 INSERT INTO linhagem (tenant_id, transformacao, versao, origem_sistema, origem_dataset, origem_campo, destino_sistema, destino_dataset, destino_campo, finalidade, base_legal, linhas, run_id) VALUES
   ('11111111-1111-4111-8111-111111111111','etl_pedidos_daily','v2.1.0','credit-scoring','clientes','cpf','analytics','fact_pedidos','cpf_hmac','Análise de vendas','legitimo_interesse',41893,'run_2026_07_27'),
