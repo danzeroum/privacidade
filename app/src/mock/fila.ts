@@ -16,11 +16,16 @@ import type { Obrigacao } from './calendario';
  *
  * Três decisões que valem mais que a tabela abaixo:
  *
- * 1. **Quem decide de quem é o item é a permissão, não o item.** Cada regra
- *    declara a `Acao` que a próxima ação exige, e a fila de um papel é o
- *    subconjunto que ele alcança. Não existe campo "papéis" escrito à mão: se
- *    existisse, ele divergiria de `permissoes.ts` em três meses, do mesmo jeito
- *    que o rótulo do gatilho divergia do catálogo antes do PR 8.
+ * 1. **Item de artefato deriva o dono da permissão, não de campo escrito à mão.**
+ *    Cada regra declara a `Acao` que a próxima ação exige, e a fila de um papel é
+ *    o subconjunto que ele alcança. Um campo "papéis" aqui divergiria de
+ *    `permissoes.ts` em três meses, do mesmo jeito que o rótulo do gatilho
+ *    divergia do catálogo antes do PR 8.
+ *
+ *    A frase original deste comentário dizia isto sem ressalva — "quem decide de
+ *    quem é o item é a permissão" — e ficou incompleta no PR 13: obrigação de
+ *    calendário é dado autorado e **declara** o dono. Não é exceção ao princípio,
+ *    é o outro lado dele, e as duas convivem atrás de `Titularidade`.
  *
  * 2. **Trabalho em curso não é item de fila.** `risco em_tratamento` tem dono e
  *    prazo — está andando. Item de fila é o que está **parado esperando você**.

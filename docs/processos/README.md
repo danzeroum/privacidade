@@ -70,6 +70,9 @@ declarado, prazo de reavaliação e justificativa são **validação**, e vivem 
 devolver `422` para quem pulou um passo manda a pessoa reescrever um texto que
 já estava bom.
 
+Elas estão enunciadas logo abaixo, e não no `.bpmn`, porque são a outra metade da
+mesma decisão — quem lê o desenho precisa saber onde procurar a metade que falta.
+
 **O `.dmn` não declara o preenchimento do indefinido.** "Entrada ausente cai no
 cenário mais restritivo" é contrato de `aplicar()`, em volta da tabela: a tabela
 recebe entradas já preenchidas. Modelá-lo como linha faria a regra de omissão
@@ -78,6 +81,32 @@ competir com as regras de negócio na mesma política de acerto.
 **Nenhum arquivo carrega dado de cenário.** Especificação descreve o processo,
 não uma instância dele — e há teste varrendo os doze arquivos contra os
 identificadores da massa de demonstração.
+
+## As exigências de conteúdo — o que produz `422`
+
+O desenho diz quais transições são legais. Estas linhas dizem o que cada uma exige
+**além** de estar na ordem certa. Elas vivem aqui, ao lado dos arquivos de processo,
+porque até o PR 13 só existiam em `exigenciasDe()` e nos testes — executáveis e
+conferidas, mas ilegíveis para quem não lê TypeScript.
+
+Há catraca aqui também: um teste extrai os ramos de `exigenciasDe()` do código e
+reprova o build quando um deles não tem linha nesta tabela. Exigência nova sem
+enunciado vira lacuna apontada, não silêncio.
+
+| Artefato | Transição | O que a rota exige além da sequência | Por quê |
+|---|---|---|---|
+| `parecer` | `homologado → devolvido` | motivo de ao menos 20 caracteres | Devolução sem motivo é ida e volta sem aprendizado — e a terceira devolução vai ao comitê sem que ninguém saiba por quê. |
+| `ripd` | `triagem → dispensado` | justificativa de ao menos 20 caracteres **e** ao menos um gatilho de reabertura do catálogo da triagem, com a condição que o faria disparar neste sistema | Dispensa sem registro é omissão, não decisão. E gatilho em prosa não dispara nada: o código do catálogo é o que permite a esteira reabrir o RIPD sozinha. |
+| `risco` | `em_tratamento → aceito` | dono da aceitação, prazo de reavaliação e gatilho de reabertura | Risco aceito sem dono volta como surpresa, e sem prazo vira permanente. |
+| `solicitacao` | `em_analise → recusada_com_fundamento` | fundamento legal de ao menos 20 caracteres | Art. 18, §4º: a negativa é fundamentada. Recusa sem fundamento não é atendimento, é silêncio com carimbo. |
+| `achado` | `executado → verificado` | quem verificou | A verificação de eficácia é independente de quem executou — executar não é comprovar que resolveu. |
+
+Duas exigências transversais, que não são de nenhuma transição em particular:
+
+- **Toda transição grava antes de aplicar.** Falha de registro é `503` e o estado
+  não muda. A ordem importa e existe teste para ela.
+- **Todo texto que entra em registro passa pelo redator antes de ser gravado.** O
+  que chega com dado pessoal é redigido na escrita, não na exibição.
 
 ## Onde isto aparece no produto
 
