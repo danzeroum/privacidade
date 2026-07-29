@@ -1,0 +1,164 @@
+# Inventário fechado da PII sintética que este repositório publica (Risco-003).
+#
+# Até o PR 4 o gate varria **um** arquivo — o log de exemplo — e aprovava com 45
+# CPFs formatados espalhados por 7 arquivos de fonte, teste, SQL, HTML e
+# documentação. Nenhum deles era segredo: são titulares fictícios de cenário de
+# demonstração. O problema nunca foi a existência deles, foi **ninguém saber que
+# existiam**, e a folga ter crescido de 40 para 45 enquanto o relatório dizia
+# "nenhum achado".
+#
+# A regra que dá sentido a este arquivo é a mesma do inventário de campos:
+# declarar é ato explícito e visível no diff. Um CPF novo em `regras.test.tsx`
+# — arquivo que já tem 28 declarados — reprova o merge até alguém escrever aqui
+# qual é o valor, por que ele existe e onde pode aparecer. É a catraca que
+# faltou nos PRs anteriores, e que deixou eu mesmo acrescentar cinco.
+#
+# Quatro coisas reprovam, e vale nomeá-las porque é onde uma declaração costuma
+# virar carta-branca:
+#
+#   1. valor não declarado, em qualquer arquivo do repositório;
+#   2. valor declarado aparecendo **fora** dos caminhos declarados em `onde` —
+#      declaração não é passe livre global;
+#   3. declaração morta: valor que não existe mais em lugar nenhum. Lista que
+#      ninguém confere apodrece, e apodrecida ela passa a autorizar o que não
+#      está mais lá;
+#   4. este arquivo ausente ou ilegível — como o inventário de campos, ausência
+#      não é aprovação.
+#
+# Este arquivo é, ele próprio, caminho implícito de tudo o que declara: não há
+# como declarar um valor sem escrevê-lo. Não é exceção escondida — é a única
+# forma de a lista existir, e ela está inteira no diff.
+#
+# ## Dígito verificador
+#
+# Dez dos onze CPFs abaixo falham no dígito verificador; nenhum é válido. Isso é
+# higiene, **não é o critério**: o gate reprova CPF válido e inválido igual, e
+# quem decide o que passa é esta lista. Um documento estruturalmente impossível
+# continua sendo um padrão que não deve entrar em log, e tratar "inválido" como
+# "pode" transformaria o gate num validador de dígito com outro nome.
+#
+# O PR 4 substituiu, em cinco arquivos, o único CPF do repositório que passava no
+# dígito verificador — o número de tutorial que todo exemplo brasileiro usa. Um
+# documento estruturalmente válido pode pertencer a alguém, e "é o exemplo de
+# todo mundo" é precisamente o argumento que uma auditoria não aceita de
+# ninguém. O valor antigo não é repetido aqui: declarar o que saiu seria
+# reintroduzi-lo. Quem quiser conferir lê o diff, que é onde ele está.
+repositorio: danzeroum/privacidade
+
+cpf:
+  # Cenário "crédito" (`cenarioCredito`), a titular do fluxo principal.
+  - valor: "274.065.813-77"
+    motivo: >-
+      Ana Beatriz Silva, titular fictícia do cenário de crédito. É o CPF que
+      atravessa o repositório inteiro: aparece como massa (`scenarios.ts`), como
+      valor esperado nos testes de revelação e redação, no exemplo do redator,
+      no teste de trilha em SQL e na tela do protótipo.
+    onde:
+      - app/src/lib/redator.ts
+      - app/src/mock/scenarios.ts
+      - app/tests/regras.test.tsx
+      - db/tests.sql
+      - prototipo/index.html
+
+  - valor: "843.117.902-08"
+    motivo: Carlos Menezes, titular fictício do cenário de crédito.
+    onde:
+      - app/src/mock/scenarios.ts
+      - prototipo/index.html
+
+  - valor: "311.408.775-31"
+    motivo: Joana Prado, titular fictícia do cenário de crédito.
+    onde:
+      - app/src/mock/scenarios.ts
+      - prototipo/index.html
+
+  # Cenário "vídeo" (`cenarioVideo`).
+  - valor: "712.334.908-11"
+    motivo: Marina Costa, titular fictícia do cenário de streaming.
+    onde: [app/src/mock/scenarios.ts]
+
+  - valor: "905.221.744-60"
+    motivo: Rafael Andrade, titular fictício do cenário de streaming.
+    onde: [app/src/mock/scenarios.ts]
+
+  - valor: "188.077.312-45"
+    motivo: Beatriz Lopes, titular fictícia do cenário de streaming.
+    onde: [app/src/mock/scenarios.ts]
+
+  # Cenário "mobilidade" (`cenarioMobilidade`).
+  - valor: "404.882.113-90"
+    motivo: Diego Rocha, titular fictício do cenário de mobilidade.
+    onde: [app/src/mock/scenarios.ts]
+
+  - valor: "620.559.874-02"
+    motivo: Helena Martins, titular fictícia do cenário de mobilidade.
+    onde: [app/src/mock/scenarios.ts]
+
+  - valor: "037.914.226-58"
+    motivo: Tiago Nunes, titular fictício do cenário de mobilidade.
+    onde: [app/src/mock/scenarios.ts]
+
+  # Valores de teste que não pertencem a nenhum titular do cenário.
+  - valor: "347.912.884-42"
+    motivo: >-
+      CPF de fixture usado nos testes do próprio gate e no handoff de design.
+      É o valor que o teste injeta para provar que a varredura reprova, e o que
+      a documentação de implementação mostra mascarado na tela.
+    onde:
+      - app/tests/regras.test.tsx
+      - docs/design_handoff_lastro_correcoes/
+
+  - valor: "000.000.000-00"
+    motivo: >-
+      Não é um CPF fictício, é a **ausência** de um: o teste de fronteira que
+      confere que a máscara e o redator tratam um documento zerado como qualquer
+      outro, em vez de deixá-lo passar por parecer vazio.
+    onde: [app/tests/regras.test.tsx]
+
+# Nenhum CNPJ formatado no repositório hoje. A chave existe declarada e vazia de
+# propósito: chave ausente e lista vazia dizem coisas diferentes, e a segunda é
+# uma afirmação que alguém pode conferir.
+cnpj: []
+
+telefone:
+  - valor: "(81) 98812-4470"
+    motivo: Telefone de contato de titular fictício do cenário de crédito.
+    onde: [app/src/mock/scenarios.ts]
+
+  - valor: "(11) 97741-0033"
+    motivo: Telefone de contato de titular fictício do cenário de streaming.
+    onde: [app/src/mock/scenarios.ts]
+
+  - valor: "(11) 98765-4321"
+    motivo: >-
+      Telefone de fixture do teste do gate — o valor que prova que a varredura
+      pega telefone além de CPF.
+    onde: [app/tests/regras.test.tsx]
+
+# E-mail é declarado por **domínio**, e não valor a valor, porque o que torna um
+# endereço sintético é o domínio não roteável — não a parte antes do arroba.
+# Declarar dezenove endereços produziria churn de fixture sem acrescentar uma
+# única garantia: `ana.silva@` e `bia.l@` são igualmente inofensivos enquanto o
+# domínio não existir. A catraca continua fechada no que importa: um domínio
+# novo — inclusive um domínio real — reprova até ser declarado aqui.
+email:
+  dominios:
+    - dominio: exemplo.test
+      motivo: >-
+        Titulares fictícios dos três cenários e do protótipo. `.test` é TLD
+        reservado pela RFC 2606: não resolve, não roteia e não pode ser
+        registrado por ninguém. O PR 4 migrou estes endereços de `exemplo.com`,
+        que **é** um domínio registrável — uma mensagem enviada por engano para
+        lá chegaria a alguém, e "é só um exemplo" não é uma garantia técnica.
+      onde:
+        - app/src/mock/scenarios.ts
+        - app/tests/regras.test.tsx
+        - prototipo/index.html
+        - docs/design_handoff_lastro_correcoes/
+
+    - dominio: creditoia.example
+      motivo: >-
+        Atores internos da organização fictícia do seed (DPO, encarregado,
+        analistas, remetente de notificação). `.example` é reservado pela mesma
+        RFC 2606.
+      onde: [db/seed.sql]

@@ -1291,6 +1291,13 @@ BEGIN
             || '|' || NEW.recurso_tipo
             || '|' || coalesce(NEW.recurso_id, '-')
             || '|' || coalesce(NEW.finalidade, '-')
+            -- A base legal entra na cadeia (Risco-004). Ela estava gravada e não
+            -- selada: um DBA comprometido trocava `consentimento` por
+            -- `legitimo_interesse` na linha que registrou o acesso, e a
+            -- verificação de integridade continuava fechando. O campo que
+            -- justifica o tratamento era, até aqui, o único do trail que se
+            -- podia reescrever sem deixar rastro.
+            || '|' || coalesce(NEW.base_legal::text, '-')
             || '|' || array_to_string(NEW.campos, ',')
             || '|' || NEW.resultado
             || '|' || NEW.justificativa_hash;
@@ -1390,12 +1397,26 @@ CREATE TRIGGER consentimento_texto_imutavel
   FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
 
 -- Botão "Verificar integridade" da T6 chama esta função.
+--
+-- Duas conferências, não uma, e a segunda é o que fecha o Risco-004.
+--
+-- A primeira é a cadeia: recompõe o payload de cada linha e confere o hash. A
+-- segunda é o **selo contra o texto**: enquanto a justificativa existe, o seu
+-- sha256 tem de bater com `justificativa_hash`. Sem ela havia um buraco exato:
+-- quem trocasse só o texto, deixando a coluna do selo intacta, passava — porque
+-- a cadeia consome o selo, não o texto. O campo mais aberto do trail era o
+-- único que se podia reescrever sem deixar rastro.
+--
+-- Depois do expurgo controlado o texto não existe mais, e é `pii_expurgada_em`
+-- que diz isso. Aí só a cadeia responde — que é precisamente o desenho: o selo
+-- sobrevive ao texto e continua provando o que o texto dizia.
 CREATE OR REPLACE FUNCTION verificar_integridade_audit(p_tenant UUID)
-RETURNS TABLE (linha_id BIGINT, esperado TEXT, encontrado TEXT, integro BOOLEAN) AS $$
+RETURNS TABLE (linha_id BIGINT, esperado TEXT, encontrado TEXT, integro BOOLEAN, motivo TEXT) AS $$
 DECLARE
   r RECORD;
   v_prev TEXT := NULL;
   v_calc TEXT;
+  v_selo BOOLEAN;
 BEGIN
   FOR r IN SELECT * FROM audit_log WHERE tenant_id = p_tenant ORDER BY id LOOP
     v_calc := encode(sha256((
@@ -1406,14 +1427,33 @@ BEGIN
      || '|' || r.recurso_tipo
      || '|' || coalesce(r.recurso_id, '-')
      || '|' || coalesce(r.finalidade, '-')
+     -- Mesma posição do trigger, e as duas mudam juntas ou nenhuma delas: uma
+     -- verificação que monta o payload em ordem diferente da gravação acusa o
+     -- trail inteiro de adulterado e vira ruído que a equipe aprende a ignorar.
+     || '|' || coalesce(r.base_legal::text, '-')
      || '|' || array_to_string(r.campos, ',')
      || '|' || r.resultado
      -- Lido da coluna, não recalculado do texto: é exatamente por isso que a
      -- verificação continua íntegra depois de a justificativa ser expurgada.
      || '|' || coalesce(r.justificativa_hash, ''))::bytea), 'hex');
 
-    linha_id := r.id; esperado := v_calc; encontrado := r.hash; integro := (v_calc = r.hash);
+    -- O selo só é conferível enquanto o texto existe. Depois do expurgo, quem
+    -- responde é a cadeia — e ela responde justamente porque o selo entrou nela.
+    v_selo := r.pii_expurgada_em IS NOT NULL
+           OR encode(sha256(coalesce(r.justificativa, '')::bytea), 'hex') = coalesce(r.justificativa_hash, '');
+
+    linha_id := r.id; esperado := v_calc; encontrado := r.hash;
+    integro := (v_calc = r.hash) AND v_selo;
+    motivo := CASE
+                WHEN v_calc <> r.hash AND NOT v_selo THEN 'cadeia e selo da justificativa'
+                WHEN v_calc <> r.hash THEN 'cadeia'
+                WHEN NOT v_selo THEN 'texto da justificativa não corresponde ao selo'
+                ELSE NULL
+              END;
     RETURN NEXT;
+    -- Encadeia pelo hash **gravado**, não pelo recalculado: é o que faz a
+    -- adulteração de uma linha contaminar todas as seguintes em vez de ficar
+    -- contida nela.
     v_prev := r.hash;
   END LOOP;
 END;
