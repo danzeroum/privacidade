@@ -20,6 +20,9 @@ import {
   CATEGORIAS, GATILHOS, TABELAS, TABELAS_IDS, aplicar, condicoesDe, nivelDoRisco,
   reproduzir, tomDoRisco, ultimaDecisao, vigenteDe,
 } from '../src/mock/decisoes';
+import { requestPortal } from '../src/mock/portal';
+import { DIREITOS, REGIME, nivelExigido } from '../src/mock/direitos';
+import { OPERACOES, RAIZES_DO_MOCK, operacaoDe } from '../src/mock/rotas';
 import { REGRAS, derivarFila, eDe, minhaFila } from '../src/mock/fila';
 import type { ContadoresDaFila, ItemDaFila } from '../src/mock/fila';
 import {
@@ -47,7 +50,7 @@ import T6 from '../src/screens/T6';
 import T11, { DESVIOS, trilhaDoAchado } from '../src/screens/T11';
 import { useSessao, limparBancosDaSessao } from '../src/store/sessao';
 import { sha256, hashCpf } from '../src/lib/sha256';
-import type { DecisaoRegistrada, EstadoIncidente, Papel } from '../src/mock/types';
+import type { DecisaoRegistrada, Direito, EstadoIncidente, Papel } from '../src/mock/types';
 
 let banco: BancoMock;
 beforeEach(() => {
@@ -4605,5 +4608,162 @@ describe('PR 15 · validação — o §1 do MAPA descreve telas que existem?', (
     // A pendência que sobrava era esta, e ela é este PR.
     expect(pr05).not.toContain('estado do achado');
     expect(pr05.split('|').at(-2)!.trim()).toBe('—');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 16 · o portal do titular (Risco-001, P0)
+//
+// A ordem dos blocos é a da recomendação: primeiro os dois invariantes que
+// sustentam tudo — o nível derivado no servidor e o 401 que não é oráculo —,
+// depois as rotas. Invariante escrito depois da rota é invariante que descreve
+// o que a rota faz; escrito antes, é invariante que decide o que ela pode fazer.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Abre e confirma uma verificação, devolvendo o token de sessão do portal. */
+function sessaoDoPortal(
+  b: BancoMock, direito: Direito, indiceDoTitular = 0,
+  ajuste: { codigoErrado?: boolean; semDocumento?: boolean; identificadorHash?: string } = {},
+) {
+  const titular = b.cenario.titulares[indiceDoTitular];
+  const abertura = requestPortal<{ id: string; nivel_exigido: number }>(b, {
+    metodo: 'POST',
+    caminho: '/v1/me/verificacao',
+    body: {
+      direito,
+      canal: 'email',
+      identificador_hash: ajuste.identificadorHash ?? sha256(titular.segredos.email),
+    },
+  });
+  const nivel = nivelExigido(direito);
+  const fatores: Record<string, unknown> = {
+    codigo: ajuste.codigoErrado ? '000000' : b.codigoDaVerificacao(abertura.body.id),
+  };
+  if (nivel === 2) fatores.dado_cadastro_hash = titular.cpfHash;
+  if (nivel === 3 && !ajuste.semDocumento) fatores.documento_hash = sha256('documento-com-foto');
+  const confirmacao = requestPortal<{ sessao: string; nivel_atingido: number }>(b, {
+    metodo: 'POST',
+    caminho: `/v1/me/verificacao/${abertura.body.id}/codigo`,
+    body: fatores,
+  });
+  return { abertura, confirmacao, titular, token: confirmacao.body?.sessao };
+}
+
+describe('PR 16 · invariante — o nível de verificação é derivado do direito, no servidor', () => {
+  it('a tabela declara os dez direitos, e só ela decide o nível', () => {
+    expect(DIREITOS).toHaveLength(10);
+    for (const d of DIREITOS) {
+      expect(REGIME[d].nivel, `${d} sem nível declarado`).toBeGreaterThanOrEqual(1);
+      expect(REGIME[d].nivel).toBeLessThanOrEqual(3);
+    }
+    // A escada da tela 02, item a item. Rebaixar qualquer um destes é editar
+    // esta linha — que é onde o teste olha.
+    expect(DIREITOS.filter((d) => REGIME[d].nivel === 3).sort())
+      .toEqual(['anonimizacao', 'eliminacao', 'portabilidade']);
+    expect(DIREITOS.filter((d) => REGIME[d].nivel === 1).sort())
+      .toEqual(['compartilhamentos', 'confirmacao']);
+  });
+
+  it('pedir eliminação com nivel_verificacao 1 no corpo não reduz a exigência', () => {
+    const abertura = requestPortal<{ id: string; nivel_exigido: number }>(banco, {
+      metodo: 'POST',
+      caminho: '/v1/me/verificacao',
+      body: {
+        direito: 'eliminacao',
+        canal: 'email',
+        identificador_hash: sha256(banco.cenario.titulares[0].segredos.email),
+        // O parâmetro do cliente. Se fosse lido, a escada inteira seria sugestão.
+        nivel_verificacao: 1,
+      },
+    });
+    expect(abertura.status).toBe(201);
+    expect(abertura.body.nivel_exigido).toBe(3);
+  });
+
+  it('sessão de nível 2 não abre solicitação de direito de nível 3', () => {
+    // A sessão é do direito que a pediu: uma verificação de "acesso" (nível 2)
+    // não vira crédito para eliminar.
+    const { token } = sessaoDoPortal(banco, 'acesso');
+    const res = requestPortal(banco, {
+      metodo: 'POST', caminho: '/v1/requests', sessao: token,
+      body: { direito: 'eliminacao', nivel_verificacao: 1 },
+    });
+    expect(res.status).toBe(403);
+    expect(banco.cenario.solicitacoes.some((s) => s.direito === 'eliminacao' && s.origem === 'portal')).toBe(false);
+  });
+
+  it('a solicitação criada grava o nível derivado, e não o que veio no corpo', () => {
+    const { token } = sessaoDoPortal(banco, 'eliminacao', 0);
+    const res = requestPortal<{ protocolo: string; nivel_verificacao: number }>(banco, {
+      metodo: 'POST', caminho: '/v1/requests', sessao: token,
+      body: { direito: 'eliminacao', nivel_verificacao: 1 },
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.nivel_verificacao).toBe(3);
+    const gravada = banco.cenario.solicitacoes.find((s) => s.protocolo === res.body.protocolo)!;
+    expect(gravada.nivelVerificacao).toBe(3);
+  });
+
+  it('confirmar eliminação sem o documento não confirma a sessão', () => {
+    const { confirmacao } = sessaoDoPortal(banco, 'eliminacao', 0, { semDocumento: true });
+    expect(confirmacao.status).toBe(422);
+    expect(confirmacao.body).not.toHaveProperty('sessao');
+  });
+});
+
+describe('PR 16 · invariante — o 401 não diz se o cadastro existe', () => {
+  const semCadastro = () => sha256('ninguem-com-esse-email@exemplo.com');
+
+  it('código inválido responde igual para e-mail cadastrado e não cadastrado', () => {
+    const cadastrado = sessaoDoPortal(banco, 'acesso', 0, { codigoErrado: true }).confirmacao;
+    const inexistente = sessaoDoPortal(banco, 'acesso', 0, {
+      codigoErrado: true, identificadorHash: semCadastro(),
+    }).confirmacao;
+    expect(cadastrado.status).toBe(401);
+    expect(inexistente).toEqual(cadastrado);
+  });
+
+  it('nem o código certo confirma um e-mail que não está cadastrado — e a recusa é a mesma', () => {
+    // O caso mais afiado: se a recusa por "código certo, cadastro inexistente"
+    // fosse diferente da recusa por "código errado", o par de respostas viraria
+    // um oráculo de cadastro operável em lote.
+    const errado = sessaoDoPortal(banco, 'acesso', 0, { codigoErrado: true }).confirmacao;
+    const certoSemCadastro = sessaoDoPortal(banco, 'acesso', 0, {
+      identificadorHash: semCadastro(),
+    }).confirmacao;
+    expect(certoSemCadastro.status).toBe(401);
+    expect(certoSemCadastro).toEqual(errado);
+  });
+
+  it('abrir a verificação responde 201 igual para os dois, e nunca devolve o código', () => {
+    const corpo = (hash: string) => requestPortal<Record<string, unknown>>(banco, {
+      metodo: 'POST',
+      caminho: '/v1/me/verificacao',
+      body: { direito: 'acesso', canal: 'email', identificador_hash: hash },
+    });
+    const a = corpo(sha256(banco.cenario.titulares[0].segredos.email));
+    const b = corpo(semCadastro());
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+    // O `id` é diferente por construção; todo o resto tem de ser igual.
+    expect(Object.keys(a.body).sort()).toEqual(Object.keys(b.body).sort());
+    const { id: _a, expira_em: _ea, ...restoA } = a.body as Record<string, unknown>;
+    const { id: _b, expira_em: _eb, ...restoB } = b.body as Record<string, unknown>;
+    expect(restoA).toEqual(restoB);
+    expect(JSON.stringify(a.body)).not.toContain(banco.codigoDaVerificacao(String(a.body.id)));
+  });
+
+  it('nenhum campo do titular sai antes da confirmação', () => {
+    const protocolo = banco.cenario.solicitacoes[0].protocolo;
+    const semSessao = requestPortal<Record<string, unknown>>(banco, {
+      metodo: 'GET', caminho: `/v1/requests/${protocolo}`,
+    });
+    expect(semSessao.status).toBe(401);
+    const corpo = JSON.stringify(semSessao.body);
+    const titular = banco.cenario.titulares[0];
+    for (const segredo of Object.values(titular.segredos)) {
+      expect(corpo).not.toContain(segredo);
+    }
+    expect(Object.keys(semSessao.body)).toEqual(['erro']);
   });
 });
