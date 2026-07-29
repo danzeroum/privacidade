@@ -60,9 +60,15 @@ CREATE TYPE tratamento_risco AS ENUM ('mitigar', 'transferir', 'evitar', 'aceita
 
 CREATE TYPE dano_titular AS ENUM ('material', 'moral', 'discriminacao', 'perda_de_controle');
 
+-- 'oposicao' (Art. 18, §2º) é distinto de 'bloqueio' (Art. 18, IV): bloqueio
+-- suspende um dado, oposição objeta ao FUNDAMENTO do tratamento. É a oposição
+-- que a LIA publica em lia.canal_oposicao como salvaguarda do legítimo
+-- interesse (Art. 10, §3º) — apelidar um de outro deixaria a LIA apontando
+-- para um canal que decide outra coisa.
 CREATE TYPE direito_titular AS ENUM (
   'confirmacao', 'acesso', 'correcao', 'anonimizacao', 'bloqueio',
-  'eliminacao', 'portabilidade', 'compartilhamentos', 'revogacao', 'revisao_decisao'
+  'eliminacao', 'portabilidade', 'compartilhamentos', 'revogacao', 'revisao_decisao',
+  'oposicao'
 );
 
 CREATE TYPE status_solicitacao AS ENUM ('recebida', 'em_analise', 'aguardando_titular', 'concluida', 'recusada');

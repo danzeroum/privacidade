@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
+import { parse as parseYaml } from 'yaml';
 import { dirname, join, resolve } from 'path';
 import { tmpdir } from 'os';
 import { render, screen, fireEvent, act, cleanup, within } from '@testing-library/react';
@@ -20,6 +21,11 @@ import {
   CATEGORIAS, GATILHOS, TABELAS, TABELAS_IDS, aplicar, condicoesDe, nivelDoRisco,
   reproduzir, tomDoRisco, ultimaDecisao, vigenteDe,
 } from '../src/mock/decisoes';
+import { requestPortal } from '../src/mock/portal';
+import { DIREITOS, REGIME, nivelExigido } from '../src/mock/direitos';
+import {
+  CAMINHO_DA_OPOSICAO, OPERACOES, RAIZES_DO_MOCK, ROTAS_APENAS_DEMO, canalDeOposicao, operacaoDe,
+} from '../src/mock/rotas';
 import { REGRAS, derivarFila, eDe, minhaFila } from '../src/mock/fila';
 import type { ContadoresDaFila, ItemDaFila } from '../src/mock/fila';
 import {
@@ -47,7 +53,7 @@ import T6 from '../src/screens/T6';
 import T11, { DESVIOS, trilhaDoAchado } from '../src/screens/T11';
 import { useSessao, limparBancosDaSessao } from '../src/store/sessao';
 import { sha256, hashCpf } from '../src/lib/sha256';
-import type { DecisaoRegistrada, EstadoIncidente, Papel } from '../src/mock/types';
+import type { DecisaoRegistrada, Direito, EstadoIncidente, Papel } from '../src/mock/types';
 
 let banco: BancoMock;
 beforeEach(() => {
@@ -715,9 +721,24 @@ describe('T4-02 — concluir o atendimento', () => {
     expect(semRazao.status).toBe(422);
     expect(banco.cenario.solicitacoes.find((x) => x.id === 's1')!.status).toBe('em_analise');
 
-    const comRazao = chamar('dpo', {
+    // PR 16 — fundamento continua obrigatório, e agora a recusa também nomeia o
+    // que ficou: item, lei e data. Sem a lista, 422 mesmo com a razão escrita.
+    const semRetidos = chamar('dpo', {
       metodo: 'POST', caminho: '/v1/requests/s1/concluir',
       body: { desfecho: 'recusado_com_fundamento', evidencia: 'Guarda fiscal obrigatória de 5 anos impede a eliminação agora.' },
+    });
+    expect(semRetidos.status).toBe(422);
+
+    const comRazao = chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/requests/s1/concluir',
+      body: {
+        desfecho: 'recusado_com_fundamento',
+        evidencia: 'Guarda fiscal obrigatória de 5 anos impede a eliminação agora.',
+        retidos: [{
+          item: 'Notas fiscais das suas compras', base_legal: 'obrigacao_legal',
+          artigo: 'Art. 16, I', retencao_ate: '2031-07-29',
+        }],
+      },
     });
     expect(comRazao.status).toBe(200);
     // PR 7 — o estado passou a se chamar como no MAPA.
@@ -4605,5 +4626,833 @@ describe('PR 15 · validação — o §1 do MAPA descreve telas que existem?', (
     // A pendência que sobrava era esta, e ela é este PR.
     expect(pr05).not.toContain('estado do achado');
     expect(pr05.split('|').at(-2)!.trim()).toBe('—');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 16 · o portal do titular (Risco-001, P0)
+//
+// A ordem dos blocos é a da recomendação: primeiro os dois invariantes que
+// sustentam tudo — o nível derivado no servidor e o 401 que não é oráculo —,
+// depois as rotas. Invariante escrito depois da rota é invariante que descreve
+// o que a rota faz; escrito antes, é invariante que decide o que ela pode fazer.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Abre e confirma uma verificação, devolvendo o token de sessão do portal. */
+function sessaoDoPortal(
+  b: BancoMock, direito: Direito, indiceDoTitular = 0,
+  ajuste: { codigoErrado?: boolean; semDocumento?: boolean; identificadorHash?: string } = {},
+) {
+  const titular = b.cenario.titulares[indiceDoTitular];
+  const abertura = requestPortal<{ id: string; nivel_exigido: number }>(b, {
+    metodo: 'POST',
+    caminho: '/v1/me/verificacao',
+    body: {
+      direito,
+      canal: 'email',
+      identificador_hash: ajuste.identificadorHash ?? sha256(titular.segredos.email),
+    },
+  });
+  const nivel = nivelExigido(direito);
+  const fatores: Record<string, unknown> = {
+    codigo: ajuste.codigoErrado ? '000000' : b.codigoDaVerificacao(abertura.body.id),
+  };
+  if (nivel === 2) fatores.dado_cadastro_hash = titular.cpfHash;
+  if (nivel === 3 && !ajuste.semDocumento) fatores.documento_hash = sha256('documento-com-foto');
+  const confirmacao = requestPortal<{ sessao: string; nivel_atingido: number }>(b, {
+    metodo: 'POST',
+    caminho: `/v1/me/verificacao/${abertura.body.id}/codigo`,
+    body: fatores,
+  });
+  return { abertura, confirmacao, titular, token: confirmacao.body?.sessao };
+}
+
+describe('PR 16 · invariante — o nível de verificação é derivado do direito, no servidor', () => {
+  it('a tabela declara os onze direitos, e só ela decide o nível', () => {
+    expect(DIREITOS).toHaveLength(11);
+    for (const d of DIREITOS) {
+      expect(REGIME[d].nivel, `${d} sem nível declarado`).toBeGreaterThanOrEqual(1);
+      expect(REGIME[d].nivel).toBeLessThanOrEqual(3);
+    }
+    // A escada da tela 02, item a item. Rebaixar qualquer um destes é editar
+    // esta linha — que é onde o teste olha.
+    expect(DIREITOS.filter((d) => REGIME[d].nivel === 3).sort())
+      .toEqual(['anonimizacao', 'eliminacao', 'portabilidade']);
+    expect(DIREITOS.filter((d) => REGIME[d].nivel === 1).sort())
+      .toEqual(['compartilhamentos', 'confirmacao']);
+    // `bloqueio` e `oposicao` dividem a linha 2 e continuam distintos: um
+    // suspende um dado, o outro objeta ao fundamento. Fundi-los deixaria a LIA
+    // publicando um canal que decide outra coisa.
+    expect(REGIME.oposicao.nivel).toBe(2);
+    expect(REGIME.oposicao.artigo).toContain('§2º');
+    expect(REGIME.bloqueio.artigo).not.toBe(REGIME.oposicao.artigo);
+  });
+
+  it('pedir eliminação com nivel_verificacao 1 no corpo não reduz a exigência', () => {
+    const abertura = requestPortal<{ id: string; nivel_exigido: number }>(banco, {
+      metodo: 'POST',
+      caminho: '/v1/me/verificacao',
+      body: {
+        direito: 'eliminacao',
+        canal: 'email',
+        identificador_hash: sha256(banco.cenario.titulares[0].segredos.email),
+        // O parâmetro do cliente. Se fosse lido, a escada inteira seria sugestão.
+        nivel_verificacao: 1,
+      },
+    });
+    expect(abertura.status).toBe(201);
+    expect(abertura.body.nivel_exigido).toBe(3);
+  });
+
+  it('sessão de nível 2 não abre solicitação de direito de nível 3', () => {
+    // A sessão é do direito que a pediu: uma verificação de "acesso" (nível 2)
+    // não vira crédito para eliminar.
+    const { token } = sessaoDoPortal(banco, 'acesso');
+    const res = requestPortal(banco, {
+      metodo: 'POST', caminho: '/v1/requests', sessao: token,
+      body: { direito: 'eliminacao', nivel_verificacao: 1 },
+    });
+    expect(res.status).toBe(403);
+    expect(banco.cenario.solicitacoes.some((s) => s.direito === 'eliminacao' && s.origem === 'portal')).toBe(false);
+  });
+
+  it('a solicitação criada grava o nível derivado, e não o que veio no corpo', () => {
+    const { token } = sessaoDoPortal(banco, 'eliminacao', 0);
+    const res = requestPortal<{ protocolo: string; nivel_verificacao: number }>(banco, {
+      metodo: 'POST', caminho: '/v1/requests', sessao: token,
+      body: { direito: 'eliminacao', nivel_verificacao: 1 },
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.nivel_verificacao).toBe(3);
+    const gravada = banco.cenario.solicitacoes.find((s) => s.protocolo === res.body.protocolo)!;
+    expect(gravada.nivelVerificacao).toBe(3);
+  });
+
+  it('confirmar eliminação sem o documento não confirma a sessão', () => {
+    const { confirmacao } = sessaoDoPortal(banco, 'eliminacao', 0, { semDocumento: true });
+    expect(confirmacao.status).toBe(422);
+    expect(confirmacao.body).not.toHaveProperty('sessao');
+  });
+});
+
+describe('PR 16 · invariante — o 401 não diz se o cadastro existe', () => {
+  const semCadastro = () => sha256('ninguem-com-esse-email@exemplo.com');
+
+  it('código inválido responde igual para e-mail cadastrado e não cadastrado', () => {
+    const cadastrado = sessaoDoPortal(banco, 'acesso', 0, { codigoErrado: true }).confirmacao;
+    const inexistente = sessaoDoPortal(banco, 'acesso', 0, {
+      codigoErrado: true, identificadorHash: semCadastro(),
+    }).confirmacao;
+    expect(cadastrado.status).toBe(401);
+    expect(inexistente).toEqual(cadastrado);
+  });
+
+  it('nem o código certo confirma um e-mail que não está cadastrado — e a recusa é a mesma', () => {
+    // O caso mais afiado: se a recusa por "código certo, cadastro inexistente"
+    // fosse diferente da recusa por "código errado", o par de respostas viraria
+    // um oráculo de cadastro operável em lote.
+    const errado = sessaoDoPortal(banco, 'acesso', 0, { codigoErrado: true }).confirmacao;
+    const certoSemCadastro = sessaoDoPortal(banco, 'acesso', 0, {
+      identificadorHash: semCadastro(),
+    }).confirmacao;
+    expect(certoSemCadastro.status).toBe(401);
+    expect(certoSemCadastro).toEqual(errado);
+  });
+
+  it('abrir a verificação responde 201 igual para os dois, e nunca devolve o código', () => {
+    const corpo = (hash: string) => requestPortal<Record<string, unknown>>(banco, {
+      metodo: 'POST',
+      caminho: '/v1/me/verificacao',
+      body: { direito: 'acesso', canal: 'email', identificador_hash: hash },
+    });
+    const a = corpo(sha256(banco.cenario.titulares[0].segredos.email));
+    const b = corpo(semCadastro());
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+    // O `id` é diferente por construção; todo o resto tem de ser igual.
+    expect(Object.keys(a.body).sort()).toEqual(Object.keys(b.body).sort());
+    const { id: _a, expira_em: _ea, ...restoA } = a.body as Record<string, unknown>;
+    const { id: _b, expira_em: _eb, ...restoB } = b.body as Record<string, unknown>;
+    expect(restoA).toEqual(restoB);
+    expect(JSON.stringify(a.body)).not.toContain(banco.codigoDaVerificacao(String(a.body.id)));
+  });
+
+  it('nenhum campo do titular sai antes da confirmação', () => {
+    const protocolo = banco.cenario.solicitacoes[0].protocolo;
+    const semSessao = requestPortal<Record<string, unknown>>(banco, {
+      metodo: 'GET', caminho: `/v1/requests/${protocolo}`,
+    });
+    expect(semSessao.status).toBe(401);
+    const corpo = JSON.stringify(semSessao.body);
+    const titular = banco.cenario.titulares[0];
+    for (const segredo of Object.values(titular.segredos)) {
+      expect(corpo).not.toContain(segredo);
+    }
+    expect(Object.keys(semSessao.body)).toEqual(['erro']);
+  });
+});
+
+describe('PR 16 · as doze rotas — verificação: existem e respondem o contrato?', () => {
+  it('as treze do portal estão declaradas no contrato e têm política própria', () => {
+    const portal = OPERACOES.filter((o) => o.superficie === 'portal');
+    expect(portal).toHaveLength(13);
+    for (const op of portal) {
+      const caminho = op.contrato.replace(/\{[^}]+\}/g, 'x').replace(/^\//, '');
+      const politica = POLITICAS.find((p) => p.superficie === 'portal'
+        && p.metodo === op.metodo && p.caminho.test(caminho));
+      expect(politica, `${op.metodo} ${op.contrato} sem política declarada em politicas.ts`).toBeTruthy();
+    }
+  });
+
+  it('cada uma responde algo que não é o 404 terminal do dispatcher', () => {
+    // Verificação, não validação: a pergunta é se a rota existe, não se o
+    // titular consegue exercer o direito por ela.
+    const { token } = sessaoDoPortal(banco, 'revogacao');
+    const chamadas: [ 'GET' | 'POST', string ][] = [
+      ['GET', '/v1/me/direitos'],
+      ['POST', '/v1/me/verificacao'],
+      ['POST', '/v1/me/verificacao/xx/codigo'],
+      ['POST', '/v1/requests'],
+      ['GET', '/v1/requests/xx'],
+      ['POST', '/v1/requests/xx/mensagens'],
+      ['GET', '/v1/requests/xx/pacote'],
+      ['GET', '/v1/me/consentimentos'],
+      ['POST', '/v1/me/consentimentos/xx/revogacao'],
+      ['GET', '/v1/me/consentimentos/xx/propagacao'],
+      ['GET', '/v1/me/decisoes/xx'],
+      ['POST', '/v1/me/decisoes/xx/revisao'],
+      ['POST', '/v1/titulares/me/oposicao?lia=LIA-SCORING-001'],
+    ];
+    expect(chamadas).toHaveLength(13);
+    for (const [metodo, caminho] of chamadas) {
+      const res = requestPortal<{ erro?: string }>(banco, { metodo, caminho, sessao: token, body: {} });
+      expect(String(res.body?.erro ?? ''), `${metodo} ${caminho} caiu no 404 terminal`)
+        .not.toContain('Rota não encontrada');
+    }
+  });
+
+  it('GET /me/direitos devolve os onze, com nível e prazo, e nenhum dado de titular', () => {
+    const res = requestPortal<{ direitos: any[] }>(banco, { metodo: 'GET', caminho: '/v1/me/direitos' });
+    expect(res.status).toBe(200);
+    expect(res.body.direitos).toHaveLength(11);
+    expect(res.body.direitos.find((d) => d.direito === 'oposicao').nivel).toBe(2);
+    expect(res.body.direitos.find((d) => d.direito === 'eliminacao').nivel).toBe(3);
+    expect(res.body.direitos.find((d) => d.direito === 'revisao_decisao').prazo_dias).toBe(5);
+    const corpo = JSON.stringify(res.body);
+    for (const t of banco.cenario.titulares) {
+      for (const segredo of Object.values(t.segredos)) expect(corpo).not.toContain(segredo);
+    }
+  });
+});
+
+describe('PR 16 · POST /requests — prazo derivado do direito, gravado antes da resposta', () => {
+  const DIA = 24 * 60 * 60 * 1000;
+
+  it('calcula 15 dias para o acesso e 5 para a revisão do Art. 20', () => {
+    const antes = Date.now();
+    const acesso = requestPortal<{ prazo_limite: string; prazo_dias: number }>(banco, {
+      metodo: 'POST', caminho: '/v1/requests', sessao: sessaoDoPortal(banco, 'acesso').token,
+      body: { direito: 'acesso' },
+    });
+    expect(acesso.status).toBe(201);
+    expect(acesso.body.prazo_dias).toBe(15);
+    expect(Date.parse(acesso.body.prazo_limite) - antes).toBeGreaterThanOrEqual(15 * DIA - 5000);
+    expect(Date.parse(acesso.body.prazo_limite) - antes).toBeLessThan(15 * DIA + 5000);
+
+    const decisao = banco.cenario.titulares[0].decisao!;
+    const revisao = requestPortal<{ prazo_limite: string; prazo_dias: number }>(banco, {
+      metodo: 'POST', caminho: `/v1/me/decisoes/${decisao.id}/revisao`,
+      sessao: sessaoDoPortal(banco, 'revisao_decisao').token,
+      body: { fundamento: 'Não reconheço a recusa; meu emprego é estável há sete anos.' },
+    });
+    expect(revisao.status).toBe(201);
+    expect(revisao.body.prazo_dias).toBe(5);
+    expect(Date.parse(revisao.body.prazo_limite) - antes).toBeLessThan(5 * DIA + 5000);
+  });
+
+  it('o prazo está gravado na solicitação antes de a resposta sair', () => {
+    const res = requestPortal<{ protocolo: string; prazo_limite: string }>(banco, {
+      metodo: 'POST', caminho: '/v1/requests', sessao: sessaoDoPortal(banco, 'acesso').token,
+      body: { direito: 'acesso' },
+    });
+    const gravada = banco.cenario.solicitacoes.find((s) => s.protocolo === res.body.protocolo)!;
+    expect(new Date(gravada.prazoLimiteMs).toISOString()).toBe(res.body.prazo_limite);
+    // E a linha do trail saiu antes: ela já carrega o prazo.
+    const linha = banco.auditoria.find((l) => l.acao === 'SOLICITACAO_ABERTA' && l.protocolo === res.body.protocolo)!;
+    expect(linha.campos.some((c) => c.startsWith('prazo_limite='))).toBe(true);
+  });
+
+  it('o pedido não exige justificativa, e o texto livre passa pelo redator', () => {
+    const semTexto = requestPortal(banco, {
+      metodo: 'POST', caminho: '/v1/requests', sessao: sessaoDoPortal(banco, 'acesso').token,
+      body: { direito: 'acesso' },
+    });
+    expect(semTexto.status).toBe(201);
+
+    const comCpf = requestPortal<{ protocolo: string }>(banco, {
+      metodo: 'POST', caminho: '/v1/requests', sessao: sessaoDoPortal(banco, 'acesso', 1).token,
+      body: { direito: 'acesso', texto: 'Meu CPF é 529.982.247-25, confiram por favor.' },
+    });
+    expect(comCpf.status).toBe(201);
+    const gravada = banco.cenario.solicitacoes.find((s) => s.protocolo === comCpf.body.protocolo)!;
+    expect(gravada.detalhe).toContain('[CPF removido]');
+    expect(gravada.detalhe).not.toContain('529.982.247-25');
+    const linha = banco.auditoria.find((l) => l.protocolo === comCpf.body.protocolo)!;
+    expect(linha.justificativa).not.toContain('529.982.247-25');
+  });
+
+  it('falha de log ao abrir derruba a solicitação inteira: 503 e nenhum protocolo criado', () => {
+    const token = sessaoDoPortal(banco, 'acesso').token;
+    const antes = banco.cenario.solicitacoes.length;
+    banco.simularFalhaDeLog = true;
+    const res = requestPortal<{ erro: string }>(banco, {
+      metodo: 'POST', caminho: '/v1/requests', sessao: token, body: { direito: 'acesso' },
+    });
+    expect(res.status).toBe(503);
+    expect(banco.cenario.solicitacoes).toHaveLength(antes);
+    expect(banco.cenario.solicitacoes.some((s) => s.origem === 'portal')).toBe(false);
+  });
+});
+
+describe('PR 16 · atendimento parcial — retidos[] com base legal e data, item a item', () => {
+  const emAnalise = () => banco.cenario.solicitacoes.find((s) => s.status === 'em_analise')!;
+
+  it('parcial sem retidos[] é recusado com 422', () => {
+    const res = chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/requests/${emAnalise().id}/concluir`,
+      body: { desfecho: 'atendido_parcialmente', evidencia: 'Parte dos dados fica retida por lei.' },
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('retido sem base legal, ou sem data, também é 422', () => {
+    const semBase = chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/requests/${emAnalise().id}/concluir`,
+      body: {
+        desfecho: 'atendido_parcialmente', evidencia: 'Parte dos dados fica retida por lei.',
+        retidos: [{ item: 'Notas fiscais', retencao_ate: '2031-07-29' }],
+      },
+    });
+    expect(semBase.status).toBe(422);
+
+    const semData = chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/requests/${emAnalise().id}/concluir`,
+      body: {
+        desfecho: 'atendido_parcialmente', evidencia: 'Parte dos dados fica retida por lei.',
+        retidos: [{ item: 'Notas fiscais', base_legal: 'obrigacao_legal' }],
+      },
+    });
+    expect(semData.status).toBe(422);
+    expect(String(semData.body && (semData.body as any).erro)).toContain('data de eliminação');
+  });
+
+  it('concluído em parte, o titular vê o que foi apagado e o que ficou — com a lei e a data', () => {
+    const alvo = banco.cenario.solicitacoes.find(
+      (s) => s.status === 'em_analise' && s.titularId === banco.cenario.titulares[0].id,
+    )!;
+    const conclusao = chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/requests/${alvo.id}/concluir`,
+      body: {
+        desfecho: 'atendido_parcialmente',
+        evidencia: 'Cadastro apagado; notas fiscais retidas por obrigação fiscal.',
+        apagados: ['Perfil de navegação', 'Telefone de contato'],
+        retidos: [{
+          item: 'Notas fiscais das suas compras', base_legal: 'obrigacao_legal',
+          artigo: 'Art. 16, I', retencao_ate: '2031-07-29',
+          motivo: 'A legislação fiscal obriga a guardar a nota por cinco anos.',
+        }],
+      },
+    });
+    expect(conclusao.status).toBe(200);
+
+    const { token } = sessaoDoPortal(banco, alvo.direito, 0);
+    const vista = requestPortal<any>(banco, {
+      metodo: 'GET', caminho: `/v1/requests/${alvo.protocolo}`, sessao: token,
+    });
+    expect(vista.status).toBe(200);
+    expect(vista.body.apagados).toHaveLength(2);
+    expect(vista.body.retidos).toEqual([expect.objectContaining({
+      item: 'Notas fiscais das suas compras',
+      base_legal: 'obrigacao_legal',
+      retencao_ate: '2031-07-29',
+    })]);
+    // Recusa e retenção nunca aparecem sem o caminho da autoridade ao lado.
+    expect(vista.body.caminho_da_anpd).toContain('ANPD');
+  });
+});
+
+describe('PR 16 · revogação — cascata registrada, propagação consultável, alerta de 24 h', () => {
+  let varejo: BancoMock;
+  /** Beatriz tem telefone sob consentimento (v-tel), que não é sensível e é revelável. */
+  const TITULAR = 2;
+  const CAMPO = 'v-tel';
+
+  const revogar = () => {
+    const { token } = sessaoDoPortal(varejo, 'revogacao', TITULAR);
+    return requestPortal<any>(varejo, {
+      metodo: 'POST', caminho: `/v1/me/consentimentos/${CAMPO}/revogacao`, sessao: token,
+    });
+  };
+
+  beforeEach(() => { varejo = new BancoMock('varejo'); });
+
+  it('a cascata cobre os três sistemas: quem trata, quem recebeu e o que já foi coletado', () => {
+    const res = revogar();
+    expect(res.status).toBe(200);
+    expect(res.body.cascata).toHaveLength(3);
+    expect(res.body.cascata.map((c: any) => c.tipo).sort())
+      .toEqual(['cessacao', 'expurgo', 'notificacao']);
+    expect(res.body.cascata.find((c: any) => c.tipo === 'notificacao').alvo).toBe('Zenvia');
+    // O expurgo nasce pendente: o executor é externo (Risco-006), e fingir que
+    // concluiu seria a promessa sem instrumento que a auditoria enumerou.
+    expect(res.body.cascata.find((c: any) => c.tipo === 'expurgo').estado).toBe('pendente');
+    expect(varejo.auditoria.some((l) => l.acao === 'CONSENTIMENTO_REVOGADO')).toBe(true);
+  });
+
+  it('o tratamento a jusante é bloqueado com 422 — para quem revogou, e só para ele', () => {
+    revogar();
+    const revelar = (indice: number) => chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/pseudonyms/resolve', purpose: 'atendimento',
+      body: {
+        titularId: varejo.cenario.titulares[indice].id,
+        campo: 'telefone',
+        justificativa: 'Confirmação de contato para o atendimento do protocolo em curso.',
+        protocolo: varejo.cenario.solicitacoes.find((s) => s.titularId === varejo.cenario.titulares[indice].id)?.protocolo,
+      },
+    });
+    // O banco do `chamar` é o `banco` do beforeEach global; aqui a chamada
+    // precisa ir ao cenário de varejo.
+    const bloqueado = request(varejo, {
+      papel: 'dpo', ator: 'teste', metodo: 'POST', caminho: '/v1/pseudonyms/resolve',
+      purpose: 'atendimento',
+      body: {
+        titularId: varejo.cenario.titulares[TITULAR].id, campo: 'telefone',
+        justificativa: 'Confirmação de contato para o atendimento do protocolo em curso.',
+        protocolo: varejo.cenario.solicitacoes.find((s) => s.titularId === varejo.cenario.titulares[TITULAR].id)!.protocolo,
+      },
+    });
+    expect(bloqueado.status).toBe(422);
+    expect(String((bloqueado.body as any).erro)).toContain('retirou a autorização');
+    void revelar;
+
+    // Marina (t1) também tem v-tel e não revogou: a base legal dela continua de pé.
+    const outra = request(varejo, {
+      papel: 'dpo', ator: 'teste', metodo: 'POST', caminho: '/v1/pseudonyms/resolve',
+      purpose: 'atendimento',
+      body: {
+        titularId: varejo.cenario.titulares[0].id, campo: 'telefone',
+        justificativa: 'Confirmação de contato para o atendimento do protocolo em curso.',
+        protocolo: varejo.cenario.solicitacoes.find((s) => s.titularId === varejo.cenario.titulares[0].id)!.protocolo,
+      },
+    });
+    expect(outra.status).toBe(200);
+  });
+
+  it('a propagação é consultável, e revogar duas vezes é 409', () => {
+    revogar();
+    const { token } = sessaoDoPortal(varejo, 'revogacao', TITULAR);
+    const p = requestPortal<any>(varejo, {
+      metodo: 'GET', caminho: `/v1/me/consentimentos/${CAMPO}/propagacao`, sessao: token,
+    });
+    expect(p.status).toBe(200);
+    expect(p.body.itens).toHaveLength(3);
+    expect(p.body.pendentes).toBe(1);
+    expect(p.body.alerta).toBe(false);
+
+    const denovo = requestPortal(varejo, {
+      metodo: 'POST', caminho: `/v1/me/consentimentos/${CAMPO}/revogacao`, sessao: token,
+    });
+    expect(denovo.status).toBe(409);
+  });
+
+  it('pendência acima de 24 h levanta alerta — e o alerta é visível ao titular', () => {
+    revogar();
+    const pendente = varejo.revogacoesTitular[0].cascata.find((c) => c.estado === 'pendente')!;
+    pendente.iniciadaEmMs -= 25 * 60 * 60 * 1000;
+
+    const { token } = sessaoDoPortal(varejo, 'revogacao', TITULAR);
+    const p = requestPortal<any>(varejo, {
+      metodo: 'GET', caminho: `/v1/me/consentimentos/${CAMPO}/propagacao`, sessao: token,
+    });
+    expect(p.body.alerta).toBe(true);
+    expect(p.body.alerta_desde).toBeTruthy();
+    expect(p.body.alerta_texto).toContain('24 h');
+  });
+
+  it('minhas autorizações mostram o texto na versão aceita, e o que se perde ao retirar', () => {
+    const { token } = sessaoDoPortal(varejo, 'revogacao', TITULAR);
+    const res = requestPortal<any>(varejo, {
+      metodo: 'GET', caminho: '/v1/me/consentimentos', sessao: token,
+    });
+    expect(res.status).toBe(200);
+    const tel = res.body.consentimentos.find((c: any) => c.id === CAMPO);
+    expect(tel.versao).toBe('v2');
+    expect(tel.canal).toBe('checkout web');
+    expect(tel.estado).toBe('ativo');
+    expect(tel.o_que_voce_perde.join(' ')).toContain('Zenvia');
+  });
+});
+
+describe('PR 16 · invariante de paridade — contrato e mock, nos dois sentidos (Risco-034)', () => {
+  const CONTRATO = (() => {
+    const doc = parseYaml(readFileSync(join('..', 'api', 'openapi.yaml'), 'utf8')) as any;
+    const ops: string[] = [];
+    for (const [caminho, item] of Object.entries<any>(doc.paths)) {
+      for (const m of ['get', 'post', 'patch', 'delete', 'put']) {
+        if (item[m]) ops.push(`${m.toUpperCase()} ${caminho}`);
+      }
+    }
+    return ops;
+  })();
+
+  it('toda operação do contrato está declarada em rotas.ts', () => {
+    expect(CONTRATO.length).toBeGreaterThan(50);
+    const declaradas = new Set(OPERACOES.map((o) => `${o.metodo} ${o.contrato}`));
+    const orfas = CONTRATO.filter((c) => !declaradas.has(c));
+    expect(orfas, 'operação no contrato sem linha em mock/rotas.ts').toEqual([]);
+  });
+
+  it('toda linha de rotas.ts existe no contrato — o mock nunca vai à frente dele', () => {
+    const noContrato = new Set(CONTRATO);
+    const orfas = OPERACOES
+      .map((o) => `${o.metodo} ${o.contrato}`)
+      .filter((c) => !noContrato.has(c));
+    expect(orfas, 'rota declarada que o contrato não tem').toEqual([]);
+    // E nenhuma linha duplicada: duas declarações da mesma operação escondem
+    // divergência entre elas.
+    expect(new Set(OPERACOES.map((o) => `${o.metodo} ${o.contrato}`)).size).toBe(OPERACOES.length);
+  });
+
+  it('a tabela não é decorativa: toda rota servida responde de verdade', () => {
+    const servidas = OPERACOES.filter((o) => o.mock);
+    expect(servidas.length).toBeGreaterThan(30);
+    for (const op of servidas) {
+      if (op.superficie === 'portal' && op.contrato !== '/requests/{id}/mensagens') continue;
+      const res = request<{ erro?: string }>(banco, {
+        metodo: op.metodo as 'GET' | 'POST' | 'PATCH' | 'DELETE',
+        caminho: op.mock!,
+        papel: op.papel ?? 'dpo',
+        ator: 'teste',
+        body: {},
+      });
+      expect(String(res.body?.erro ?? ''), `${op.metodo} ${op.mock} caiu no 404 terminal do switch`)
+        .not.toContain('Rota não encontrada');
+    }
+  });
+
+  it('quem não é servida diz por quê, e a única razão admitida é ingestão de CI', () => {
+    const semMock = OPERACOES.filter((o) => !o.mock && o.superficie === 'console');
+    for (const op of semMock) {
+      expect(op.motivo, `${op.metodo} ${op.contrato} sem mock e sem motivo`).toBe('ingestao_ci');
+    }
+    // A lista é fechada. Crescer aqui é decisão visível no diff, não omissão.
+    expect(semMock.map((o) => `${o.metodo} ${o.contrato}`).sort()).toEqual([
+      'GET /threat-models/{repo}',
+      'POST /catalog/inventories',
+      'POST /gates/runs',
+      'POST /kms/rotations/{id}/steps',
+      'POST /metrics/snapshots',
+      'POST /purge/runs',
+      'POST /ripds/triage',
+      'POST /telemetry/redaction',
+      'PUT /threat-models/{repo}',
+    ].sort());
+  });
+
+  it('toda raiz que o switch de api.ts atende está declarada — nada entra pela porta dos fundos', () => {
+    const fonte = readFileSync(join('src', 'mock', 'api.ts'), 'utf8');
+    const raizes = [...fonte.matchAll(/case '(GET|POST|PATCH|DELETE) ([a-z.]+)':/g)]
+      .map((m) => `${m[1]} ${m[2]}`);
+    expect(raizes.length, 'sem raiz extraída a varredura não prova nada').toBeGreaterThan(20);
+    const naoDeclaradas = raizes.filter((r) => !RAIZES_DO_MOCK.has(r));
+    expect(naoDeclaradas, 'raiz atendida pelo mock e ausente de mock/rotas.ts').toEqual([]);
+  });
+
+  it('a rota de forja fica fora do contrato — declarada, e sozinha', () => {
+    expect(ROTAS_APENAS_DEMO).toHaveLength(1);
+    expect(ROTAS_APENAS_DEMO[0].mock).toBe('/v1/audit/forjar');
+    expect(CONTRATO.some((c) => c.includes('forjar'))).toBe(false);
+    // E ela continua exigindo o modo demonstração.
+    banco.modoDemo = false;
+    expect(chamar('dpo', { metodo: 'POST', caminho: '/v1/audit/forjar', body: { id: 2 } }).status).toBe(404);
+  });
+
+  it('o contrato declara a superfície separada do portal e o esquema próprio do titular', () => {
+    const doc = parseYaml(readFileSync(join('..', 'api', 'openapi.yaml'), 'utf8')) as any;
+    expect(doc.components.securitySchemes.sessaoTitular).toBeTruthy();
+    for (const op of OPERACOES.filter((o) => o.superficie === 'portal')) {
+      const item = doc.paths[op.contrato];
+      const operacao = item[op.metodo.toLowerCase()];
+      const seguranca = operacao.security ?? doc.security;
+      const esquemas = seguranca.flatMap((s: any) => Object.keys(s));
+
+      if (op.contrato === '/requests/{id}/mensagens') {
+        // A única das doze que vive nas duas superfícies: é a mesma conversa,
+        // das duas pontas. Por isso aceita os dois esquemas, e não um servidor
+        // só — e é justamente por aceitar os dois que precisa dizê-lo.
+        expect(esquemas.sort()).toEqual(['oidc', 'sessaoTitular']);
+        continue;
+      }
+      const servidor = operacao.servers ?? item.servers;
+      expect(servidor?.[0]?.url, `${op.contrato} sem servidor de portal declarado`)
+        .toContain('portal.lastro');
+      // E nenhuma delas aceita o SSO interno: o console não entra pelo portal.
+      expect(esquemas).not.toContain('oidc');
+    }
+  });
+
+  it('nenhuma rota do portal empresta permissão da matriz interna', () => {
+    for (const p of POLITICAS.filter((x) => x.superficie === 'portal')) {
+      expect(p.acao, `${p.caminho} declara ação de papel interno`).toBeUndefined();
+      expect(p.foraDeEscopo).toBe('401_uniforme');
+    }
+  });
+});
+
+describe('PR 16 · T4 na tela — o balcão consegue responder o que o portal mostra', () => {
+  const montarT4 = () => {
+    limparBancosDaSessao();
+    useSessao.setState({
+      papel: 'dpo', banco: new BancoMock('banco'), versao: 0,
+      avisos: [], recusas: {}, protocoloSelecionado: '2026-0731',
+    });
+    return render(<MemoryRouter><T4 /></MemoryRouter>);
+  };
+
+  it('a lista de retidos só aparece quando o desfecho a exige', () => {
+    montarT4();
+    expect(screen.queryByText(/o que ficou retido/i)).toBeNull();
+    fireEvent.change(screen.getByLabelText(/desfecho/i), { target: { value: 'atendido_parcialmente' } });
+    expect(screen.getByText(/o que ficou retido/i)).toBeInTheDocument();
+  });
+
+  /**
+   * O ponto do teste não é o formulário: é que a regra nova não pode existir
+   * apenas como 422. Botão que só sabe recusar transforma a exigência em
+   * obstáculo, e obstáculo é o que faz alguém procurar o caminho de fora.
+   */
+  it('sem item completo o botão não deixa concluir; com item completo, conclui', () => {
+    montarT4();
+    fireEvent.change(screen.getByLabelText(/desfecho/i), { target: { value: 'atendido_parcialmente' } });
+    const concluir = screen.getByRole('button', { name: /registrar conclusão/i });
+    expect(concluir).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '+ item retido' }));
+    expect(concluir).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/item retido 1/i), { target: { value: 'Notas fiscais' } });
+    expect(concluir).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/retenção até, item 1/i), { target: { value: '2031-07-29' } });
+    expect(concluir).not.toBeDisabled();
+
+    fireEvent.click(concluir);
+    const s = useSessao.getState().banco.cenario.solicitacoes.find((x) => x.protocolo === '2026-0731')!;
+    expect(s.desfecho).toBe('atendido_parcialmente');
+    expect(s.retidos).toEqual([expect.objectContaining({
+      item: 'Notas fiscais', baseLegal: 'obrigacao_legal', retencaoAte: '2031-07-29',
+    })]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 17 · oposição (Art. 18, §2º) — o último sub-item do P0
+//
+// Verificação e validação separadas, como sempre: primeiro *a rota existe no
+// caminho que a LIA anuncia?*, depois *o titular consegue se opor e o
+// tratamento para?*. A primeira pergunta é a que fecha o Risco-001; a segunda é
+// a que impede a rota de ser um 201 decorativo.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('PR 17 · verificação — a rota existe no caminho que a LIA anuncia', () => {
+  const SEED = readFileSync(join('..', 'db', 'seed.sql'), 'utf8');
+
+  /** O canal como o banco de produção o publica, extraído do próprio seed. */
+  const canalNoSeed = (): string => {
+    const m = SEED.match(/'(POST [^']*oposicao[^']*)'/);
+    expect(m, 'db/seed.sql precisa publicar um canal_oposicao').toBeTruthy();
+    return m![1];
+  };
+
+  it('o canal publicado pela LIA é exatamente o que o código serve', () => {
+    // Falha se alguém renomear qualquer um dos dois lados. Era este o defeito:
+    // a LIA anunciava POST /api/v1/titulares/me/oposicao e nenhuma linha de
+    // código sabia disso — o canal e a rota nunca se olharam.
+    expect(canalNoSeed()).toBe(canalDeOposicao('LIA-SCORING-001'));
+    expect(canalNoSeed()).toContain(CAMINHO_DA_OPOSICAO);
+  });
+
+  it('esse caminho está no contrato, e a catraca de paridade o conhece', () => {
+    const semPrefixo = CAMINHO_DA_OPOSICAO.replace(/^\/v1/, '');
+    const doc = parseYaml(readFileSync(join('..', 'api', 'openapi.yaml'), 'utf8')) as any;
+    expect(doc.paths[semPrefixo]?.post, 'o contrato não declara o caminho que a LIA publica').toBeTruthy();
+    expect(operacaoDe('POST', semPrefixo), 'rotas.ts não declara a operação').toBeTruthy();
+    // E o enum do contrato tem os onze.
+    expect(doc.components.schemas.Direito.enum).toHaveLength(11);
+    expect(doc.components.schemas.Direito.enum).toContain('oposicao');
+  });
+
+  it('o enum de onze vale nos três lugares: contrato, schema e vocabulário do mock', () => {
+    const schema = readFileSync(join('..', 'db', 'schema.sql'), 'utf8');
+    const enumSql = schema.match(/CREATE TYPE direito_titular AS ENUM \(([\s\S]*?)\);/)![1];
+    const valores = [...enumSql.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+    expect(valores.sort()).toEqual([...DIREITOS].sort());
+  });
+
+  it('a rota responde no caminho anunciado — e nada além dela usa esse endereço', () => {
+    const { token } = sessaoDoPortal(banco, 'oposicao');
+    const res = requestPortal<any>(banco, {
+      metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-SCORING-001`, sessao: token,
+    });
+    expect(res.status).toBe(201);
+    // O console continua sem servir este endereço: a superfície é outra.
+    const noConsole = chamar('dpo', { metodo: 'POST', caminho: CAMINHO_DA_OPOSICAO, body: {} });
+    expect(String((noConsole.body as any).erro)).toContain('Rota não encontrada');
+  });
+
+  it('a tela da LIA lê o canal do registro, e não de uma string própria', () => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [], recusas: {} });
+    render(<MemoryRouter><T8 /></MemoryRouter>);
+    expect(screen.getByText(canalDeOposicao('LIA-SCORING-001').replace('POST ', 'POST ')))
+      .toBeInTheDocument();
+    // A grafia antiga não sobrevive em lugar nenhum da tela.
+    expect(screen.queryByText(/\/api\/v1\//)).toBeNull();
+  });
+});
+
+describe('PR 17 · validação — o titular consegue se opor, e o tratamento para', () => {
+  const revelarHistorico = (b: BancoMock, indice = 0) => request(b, {
+    papel: 'dpo', ator: 'teste', metodo: 'POST', caminho: '/v1/pseudonyms/resolve',
+    purpose: 'auditoria',
+    body: {
+      titularId: b.cenario.titulares[indice].id,
+      campo: 'historico',
+      justificativa: 'Conferência do histórico usado no modelo, sob o protocolo em atendimento.',
+      protocolo: b.cenario.solicitacoes.find((s) => s.titularId === b.cenario.titulares[indice].id)!.protocolo,
+    },
+  });
+
+  const opor = (b: BancoMock, indice = 0) => {
+    const { token } = sessaoDoPortal(b, 'oposicao', indice);
+    return requestPortal<any>(b, {
+      metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-SCORING-001`, sessao: token,
+      body: { texto: 'Não concordo que meu histórico alimente o modelo de vocês.' },
+    });
+  };
+
+  it('a oposição abre protocolo com prazo de 15 dias e devolve a cessação já em vigor', () => {
+    const res = opor(banco);
+    expect(res.status).toBe(201);
+    expect(res.body.prazo_dias).toBe(15);
+    expect(res.body.protocolo).toBeTruthy();
+    expect(res.body.cessacao).toHaveLength(1);
+    expect(res.body.cessacao[0].campo).toBe('Histórico de compras');
+    expect(res.body.como_o_controlador_pode_retomar).toContain('escrita');
+  });
+
+  it('o nível continua vindo do direito: nivel_verificacao 1 no corpo não reduz nada', () => {
+    const { token } = sessaoDoPortal(banco, 'oposicao');
+    const res = requestPortal<any>(banco, {
+      metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-SCORING-001`, sessao: token,
+      body: { nivel_verificacao: 1 },
+    });
+    expect(res.body.nivel_verificacao).toBe(2);
+    const gravada = banco.cenario.solicitacoes.find((s) => s.protocolo === res.body.protocolo)!;
+    expect(gravada.nivelVerificacao).toBe(2);
+    expect(gravada.direito).toBe('oposicao');
+
+    // E a confirmação de bloqueio não empresta credencial para oposição: são
+    // direitos distintos, e a sessão é presa a um deles.
+    const comBloqueio = requestPortal(banco, {
+      metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-SCORING-001`,
+      sessao: sessaoDoPortal(banco, 'bloqueio').token,
+    });
+    expect(comBloqueio.status).toBe(403);
+  });
+
+  it('acolhida a oposição, o tratamento por legítimo interesse é recusado com 422', () => {
+    expect(revelarHistorico(banco).status).toBe(200);
+    opor(banco);
+    const depois = revelarHistorico(banco);
+    expect(depois.status).toBe(422);
+    expect(String((depois.body as any).erro)).toContain('se opôs');
+    expect(banco.auditoria.some((l) => l.acao === 'OPOSICAO_ACOLHIDA')).toBe(true);
+    // A cessação é deste titular. Joana (t3) não se opôs e segue sob a mesma LIA.
+    expect(banco.oposicoesTitular).toHaveLength(1);
+    expect(banco.oposicaoVigenteSobre('t3', 'b-hist')).toBeUndefined();
+  });
+
+  it('bloqueio segue reversível e distinto: pedir bloqueio não cessa o legítimo interesse', () => {
+    const { token } = sessaoDoPortal(banco, 'bloqueio');
+    const res = requestPortal<any>(banco, {
+      metodo: 'POST', caminho: '/v1/requests', sessao: token, body: { direito: 'bloqueio' },
+    });
+    expect(res.status).toBe(201);
+    expect(banco.oposicoesTitular).toHaveLength(0);
+    expect(revelarHistorico(banco).status).toBe(200);
+  });
+
+  it('o controlador só retoma por escrito — recusa fundamentada devolve o tratamento', () => {
+    const protocolo = opor(banco).body.protocolo;
+    expect(revelarHistorico(banco).status).toBe(422);
+
+    const solicitacao = banco.cenario.solicitacoes.find((s) => s.protocolo === protocolo)!;
+    chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/estados/solicitacao/${protocolo}`, body: { para: 'em_analise' },
+    });
+    const conclusao = chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/requests/${solicitacao.id}/concluir`,
+      body: {
+        desfecho: 'recusado_com_fundamento',
+        evidencia: 'Prevalece a prevenção à fraude no crédito, com a LIA rebalanceada em 29/07 e comunicada.',
+        retidos: [{
+          item: 'Histórico de compras usado no modelo', base_legal: 'legitimo_interesse',
+          artigo: 'Art. 10, §3º', retencao_ate: '2027-01-29',
+        }],
+      },
+    });
+    expect(conclusao.status).toBe(200);
+    expect(banco.oposicoesTitular[0].estado).toBe('recusada');
+    expect(revelarHistorico(banco).status).toBe(200);
+  });
+
+  it('falha de log ao registrar a oposição: 503, nada cessa e nenhum protocolo nasce', () => {
+    const { token } = sessaoDoPortal(banco, 'oposicao');
+    const antes = banco.cenario.solicitacoes.length;
+    banco.simularFalhaDeLog = true;
+    const res = requestPortal(banco, {
+      metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-SCORING-001`, sessao: token,
+    });
+    expect(res.status).toBe(503);
+    banco.simularFalhaDeLog = false;
+    expect(banco.oposicoesTitular).toHaveLength(0);
+    expect(banco.cenario.solicitacoes).toHaveLength(antes);
+    expect(revelarHistorico(banco).status).toBe(200);
+  });
+
+  it('opor-se duas vezes à mesma LIA é 409, e LIA inexistente é 404', () => {
+    opor(banco);
+    const { token } = sessaoDoPortal(banco, 'oposicao');
+    expect(requestPortal(banco, {
+      metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-SCORING-001`, sessao: token,
+    }).status).toBe(409);
+    expect(requestPortal(banco, {
+      metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-NAO-EXISTE`, sessao: token,
+    }).status).toBe(404);
+    expect(requestPortal(banco, {
+      metodo: 'POST', caminho: CAMINHO_DA_OPOSICAO, sessao: token,
+    }).status).toBe(422);
+  });
+
+  it('opor-se não exige justificativa, e o texto livre passa pelo redator', () => {
+    const { token } = sessaoDoPortal(banco, 'oposicao');
+    const res = requestPortal<any>(banco, {
+      metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-SCORING-001`, sessao: token,
+      body: { texto: 'Meu CPF é 529.982.247-25 e não autorizo isso.' },
+    });
+    expect(res.status).toBe(201);
+    const gravada = banco.cenario.solicitacoes.find((s) => s.protocolo === res.body.protocolo)!;
+    expect(gravada.detalhe).toContain('[CPF removido]');
+    expect(banco.auditoria.at(-1)!.justificativa).not.toContain('529.982.247-25');
   });
 });

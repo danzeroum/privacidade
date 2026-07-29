@@ -1,5 +1,6 @@
 import { sha256, hashCpf, hashEncadeado } from '../lib/sha256';
 import { aplicar } from './decisoes';
+import { canalDeOposicao } from './rotas';
 import type { Obrigacao, Trilha, TipoObrigacao } from './calendario';
 import type { Epico, Papel, Ripd } from './types';
 
@@ -477,7 +478,8 @@ const banco: Cenario = {
     { codigo: 'R2', descricao: 'Decisão automatizada sem canal de revisão', probabilidade: 3, impacto: 5, dano: 'discriminacao', danoTexto: 'Discriminação algorítmica sem via de contestação (Art. 20)', tratamento: 'Endpoint /revisao + teste de disparidade no CI', tipo: 'mitigar', esforcoSprints: 2, dono: '@dpo-marcela', dominio: 'DPO', prazo: '29/08', reavaliacao: '29/11', status: 'em_tratamento', ripdCodigo: 'RIPD-2026-014' },
   ),
   lias: [{
-    id: 'l1', codigo: 'LIA-SCORING-001', titulo: 'Enriquecimento do modelo de scoring com histórico de compras',
+    id: 'l1', codigo: 'LIA-SCORING-001', canalOposicao: canalDeOposicao('LIA-SCORING-001'),
+    titulo: 'Enriquecimento do modelo de scoring com histórico de compras',
     finalidade: 'Elevar a acurácia do scoring para reduzir recusa indevida de crédito a titulares com histórico de pagamento consistente.',
     categoria: 'Análise de crédito', beneficio: 3, danoTitular: 2, expectativa: 'media',
     alternativas: [
@@ -498,7 +500,11 @@ const banco: Cenario = {
   titulares: [
     titular('t1', 'b', '529.982.247-25', 'Ana Beatriz Silva', 'ana.silva@exemplo.com',
       [{ chave: 'renda', rotulo: 'Renda declarada', grupo: 'Crédito', catalogo: 'b-renda', valor: 'R$ 3.500,00', mascara: 'R$ ••••,••', baseLegal: 'execucao_contrato' },
-       { chave: 'score', rotulo: 'Score', grupo: 'Crédito', catalogo: 'b-score', valor: '620', mascara: '•••', baseLegal: 'protecao_credito' }],
+       { chave: 'score', rotulo: 'Score', grupo: 'Crédito', catalogo: 'b-score', valor: '620', mascara: '•••', baseLegal: 'protecao_credito' },
+       // O campo que a LIA-SCORING-001 sustenta. Sem ele no cadastro de alguém,
+       // a LIA balanceava um tratamento que nenhum titular do cenário sofria —
+       // e o canal de oposição que ela publica não teria o que cessar.
+       { chave: 'historico', rotulo: 'Histórico de compras', grupo: 'Crédito', catalogo: 'b-hist', valor: '18 meses · 214 transações', mascara: '•• meses · ••• transações', baseLegal: 'legitimo_interesse' }],
       [{ chave: 'biometria', rotulo: 'Biometria facial', grupo: 'Onboarding', catalogo: 'b-bio', baseLegal: 'consentimento' }],
       [{ destino: 'OpenAI', finalidade: 'Enriquecimento do modelo', baseLegal: 'legitimo_interesse', internacional: true, mecanismo: 'clausulas_padrao_anpd', ultimaRemessa: '27/07' },
        { destino: 'Serasa', finalidade: 'Consulta de score', baseLegal: 'protecao_credito', internacional: false, mecanismo: 'nao_aplicavel', ultimaRemessa: '26/07' },
@@ -640,7 +646,8 @@ const varejo: Cenario = {
     { codigo: 'R2', descricao: 'Público semelhante enviado a rede de anúncios sem oposição fácil', probabilidade: 4, impacto: 3, dano: 'perda_de_controle', danoTexto: 'Titular não consegue sair da audiência publicitária', tratamento: 'Oposição em um clique + purga de audiência em 24 h', tipo: 'mitigar', esforcoSprints: 1, dono: '@squad-crm', dominio: 'Produto', prazo: '19/08', reavaliacao: '19/11', status: 'identificado' },
   ),
   lias: [{
-    id: 'l1', codigo: 'LIA-RECO-002', titulo: 'Recomendação de produtos por comportamento de navegação',
+    id: 'l1', codigo: 'LIA-RECO-002', canalOposicao: canalDeOposicao('LIA-RECO-002'),
+    titulo: 'Recomendação de produtos por comportamento de navegação',
     finalidade: 'Reduzir o tempo de busca do cliente exibindo produtos correlatos ao que ele já navegou na sessão.',
     categoria: 'Melhoria de produto', beneficio: 2, danoTitular: 2, expectativa: 'alta',
     alternativas: [
@@ -801,7 +808,8 @@ const midia: Cenario = {
     { codigo: 'R2', descricao: 'Perfil infantil em audiência publicitária', probabilidade: 3, impacto: 5, dano: 'moral', danoTexto: 'Publicidade comportamental dirigida a criança (Art. 14)', tratamento: 'Bloqueio de perfis infantis no pipeline de audiência', tipo: 'evitar', esforcoSprints: 0.5, dono: '@squad-conta', dominio: 'Engenharia', prazo: '02/08', reavaliacao: '02/11', status: 'mitigado', ripdCodigo: 'RIPD-2026-008' },
   ),
   lias: [{
-    id: 'l1', codigo: 'LIA-AUDIENCIA-003', titulo: 'Medição de audiência agregada para relatório de licenciamento',
+    id: 'l1', codigo: 'LIA-AUDIENCIA-003', canalOposicao: canalDeOposicao('LIA-AUDIENCIA-003'),
+    titulo: 'Medição de audiência agregada para relatório de licenciamento',
     finalidade: 'Reportar audiência agregada por título aos detentores de direitos, obrigação contratual de licenciamento.',
     categoria: 'Melhoria de produto', beneficio: 2, danoTitular: 3, expectativa: 'baixa',
     alternativas: [

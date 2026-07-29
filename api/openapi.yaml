@@ -1,22 +1,46 @@
 openapi: 3.1.0
 info:
   title: Lastro — API de governança de privacidade
-  version: "1.0.0"
+  version: "1.1.0"
   description: |
-    Contrato que liga os 12 artefatos de privacidade à plataforma.
+    Contrato que liga os 12 artefatos de privacidade à plataforma — e, desde a versão 1.1, o
+    **portal do titular**: as rotas pelas quais uma pessoa exerce os direitos do Art. 18.
+
+    Duas superfícies, propositalmente separadas:
+
+    * **Console interno** (`https://lastro.internal/v1`) — o balcão do DPO. Autenticação pelo SSO
+      corporativo (`oidc`), papéis internos, densidade de especialista.
+    * **Portal do titular** (`https://portal.lastro.exemplo/v1`, caminhos `/me/*`, `POST /requests`,
+      `GET /requests/{protocolo}`) — o lado de fora. Autenticação **é** a verificação escalonada:
+      não há papel, não há SSO interno, e a credencial nasce de uma confirmação de identidade cujo
+      nível o servidor deriva do direito pedido.
 
     Regras válidas para toda a API:
 
-    * **`X-Purpose` é obrigatório** em qualquer rota que toque dado de titular. Ausência devolve 403
-      e grava `ACESSO_SEM_FINALIDADE` no audit trail.
+    * **`X-Purpose` é obrigatório** em qualquer rota do console que toque dado de titular. Ausência
+      devolve 403 e grava `ACESSO_SEM_FINALIDADE` no audit trail.
     * **404, nunca 403**, para recurso de titular fora do escopo do ator — 403 confirmaria a existência.
     * **`totalItems` é omitido** para papéis não confiáveis; a paginação é por cursor (anti-enumeração).
-    * **Toda leitura de dado pessoal grava antes de responder.** Se o log falha, a resposta falha.
+    * **Toda leitura de dado pessoal grava antes de responder.** Se o log falha, a resposta falha (503).
     * Nenhum corpo de requisição ou resposta carrega CPF, e-mail ou cartão em texto claro, exceto o
       retorno de `/pseudonyms/resolve`, que é efêmero e integralmente auditado.
 
+    Regras que valem só no portal:
+
+    * **O nível de verificação é derivado do direito, no servidor.** Se `nivel_verificacao` vier no
+      corpo, é ignorado. Pedir eliminação com `nivel_verificacao: 1` não reduz a exigência.
+    * **Nenhum dado do titular sai antes da confirmação** — nem parcial, nem mascarado.
+    * **O 401 de código inválido é indistinguível** entre identificador cadastrado e não cadastrado:
+      mesmo status, mesmo corpo, mesma latência declarada. Um par de respostas diferentes seria um
+      oráculo de cadastro operável em lote.
+    * **O pedido não exige justificativa.** Texto livre é opcional e passa pelo redator de PII antes
+      de entrar no trail.
+    * **Todo prazo é uma data absoluta** (`prazo_limite`, `retencao_ate`, `expira_em`), nunca uma
+      contagem relativa.
+
 servers:
   - url: https://lastro.internal/v1
+    description: Console interno — balcão do DPO.
 
 security:
   - oidc: []
@@ -42,12 +66,520 @@ tags:
     description: Artefato 11 — risk-matrix.csv
   - name: lia
   - name: direitos
+    description: Balcão do DPO — a fila de solicitações vista de dentro.
+  - name: portal do titular
+    description: |
+      O lado de fora: o titular exercendo os direitos do Art. 18 por conta própria.
+      Superfície separada, com verificação escalonada em vez de papel.
+  - name: processos
+    description: Estados, fila, calendário e tabelas de decisão (MAPA-PROCESSOS.md).
+  - name: incidentes
+    description: Art. 48 — abertura, contenção, decisão de comunicar e encerramento.
+  - name: consentimento
+    description: Registro de consentimento como prova, e revogação que propaga.
+  - name: auditoria
+    description: Trail append-only com cadeia de hash.
 
 paths:
+  # ══════════════════════════════════════════════════════════════════════════
+  # PORTAL DO TITULAR — Art. 18. As doze rotas que faltavam (Risco-001, P0).
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /me/direitos:
+    servers:
+      - url: https://portal.lastro.exemplo/v1
+        description: Portal do titular.
+    get:
+      tags: [portal do titular]
+      summary: Os dez direitos, com o nível de verificação e o prazo de cada um
+      description: |
+        A única rota do portal sem verificação: é o cardápio, e não carrega dado de titular nenhum.
+        Perguntar quem é a pessoa antes de dizer o que ela pode pedir inverte a ordem — o portal
+        não pergunta nada antes de oferecer.
+
+        O `nivel` de cada direito vem daqui para a tela **poder mostrar a escada antes de o titular
+        entrar nela**. Continua sendo derivado no servidor: esta rota informa, não negocia.
+      security: []
+      responses:
+        '200':
+          description: Cardápio dos direitos
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [direitos]
+                properties:
+                  direitos:
+                    type: array
+                    items: { $ref: '#/components/schemas/RegimeDoDireito' }
+
+  /me/verificacao:
+    servers:
+      - url: https://portal.lastro.exemplo/v1
+        description: Portal do titular.
+    post:
+      tags: [portal do titular]
+      summary: Inicia a verificação no nível que o direito exige
+      description: |
+        Responde **201 sempre**, com o mesmo corpo, exista ou não cadastro para o identificador —
+        um 404 aqui seria um oráculo de cadastro. O código vai pelo canal declarado e **nunca**
+        aparece na resposta.
+
+        `nivel_verificacao` no corpo é ignorado. O nível devolvido é `nivelExigido(direito)`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [direito, canal, identificador_hash]
+              properties:
+                direito: { $ref: '#/components/schemas/Direito' }
+                canal: { type: string, enum: [email, sms] }
+                identificador_hash:
+                  type: string
+                  description: |
+                    Hash do e-mail ou telefone digitado. O identificador em claro não sai do
+                    navegador, pelo mesmo motivo que o CPF de `/titulares/buscar` não sai.
+                nivel_verificacao:
+                  type: integer
+                  deprecated: true
+                  description: |
+                    **Ignorado.** Documentado para que ninguém o implemente por engano: o nível é
+                    derivado do direito no servidor.
+      responses:
+        '201':
+          description: Verificação aberta. Idêntica para identificador cadastrado e não cadastrado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VerificacaoAberta' }
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+
+  /me/verificacao/{id}/codigo:
+    servers:
+      - url: https://portal.lastro.exemplo/v1
+        description: Portal do titular.
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [portal do titular]
+      summary: Confirma a verificação e emite a sessão do portal
+      description: |
+        Os fatores exigidos vêm do nível: 1 pede só o código; 2 pede código + um dado de cadastro;
+        3 pede código + documento com foto. O documento é de **uso único, não entra no cadastro e
+        é descartado em 30 dias com registro** — a data do descarte volta na resposta.
+
+        **401 é uma resposta só.** Código errado, dado de cadastro errado, documento recusado e
+        identificador sem cadastro produzem exatamente o mesmo corpo. Falta de um fator exigido é
+        422 — e é seguro que seja, porque o fator exigido deriva do direito, que o cliente já sabe.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [codigo]
+              properties:
+                codigo: { type: string }
+                dado_cadastro_hash:
+                  type: string
+                  description: Exigido no nível 2. Hash de um dado do cadastro, conferido no servidor.
+                documento_hash:
+                  type: string
+                  description: |
+                    Exigido no nível 3. Só a impressão do documento trafega e só ela é registrada —
+                    a imagem não entra no cadastro.
+      responses:
+        '200':
+          description: Confirmada — a sessão do portal está aberta
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessaoDoTitular' }
+        '401': { $ref: '#/components/responses/NaoConfirmado' }
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+
+  /requests:
+    get:
+      tags: [direitos]
+      summary: Fila de solicitações de titular com cronômetro de SLA
+      description: Console interno. O titular usa `GET /requests/{protocolo}`, que devolve só a dele.
+      parameters:
+        - { name: status, in: query, schema: { type: string } }
+        - { name: alerta_dpo, in: query, schema: { type: boolean, description: 'menos de 24h para o prazo' } }
+      responses:
+        '200':
+          description: Fila
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Solicitacao' }
+    post:
+      tags: [portal do titular]
+      summary: Abre a solicitação — a porta de entrada do Art. 18
+      description: |
+        Exige sessão do portal **do mesmo direito** e de nível suficiente: uma verificação de
+        "acesso" (nível 2) não vira crédito para eliminar (nível 3).
+
+        `prazo_limite` é calculado aqui, a partir do direito, e gravado **antes** de o protocolo
+        existir. `nivel_verificacao` no corpo é ignorado; o valor gravado é o derivado.
+
+        `texto` é **opcional** e o portal diz isso na tela: o direito não depende de justificativa.
+        Se vier, passa pelo redator de PII antes de entrar no trail.
+
+        Se o registro no audit trail falha, a resposta é 503 e **o protocolo não é criado** — a
+        ordem é gravar, depois responder (Art. 37).
+      servers:
+        - url: https://portal.lastro.exemplo/v1
+          description: Portal do titular.
+      security:
+        - sessaoTitular: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [direito]
+              properties:
+                direito: { $ref: '#/components/schemas/Direito' }
+                texto:
+                  type: string
+                  description: Opcional. Detalhamento livre — nunca condição para o direito.
+                nivel_verificacao:
+                  type: integer
+                  deprecated: true
+                  description: '**Ignorado.** O nível gravado é o derivado do direito.'
+      responses:
+        '201':
+          description: Solicitação aberta
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SolicitacaoAberta' }
+        '401': { $ref: '#/components/responses/NaoConfirmado' }
+        '403':
+          description: A sessão não alcança este direito — nível insuficiente ou direito diferente.
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
+  /requests/{protocolo}:
+    servers:
+      - url: https://portal.lastro.exemplo/v1
+        description: Portal do titular.
+    parameters:
+      - { name: protocolo, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [portal do titular]
+      summary: Acompanhar o próprio pedido — estado, prazo, e o que foi apagado ou retido
+      description: |
+        Espelho do balcão, sem o vocabulário dele. Só a solicitação do titular da sessão: protocolo
+        de outra pessoa responde 401, e não 403, pelo mesmo motivo de sempre.
+
+        Quando o desfecho é `atendido_parcialmente` ou `recusado_com_fundamento`, `retidos[]` traz
+        **cada** resíduo com a lei que o retém e a data em que ele será eliminado. Recusa que não
+        nomeia a lei nem dá a data é recusa que o titular não tem como contestar (Art. 18, §4º) —
+        e por isso vem acompanhada do caminho da ANPD.
+      security:
+        - sessaoTitular: []
+      responses:
+        '200':
+          description: A solicitação do titular
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SolicitacaoDoTitular' }
+        '401': { $ref: '#/components/responses/NaoConfirmado' }
+
+  /requests/{id}/mensagens:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [direitos, portal do titular]
+      summary: Mensagem entre titular e DPO dentro da plataforma
+      description: |
+        A mesma conversa, das duas pontas: com token do console o remetente é o DPO, com sessão do
+        portal é o titular. O corpo passa pelo redator antes do append e CPF em claro é recusado —
+        a mesma restrição existe como constraint no banco.
+      security:
+        - oidc: []
+        - sessaoTitular: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [corpo]
+              properties:
+                corpo:
+                  type: string
+                  description: Recusado se contiver CPF em texto claro.
+      responses:
+        '201':
+          description: Mensagem enviada, já redigida
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enviada: { type: boolean }
+                  corpo_gravado: { type: string, description: O texto após o redator. }
+                  houve_redacao: { type: boolean }
+        '401': { $ref: '#/components/responses/NaoConfirmado' }
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+
+  /requests/{id}/pacote:
+    servers:
+      - url: https://portal.lastro.exemplo/v1
+        description: Portal do titular.
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [portal do titular]
+      summary: O pacote de resposta — link assinado, validade de 24 h
+      description: |
+        Devolve o link e **a frase que justifica a validade curta**: expirado, o titular pede de
+        novo aqui, sem custo. Toda expiração vem com o que fazer depois.
+
+        O `sumario` existe para o titular saber o que há no arquivo sem precisar abri-lo.
+      security:
+        - sessaoTitular: []
+      responses:
+        '200':
+          description: Pacote disponível
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PacoteDeResposta' }
+        '401': { $ref: '#/components/responses/NaoConfirmado' }
+        '409':
+          description: A solicitação ainda não foi concluída — não há pacote a assinar.
+
+  /me/consentimentos:
+    servers:
+      - url: https://portal.lastro.exemplo/v1
+        description: Portal do titular.
+    get:
+      tags: [portal do titular, consentimento]
+      summary: Minhas autorizações — o texto consentido, na versão aceita
+      description: |
+        A prova do Art. 8º, §2º vista do lado de quem consentiu: o texto **na versão que foi
+        aceita**, a data, o canal e o estado. Sem isso, "você autorizou" é afirmação sobre a
+        vontade de alguém que ninguém consultou.
+      security:
+        - sessaoTitular: []
+      responses:
+        '200':
+          description: As autorizações do titular
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [consentimentos]
+                properties:
+                  consentimentos:
+                    type: array
+                    items: { $ref: '#/components/schemas/ConsentimentoDoTitular' }
+        '401': { $ref: '#/components/responses/NaoConfirmado' }
+
+  /me/consentimentos/{id}/revogacao:
+    servers:
+      - url: https://portal.lastro.exemplo/v1
+        description: Portal do titular.
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, description: Identificador do campo consentido. } }
+    post:
+      tags: [portal do titular, consentimento]
+      summary: Retirar a autorização — e disparar a cascata
+      description: |
+        Revogação sem consequência declarada é revogação de fachada. A resposta traz a **cascata**
+        inteira: qual sistema para de tratar, quem recebeu o dado e precisa ser avisado, e o
+        expurgo do que já foi coletado.
+
+        A revogação é **do titular da sessão**, não do campo inteiro: retirar a autorização de uma
+        pessoa não derruba a base legal das outras.
+      security:
+        - sessaoTitular: []
+      responses:
+        '200':
+          description: Revogada, com a cascata registrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Revogacao' }
+        '401': { $ref: '#/components/responses/NaoConfirmado' }
+        '409':
+          description: Já revogada por este titular.
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
+  /me/consentimentos/{id}/propagacao:
+    servers:
+      - url: https://portal.lastro.exemplo/v1
+        description: Portal do titular.
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [portal do titular, consentimento]
+      summary: Onde a revogação já chegou — sistema por sistema
+      description: |
+        Propagação item a item, com a data de confirmação de cada um. Pendência acima de **24 h**
+        levanta `alerta: true` — e o alerta é **visível ao titular**, não só interno: quem esperou
+        precisa saber que a espera já é anormal.
+      security:
+        - sessaoTitular: []
+      responses:
+        '200':
+          description: Estado da propagação
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Propagacao' }
+        '401': { $ref: '#/components/responses/NaoConfirmado' }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+
+  /me/decisoes/{id}:
+    servers:
+      - url: https://portal.lastro.exemplo/v1
+        description: Portal do titular.
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [portal do titular]
+      summary: Os fatores da decisão automatizada que me atingiu
+      description: |
+        Art. 20, §1º — os critérios da decisão, em linguagem de pessoa. Decisão de outro titular
+        responde 401, não 403.
+      security:
+        - sessaoTitular: []
+      responses:
+        '200':
+          description: A decisão e seus fatores
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DecisaoAutomatizada' }
+        '401': { $ref: '#/components/responses/NaoConfirmado' }
+
+  /me/decisoes/{id}/revisao:
+    servers:
+      - url: https://portal.lastro.exemplo/v1
+        description: Portal do titular.
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [portal do titular]
+      summary: Contestar a decisão automatizada (Art. 20)
+      description: |
+        Abre a solicitação de revisão com prazo de **5 dias** — compromisso interno mais estrito
+        que o legal, porque o Art. 20 não fixa prazo e prazo que a empresa não escreve é prazo que
+        ninguém cobra.
+
+        O `fundamento` do titular é dele: passa pelo redator e entra no trail. Quem revisa é uma
+        pessoa, pelo `POST /decisoes/{id}/revisar` do console — esta rota é o pedido, não o ato.
+      security:
+        - sessaoTitular: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fundamento:
+                  type: string
+                  description: Opcional — contestar não depende de o titular saber argumentar.
+      responses:
+        '201':
+          description: Contestação registrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SolicitacaoAberta' }
+        '401': { $ref: '#/components/responses/NaoConfirmado' }
+        '409':
+          description: Esta decisão já foi revisada — rever de novo é solicitação nova.
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
+  /titulares/me/oposicao:
+    servers:
+      - url: https://portal.lastro.exemplo/v1
+        description: Portal do titular.
+    post:
+      tags: [portal do titular]
+      summary: Opor-se ao tratamento sustentado por legítimo interesse (Art. 18, §2º)
+      description: |
+        **Este é o caminho que a LIA vigente publica** no campo `canal_oposicao` — o mesmo endereço,
+        letra por letra. Uma LIA que anuncia um canal inexistente não é uma promessa fraca: ela
+        derruba o balanceamento que sustenta a base legal, porque a salvaguarda oferecida ao titular
+        nunca existiu (Art. 10, §3º c/c Art. 18, §2º).
+
+        A oposição alcança **todos os campos que a LIA sustenta**, e não um campo escolhido pelo
+        titular: quem se opõe está objetando ao fundamento, não catalogando dados.
+
+        **A cessação é imediata e o padrão fecha.** Registrada a oposição, o tratamento por legítimo
+        interesse daqueles campos para de valer para este titular antes de qualquer análise. Se o
+        controlador tiver razões legítimas prevalecentes, elas se demonstram concluindo o protocolo
+        com `recusado_com_fundamento` — e é essa conclusão que retoma o tratamento. O contrário
+        (tratar enquanto se decide) faria o titular esperar pelo fim de uma análise da qual ele é
+        justamente o objeto.
+
+        Como toda rota do portal, o nível de verificação é derivado do direito: `oposicao` é
+        nível 2, e `nivel_verificacao` no corpo é ignorado.
+      security:
+        - sessaoTitular: []
+      parameters:
+        - name: lia
+          in: query
+          required: true
+          description: Código da LIA à qual o titular se opõe — o mesmo que a LIA publica no canal.
+          schema: { type: string, examples: ['LIA-SCORING-001'] }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                texto:
+                  type: string
+                  description: Opcional. Opor-se não depende de justificativa (Art. 18, §2º).
+      responses:
+        '201':
+          description: Oposição registrada e tratamento cessado
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SolicitacaoAberta'
+                  - type: object
+                    required: [cessacao]
+                    properties:
+                      lia: { type: string }
+                      cessacao:
+                        type: array
+                        description: O que parou, campo a campo, já em vigor nesta resposta.
+                        items:
+                          type: object
+                          properties:
+                            campo: { type: string }
+                            finalidade: { type: string }
+                            efeito: { type: string }
+                      como_o_controlador_pode_retomar:
+                        type: string
+        '401': { $ref: '#/components/responses/NaoConfirmado' }
+        '403':
+          description: A sessão não é de oposição, ou não alcança o nível 2.
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '409':
+          description: Já existe oposição vigente deste titular a esta LIA.
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # CONSOLE INTERNO
+  # ══════════════════════════════════════════════════════════════════════════
+
   /catalog/inventories:
     post:
       tags: [catálogo]
       summary: Recebe um data-inventory.yaml versionado (webhook de push)
+      description: Ingestão de CI. Não tem tela e não é servida pelo protótipo.
       requestBody:
         required: true
         content:
@@ -61,22 +593,27 @@ paths:
               schema: { $ref: '#/components/schemas/InventarioResultado' }
         '422': { $ref: '#/components/responses/ErroValidacao' }
 
-  /catalog/inventories:validate:
+  /catalog/validar:
     post:
       tags: [catálogo]
-      summary: Valida sem persistir e devolve o diff contra a versão vigente
-      description: Alimenta o drag-and-drop da tela T2.
+      summary: Valida um campo sem persistir e devolve os erros de conformidade
+      description: |
+        Alimenta o drag-and-drop da tela T2. Recusa o inventário inteiro quando um campo é
+        inválido: Art. 11 (base fora do rol para sensível), Art. 12 (hash declarado anonimizado),
+        Art. 33 (transferência sem mecanismo), campo sem base legal, campo sem finalidades
+        compatíveis declaradas e consentimento sem registro vigente.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/InventarioEntrada' }
+            schema: { $ref: '#/components/schemas/CampoParaValidar' }
       responses:
         '200':
-          description: Resultado da validação com diff
+          description: Campo válido
           content:
             application/json:
               schema: { $ref: '#/components/schemas/InventarioResultado' }
+        '422': { $ref: '#/components/responses/ErroValidacao' }
 
   /catalog/fields:
     get:
@@ -138,7 +675,9 @@ paths:
     post:
       tags: [gates]
       summary: Registra a execução de um gate de privacidade
-      description: Chamado por privacy-ci-gate.yml e architecture-review.yml.
+      description: |
+        Ingestão de CI, chamada por `privacy-ci-gate.yml` e `architecture-review.yml`.
+        Não tem tela e não é servida pelo protótipo.
       requestBody:
         required: true
         content:
@@ -156,6 +695,8 @@ paths:
                   findings:
                     type: array
                     items: { $ref: '#/components/schemas/GateFinding' }
+
+  /gates:
     get:
       tags: [gates]
       summary: Execuções recentes — alimenta os cartões da tela T1
@@ -175,6 +716,7 @@ paths:
     post:
       tags: [ripd]
       summary: Recebe o ripd-report.json do ripd-triage.sh
+      description: Ingestão de CI. Não tem tela e não é servida pelo protótipo.
       requestBody:
         required: true
         content:
@@ -206,35 +748,35 @@ paths:
       tags: [ripd]
       summary: Renderiza o RIPD.md a partir do template parecer-tecnico.md
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string } }
       responses:
         '200':
-          description: Documento renderizado e commitado no PR
+          description: Documento renderizado
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  documento_uri: { type: string }
-                  documento_hash: { type: string }
-                  commit_sha: { type: string }
+                  markdown: { type: string }
+        '403':
+          description: Somente engenharia gera o RIPD.md.
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
 
-  /ripds/{id}/approve:
+  /ripds/{id}/aprovar:
     post:
       tags: [ripd]
       summary: Aprovação do DPO — libera o status check no GitHub
       description: |
         A aprovação é vinculada ao `head_sha` avaliado. Um push posterior invalida a aprovação e o
-        bloqueio volta.
+        bloqueio volta. RIPD com recomendação P0 em aberto não fecha: seria aprovar o risco, não o
+        tratamento.
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string } }
       requestBody:
-        required: true
         content:
           application/json:
             schema:
               type: object
-              required: [decisao, parecer, head_sha]
               properties:
                 decisao: { type: string, enum: [aprovado, reprovado, aprovado_com_ressalva] }
                 parecer: { type: string, minLength: 20 }
@@ -242,17 +784,123 @@ paths:
       responses:
         '200':
           description: Decisão registrada e assinada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  prNumero: { type: integer }
+                  checkRun: { type: string }
         '403':
           description: Ator sem papel de DPO
+        '409':
+          description: Há recomendação P0 em aberto.
+
+  /ripds/{id}/gatilho:
+    post:
+      tags: [ripd]
+      summary: Dispara um gatilho de reabertura declarado numa dispensa
+      description: |
+        Reabre se o gatilho **foi declarado na dispensa** ou se é **crítico** — a segunda metade é
+        a que fecha a porta: gatilho crítico que a dispensa não previu quebra a premissa dela, e
+        exigir declaração prévia faria a omissão proteger a dispensa. A reabertura passa pela mesma
+        máquina de estados de qualquer transição.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [codigo, evidencia]
+              properties:
+                codigo: { type: string, description: Gatilho do catálogo de `mock/decisoes.ts`. }
+                evidencia:
+                  type: string
+                  minLength: 10
+                  description: 'Gatilho sem evidência é boato: o que reabre um RIPD precisa ser conferível no diff.'
+      responses:
+        '200':
+          description: Disparo registrado — com ou sem reabertura
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  codigo: { type: string }
+                  reabriu: { type: boolean }
+                  status: { type: string }
+                  motivo: { type: string }
+        '409':
+          description: O RIPD não está dispensado — fora de uma dispensa não há o que reabrir.
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
+  /lias/{id}/campos:
+    post:
+      tags: [lia]
+      summary: Vincula um campo à LIA
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [campoId]
+              properties:
+                campoId: { type: string }
+      responses:
+        '200':
+          description: Campos vinculados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  camposIds:
+                    type: array
+                    items: { type: string }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '422':
+          description: Campo sensível não é coberto por legítimo interesse (Art. 11).
+
+  /lias/{id}/assinar:
+    post:
+      tags: [lia]
+      summary: Assina a LIA e gera o LIA.md com timestamp, hash e assinatura do DPO
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Documento assinado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  markdown: { type: string }
+        '403':
+          description: Somente o DPO assina a LIA.
+        '409':
+          description: |
+            LIA incompleta — alternativa sem justificativa. "Não aplicável" também exige
+            justificativa: é a resposta que mais esconde falta de análise.
 
   /pseudonyms/resolve:
     post:
       tags: [pseudônimos]
       summary: Reidentifica um pseudônimo HMAC
       description: |
-        Exige `X-Purpose` e justificativa. A tentativa é gravada no audit trail **antes** da resolução.
+        Exige `X-Purpose`, justificativa e **protocolo**: a revelação acontece sob um atendimento,
+        e é ele que entra no registro. A tentativa é gravada no audit trail **antes** da resolução.
         O valor devolvido tem validade de exibição de 60 segundos e nunca é cacheável.
-        Campos marcados como sensíveis são recusados por esta rota em qualquer circunstância.
+        Campos marcados como sensíveis são recusados por esta rota em qualquer circunstância, e
+        campo cujo consentimento foi revogado deixa de ser revelável.
       parameters:
         - { $ref: '#/components/parameters/Purpose' }
       requestBody:
@@ -261,11 +909,12 @@ paths:
           application/json:
             schema:
               type: object
-              required: [token, campo, justificativa]
+              required: [titularId, campo, justificativa, protocolo]
               properties:
-                token: { type: string }
-                campo: { type: string, examples: ['cpf'] }
+                titularId: { type: string }
+                campo: { type: string, examples: ['renda'] }
                 justificativa: { type: string, minLength: 20 }
+                protocolo: { type: string, description: Precisa pertencer ao mesmo titular. }
       responses:
         '200':
           description: Valor resolvido
@@ -275,18 +924,529 @@ paths:
                 type: object
                 properties:
                   valor: { type: string }
-                  expira_em: { type: string, format: date-time }
-                  audit_id: { type: integer }
+                  expiraEmSegundos: { type: integer }
+                  campos:
+                    type: array
+                    items: { type: string }
+                  justificativaGravada: { type: string }
+                  houveRedacao: { type: boolean }
           headers:
             Cache-Control:
               schema: { type: string, const: 'no-store' }
         '403':
-          description: Finalidade não autorizada, campo sensível, ou justificativa insuficiente
+          description: Sem finalidade declarada, campo sensível ou papel sem `revelar_pii`.
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '422':
+          description: |
+            Campo fora do catálogo, finalidade incompatível, consentimento revogado,
+            justificativa curta ou protocolo de outro titular.
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
+  /titulares/buscar:
+    post:
+      tags: [direitos]
+      summary: Localiza um titular pelo hash do documento
+      description: |
+        O CPF digitado não sai do navegador — chega já em hash. A ordem é permissão → finalidade →
+        cota → registro → resposta: a cota vem **antes** da busca para que o 429 seja idêntico para
+        hash existente e inexistente. Se dependesse do resultado, o limite viraria o oráculo que o
+        404 acabou de fechar.
+      parameters:
+        - { $ref: '#/components/parameters/Purpose' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cpfHash]
+              properties:
+                cpfHash: { type: string }
+      responses:
+        '200':
+          description: Titular localizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  pseudonimo: { type: string }
+        '403':
+          description: Finalidade não declarada no cabeçalho `X-Purpose`.
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '429':
+          description: 'Limite de 5 buscas por minuto: busca em rajada é enumeração, não atendimento.'
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
+  /titulares/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [direitos]
+      summary: Ficha do titular no balcão de atendimento
+      description: Valores vêm mascarados. O valor em claro só existe por `/pseudonyms/resolve`.
+      responses:
+        '200':
+          description: Ficha com campos mascarados, compartilhamentos e decisão automatizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FichaDoTitular' }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+
+  /decisoes/{id}/revisar:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [direitos]
+      summary: Revisão humana da decisão automatizada (Art. 20)
+      description: |
+        O ato do DPO, não o pedido do titular — o pedido é `POST /me/decisoes/{id}/revisao`.
+        Manter o resultado do modelo também é decisão humana e também exige fundamento: sem ele a
+        revisão é homologação com outro nome. A devolutiva ao titular sai do mesmo ato.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resultado, fundamento]
+              properties:
+                resultado: { type: string, enum: [mantida, revertida, ajustada] }
+                fundamento: { type: string, minLength: 20 }
+      responses:
+        '200':
+          description: Revisão registrada e devolutiva enviada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  decisaoId: { type: string }
+                  resultado: { type: string }
+                  aprovado: { type: boolean }
+                  devolutivaEnviada: { type: boolean }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '409':
+          description: Esta decisão já foi revisada — a revisão é ato único e registrado.
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
+  /requests/{id}/concluir:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [direitos]
+      summary: Encerra o atendimento e para o cronômetro do SLA
+      description: |
+        Recusa exige fundamento (Art. 18, §4º). Atendimento parcial e recusa exigem, além disso,
+        `retidos[]` **item a item, com base legal e data de eliminação** — porque "parte foi
+        retida" sem dizer o quê, por qual lei e até quando não é resposta, é reticência.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [desfecho]
+              properties:
+                desfecho: { type: string, enum: [atendido, atendido_parcialmente, recusado_com_fundamento] }
+                evidencia: { type: string, description: 'Fundamento. Mínimo 20 caracteres quando há recusa.' }
+                apagados:
+                  type: array
+                  items: { type: string }
+                retidos:
+                  type: array
+                  items: { $ref: '#/components/schemas/ItemRetido' }
+      responses:
+        '200':
+          description: Atendimento concluído
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  protocolo: { type: string }
+                  status: { type: string }
+                  dentroDoPrazo: { type: boolean }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '409':
+          description: O protocolo já foi concluído.
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
+  /consentimentos:
+    get:
+      tags: [consentimento]
+      summary: Registros de consentimento — a prova que sustenta a base legal no ROPA
+      responses:
+        '200':
+          description: Registros por campo
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Consentimento' }
+
+  /consentimentos/{id}/revogar:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, description: Identificador do campo. } }
+    post:
+      tags: [consentimento]
+      summary: Revogação operada pelo balcão, quando o titular pede por outro canal
+      description: |
+        Revoga o **registro do campo**, e por isso é do DPO: propaga para todos os titulares
+        daquele consentimento. A revogação individual do Art. 18, VIII é
+        `POST /me/consentimentos/{id}/revogacao`, no portal.
+      responses:
+        '200':
+          description: Revogado, com a propagação declarada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  campoId: { type: string }
+                  estado: { type: string }
+                  revogadoEm: { type: string }
+                  efeitos:
+                    type: array
+                    items: { type: string }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '409':
+          description: Já revogado.
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
+  /incidentes:
+    get:
+      tags: [incidentes]
+      summary: Fila de incidentes
+      responses:
+        '200':
+          description: Incidentes do cenário
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Incidente' }
+    post:
+      tags: [incidentes]
+      summary: Abre o incidente com escopo lido do catálogo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [titulo, camposIds]
+              properties:
+                titulo: { type: string }
+                camposIds:
+                  type: array
+                  items: { type: string }
+                titularesAfetados: { type: integer }
+      responses:
+        '201':
+          description: Incidente aberto
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Incidente' }
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
+  /incidentes/{id}/conter:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [incidentes]
+      summary: Contenção — estanca antes de decidir
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [medida]
+              properties:
+                medida: { type: string, minLength: 20 }
+      responses:
+        '200': { description: Incidente contido }
+        '409': { $ref: '#/components/responses/SequenciaInvalida' }
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+
+  /incidentes/{id}/decisao:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [incidentes]
+      summary: Decide comunicar ou não comunicar (Art. 48)
+      description: |
+        O fundamento é obrigatório **inclusive para não comunicar** — é justamente a decisão de
+        não comunicar que precisa se defender depois.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decisao, fundamento]
+              properties:
+                decisao: { type: string, enum: [comunicar, nao_comunicar] }
+                fundamento: { type: string, minLength: 20 }
+      responses:
+        '200': { description: Decisão registrada }
+        '409': { $ref: '#/components/responses/SequenciaInvalida' }
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+
+  /incidentes/{id}/comunicar:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [incidentes]
+      summary: Efetiva a comunicação à ANPD e aos titulares
+      responses:
+        '200': { description: Comunicado }
+        '409': { $ref: '#/components/responses/SequenciaInvalida' }
+
+  /incidentes/{id}/registrar-nao-comunicacao:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [incidentes]
+      summary: Registra formalmente a decisão de não comunicar
+      responses:
+        '200': { description: Registrado }
+        '409': { $ref: '#/components/responses/SequenciaInvalida' }
+
+  /incidentes/{id}/encerrar:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [incidentes]
+      summary: Encerra o incidente
+      responses:
+        '200': { description: Encerrado }
+        '409': { $ref: '#/components/responses/SequenciaInvalida' }
+
+  /estados/{artefato}/{id}:
+    parameters:
+      - name: artefato
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [parecer, ripd, lia, risco, solicitacao, achado, incidente, chave]
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [processos]
+      summary: Move um artefato entre estados — uma rota para os oito
+      description: |
+        Não existe rota de transição por artefato, e é isso que impede um caminho especial de
+        nascer. **409 para sequência, 422 para conteúdo**: os dois erros merecem códigos
+        diferentes, e a distinção é o que separa verificação de validação.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [para]
+              properties:
+                para: { type: string }
+                justificativa: { type: string }
+                dono: { type: string }
+                prazo: { type: string, format: date }
+      responses:
+        '200':
+          description: Transição aplicada e registrada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  artefato: { type: string }
+                  id: { type: string }
+                  de: { type: string }
+                  para: { type: string }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '409': { $ref: '#/components/responses/SequenciaInvalida' }
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
+  /fila:
+    get:
+      tags: [processos]
+      summary: A fila do papel da sessão, derivada dos estados
+      description: |
+        Sem parâmetro nenhum, e isso é desenho: a fila é **a sua**. Um filtro aqui abriria caminho
+        para consultar a fila de outro papel por combinação — por isso `contadores` devolve
+        contagem do que é de outros, nunca a lista alheia.
+      responses:
+        '200':
+          description: Itens do papel e contagem dos demais
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  itens:
+                    type: array
+                    items: { $ref: '#/components/schemas/ItemDaFila' }
+                  contadores:
+                    type: object
+                    additionalProperties: { type: integer }
+
+  /dmn:
+    get:
+      tags: [processos]
+      summary: Catálogo de D1, D2 e D3 com todas as versões publicadas
+      description: 'Leitura ampla de propósito: regra que decidiu e não pode ser lida por quem audita é regra que não se defende.'
+      responses:
+        '200':
+          description: Tabelas de decisão
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TabelaDeDecisao' }
+
+  /dmn/{tabela}/aplicar:
+    parameters:
+      - { name: tabela, in: path, required: true, schema: { type: string, enum: [d1, d2, d3] } }
+    post:
+      tags: [processos]
+      summary: Aplica a tabela e grava a versão e as entradas antes de responder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string, description: Artefato sobre o qual a tabela decide. }
+      responses:
+        '200':
+          description: Decisão registrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DecisaoRegistrada' }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
+  /calendario:
+    get:
+      tags: [processos]
+      summary: O ano provisionado — obrigações, carga e o que entrou na antecedência
+      responses:
+        '200':
+          description: Agenda do ano
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  obrigacoes:
+                    type: array
+                    items: { $ref: '#/components/schemas/Obrigacao' }
+                  carga:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        mes: { type: integer }
+                        dias: { type: number }
+                        excedeu: { type: boolean }
+                  naAntecedencia:
+                    type: array
+                    items: { type: string }
+
+  /calendario/assinatura:
+    get:
+      tags: [processos]
+      summary: A URL do feed ICS do próprio papel, e de mais nenhum
+      responses:
+        '200':
+          description: Assinatura do feed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  papel: { type: string }
+                  token: { type: string }
+                  caminho: { type: string }
+
+  /calendario.ics:
+    get:
+      tags: [processos]
+      summary: Feed ICS somente leitura, assinado por papel
+      description: |
+        Quem consome é um cliente de calendário sem sessão, então a URL **é** a credencial.
+        Limitação de protótipo declarada (Risco-036): em produção o token precisa ser opaco, com
+        expiração e revogação, assinado no servidor.
+      security: []
+      parameters:
+        - { name: papel, in: query, required: true, schema: { type: string } }
+        - { name: token, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Calendário no formato iCalendar
+          content:
+            text/calendar:
+              schema: { type: string }
+        '403':
+          description: Assinatura de feed inválida.
+
+  /calendario/{codigo}/prorrogar:
+    parameters:
+      - { name: codigo, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [processos]
+      summary: Prorroga uma obrigação — com justificativa, gravada antes de a data nova valer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [para, justificativa]
+              properties:
+                para: { type: string, format: date }
+                justificativa: { type: string, minLength: 20 }
+      responses:
+        '200':
+          description: Prorrogação registrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Obrigacao' }
+        '403':
+          description: A obrigação é de outro responsável.
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
+  /epicos:
+    get:
+      tags: [gates]
+      summary: Épicos com o checklist dos sete princípios de PbD e o veredito
+      description: |
+        O veredito é calculado pela **mesma** função que o gate de CI usa sobre o `.privacy/epico.yml`.
+        A tela não reimplementa a regra: se reimplementasse, a que vale seria a que ninguém olha.
+      responses:
+        '200':
+          description: Épicos avaliados
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Epico' }
 
   /purge/runs:
     post:
       tags: [expurgo]
       summary: Registra a execução diária do expurgo-permanente.py
+      description: Ingestão de CI. Não tem tela e não é servida pelo protótipo.
       requestBody:
         required: true
         content:
@@ -295,12 +1455,12 @@ paths:
       responses:
         '201': { description: Execução registrada }
 
-  /purge/runs/{id}/verify:
+  /purge/{id}/verificar:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
     post:
       tags: [expurgo]
       summary: Recalcula os hashes do lote e confirma a integridade
-      parameters:
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '200':
           description: Resultado da verificação
@@ -310,32 +1470,34 @@ paths:
                 type: object
                 properties:
                   integro: { type: boolean }
-                  divergencias:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        tabela: { type: string }
-                        esperado: { type: string }
-                        encontrado: { type: string }
+                  lotes: { type: integer }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
 
-  /kms/keys:
+  /kms:
     get:
       tags: [kms]
-      summary: Chaves, status e dependências
+      summary: Chaves, rotação em andamento e log de acesso
       responses:
         '200':
-          description: Lista de chaves
+          description: Estado do KMS
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/ChaveKms' }
+                type: object
+                properties:
+                  chaves:
+                    type: array
+                    items: { $ref: '#/components/schemas/ChaveKms' }
+                  rotacao: { type: object, additionalProperties: true }
+                  acessos:
+                    type: array
+                    items: { type: object, additionalProperties: true }
 
   /kms/rotations/{id}/steps:
     post:
       tags: [kms]
       summary: Reporta o progresso de uma etapa do kms-rotation.yml
+      description: Ingestão de CI. Não tem tela e não é servida pelo protótipo.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -353,10 +1515,56 @@ paths:
       responses:
         '200': { description: Etapa atualizada }
 
+  /kms/{alias}/agendar-rotacao:
+    parameters:
+      - { name: alias, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [kms]
+      summary: Agenda a rotação de uma chave
+      responses:
+        '200':
+          description: Rotação agendada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alias: { type: string }
+                  rotacaoEmDias: { type: integer }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '409':
+          description: 'A chave está revogada: rotacionar uma chave morta não devolve acesso a nada.'
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
+  /kms/{alias}/promover-canary:
+    parameters:
+      - { name: alias, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [kms]
+      summary: Promove o canary a chave ativa
+      description: |
+        Só avança se a recriptografia terminou. Promover no meio deixa registro ilegível com a
+        chave nova — os dois aliases precisam continuar válidos até o último byte migrar.
+      responses:
+        '200':
+          description: Canary promovido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alias: { type: string }
+                  status: { type: string }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '409':
+          description: A recriptografia ainda não terminou.
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
   /metrics/snapshots:
     post:
       tags: [telemetria]
       summary: Recebe o docs/metrics/latest.json do metrics-collector.py
+      description: Ingestão de CI. Não tem tela e não é servida pelo protótipo.
       requestBody:
         required: true
         content:
@@ -366,28 +1574,36 @@ paths:
               additionalProperties: true
       responses:
         '201': { description: Snapshot gravado }
+
+  /metrics:
     get:
       tags: [telemetria]
-      summary: Séries para os cartões e tendências da tela T1
+      summary: Séries e maturidade para os cartões e tendências da tela T1
       parameters:
         - { name: metrica, in: query, schema: { type: string } }
         - { name: desde, in: query, schema: { type: string, format: date } }
       responses:
         '200':
-          description: Série temporal
+          description: Métricas e maturidade
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/Metrica' }
+                type: object
+                properties:
+                  metricas:
+                    type: array
+                    items: { $ref: '#/components/schemas/Metrica' }
+                  maturidade:
+                    type: array
+                    items: { type: object, additionalProperties: true }
 
   /telemetry/redaction:
     post:
       tags: [telemetria]
       summary: Contadores agregados do privacy-redactor.ts
       description: |
-        Recebe apenas **contagens** por serviço e por padrão detectado. O valor redigido nunca
-        trafega — enviá-lo transformaria a telemetria em um segundo vazamento.
+        Ingestão de CI. Recebe apenas **contagens** por serviço e por padrão detectado. O valor
+        redigido nunca trafega — enviá-lo transformaria a telemetria em um segundo vazamento.
       requestBody:
         required: true
         content:
@@ -425,7 +1641,7 @@ paths:
       summary: Reclassifica um risco
       description: A justificativa é obrigatória e o histórico é imutável.
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string } }
       requestBody:
         required: true
         content:
@@ -439,68 +1655,14 @@ paths:
                 justificativa: { type: string, minLength: 20 }
       responses:
         '200': { description: Reclassificação registrada }
-        '422': { $ref: '#/components/responses/ErroValidacao' }
-
-  /lias/{id}/render:
-    post:
-      tags: [lia]
-      summary: Gera o LIA.md com timestamp, hash e assinatura do DPO
-      parameters:
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-      responses:
-        '200':
-          description: Documento assinado
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  documento_uri: { type: string }
-                  documento_hash: { type: string }
-                  assinatura: { type: string }
-        '409':
-          description: LIA incompleta — alternativa sem justificativa ou balanceamento ausente
-
-  /requests:
-    get:
-      tags: [direitos]
-      summary: Fila de solicitações de titular com cronômetro de SLA
-      parameters:
-        - { name: status, in: query, schema: { type: string } }
-        - { name: alerta_dpo, in: query, schema: { type: boolean, description: 'menos de 24h para o prazo' } }
-      responses:
-        '200':
-          description: Fila
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/Solicitacao' }
-
-  /requests/{id}/messages:
-    post:
-      tags: [direitos]
-      summary: Mensagem entre titular e DPO dentro da plataforma
-      parameters:
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [corpo]
-              properties:
-                corpo:
-                  type: string
-                  description: Recusado se contiver CPF em texto claro.
-      responses:
-        '201': { description: Mensagem enviada }
+        '403':
+          description: Somente o DPO reclassifica risco.
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
         '422': { $ref: '#/components/responses/ErroValidacao' }
 
   /audit:
     get:
-      tags: [direitos]
+      tags: [auditoria]
       summary: Audit trail append-only
       parameters:
         - { name: ator, in: query, schema: { type: string } }
@@ -517,10 +1679,29 @@ paths:
             text/csv:
               schema: { type: string }
 
-  /audit/verify:
+  /audit/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+    patch:
+      tags: [auditoria]
+      summary: Recusada — o log é append-only no banco, não por convenção da aplicação
+      responses:
+        '409': { $ref: '#/components/responses/LogImutavel' }
+    delete:
+      tags: [auditoria]
+      summary: Recusada — o log é append-only no banco, não por convenção da aplicação
+      responses:
+        '409': { $ref: '#/components/responses/LogImutavel' }
+
+  /audit/verificar:
     post:
-      tags: [direitos]
+      tags: [auditoria]
       summary: Recalcula a cadeia de hashes e devolve as divergências
+      description: |
+        Continua sendo **leitura** mesmo gravando `INTEGRIDADE_VERIFICADA`: o registro é
+        consequência do sistema, não escalada do ator. Se fosse escrita, o auditor externo
+        perderia o ato que sustenta o parecer dele. Efeito deliberado: duas verificações seguidas
+        não devolvem o mesmo número de blocos, porque a primeira entrou na cadeia.
       responses:
         '200':
           description: Resultado
@@ -531,13 +1712,53 @@ paths:
                 properties:
                   blocos: { type: integer }
                   integro: { type: boolean }
-                  primeira_divergencia: { type: integer, nullable: true }
+                  primeiraDivergencia: { type: integer, nullable: true }
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
+  /audit/exportar:
+    post:
+      tags: [auditoria]
+      summary: Exporta o trail — e o próprio ato de exportar é gravado antes de o arquivo existir
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                formato: { type: string, enum: [csv, json] }
+                justificativa: { type: string, minLength: 20 }
+      responses:
+        '200':
+          description: Arquivo gerado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conteudo: { type: string }
+                  linhas: { type: integer }
+                  formato: { type: string }
+        '403':
+          description: Papel sem `exportar_auditoria`.
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
 
 components:
   securitySchemes:
     oidc:
       type: openIdConnect
       openIdConnectUrl: https://sso.internal/.well-known/openid-configuration
+      description: SSO corporativo. Papéis internos — não alcança o portal do titular.
+    sessaoTitular:
+      type: apiKey
+      in: header
+      name: X-Verificacao
+      description: |
+        Credencial do portal, emitida por `POST /me/verificacao/{id}/codigo` e **presa ao direito e
+        ao nível** da verificação que a produziu. Não é papel: o titular não tem papel.
+
+        Em produção esta sessão é um claim de step-up dentro do OIDC do portal, com MFA real —
+        hoje o protótipo não tem autenticação (Risco-037, premissa de aceite do RIPD §7.3).
 
   parameters:
     Purpose:
@@ -554,6 +1775,28 @@ components:
       description: |
         Não encontrado. Devolvido também quando o recurso existe mas está fora do escopo do ator —
         um 403 confirmaria a existência.
+    NaoConfirmado:
+      description: |
+        Identidade não confirmada. **Corpo idêntico** para código errado, fator errado e
+        identificador sem cadastro: a diferença entre duas recusas seria um oráculo de cadastro.
+        Nenhum campo do titular aparece aqui — nem parcial, nem mascarado.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [erro]
+            properties:
+              erro: { type: string }
+    SequenciaInvalida:
+      description: |
+        A transição não é legal a partir do estado atual. **409 é sequência**; conteúdo insuficiente
+        é 422. Os dois erros merecem códigos diferentes.
+    LogImutavel:
+      description: Tabela `audit_log` é append-only — UPDATE e DELETE não são permitidos.
+    FalhaDeRegistro:
+      description: |
+        O audit trail está indisponível e a operação foi abortada **sem efeito**. A ordem é gravar,
+        depois responder (Art. 37): sem registro, a operação não aconteceu.
     ErroValidacao:
       description: Payload inválido
       content:
@@ -576,6 +1819,251 @@ components:
       enum: [consentimento, obrigacao_legal, politica_publica, pesquisa, execucao_contrato,
              exercicio_direitos, protecao_vida, tutela_saude, legitimo_interesse, protecao_credito]
 
+    Direito:
+      type: string
+      description: |
+        Os onze direitos que o portal exerce.
+
+        `oposicao` (Art. 18, §2º) **não** é sinônimo de `bloqueio` (Art. 18, IV), e os dois
+        coexistem de propósito: bloqueio é a suspensão de um dado específico, pedida por qualquer
+        razão; oposição é a objeção ao *fundamento* do tratamento — é a salvaguarda que a LIA cita
+        como contrapartida do legítimo interesse (Art. 10, §3º). Tratar um como apelido do outro
+        deixaria a LIA apontando para um canal que decide outra coisa.
+      enum: [confirmacao, acesso, correcao, anonimizacao, bloqueio, eliminacao,
+             portabilidade, compartilhamentos, revogacao, revisao_decisao, oposicao]
+
+    NivelVerificacao:
+      type: integer
+      minimum: 1
+      maximum: 3
+      description: |
+        1 · código no canal já conhecido — confirmação, compartilhamentos.
+        2 · código + um dado de cadastro — acesso, correção, bloqueio, revogação, revisão Art. 20.
+        3 · código + documento com foto — eliminação, anonimização, portabilidade.
+
+        **Derivado do direito, no servidor.** Nunca parâmetro do cliente.
+
+    RegimeDoDireito:
+      type: object
+      required: [direito, rotulo, artigo, nivel, prazo_dias]
+      properties:
+        direito: { $ref: '#/components/schemas/Direito' }
+        rotulo:
+          type: string
+          description: 'Em linguagem de pessoa. O artigo é legenda, nunca rótulo primário.'
+          examples: ['Ver todos os dados que vocês têm sobre mim']
+        artigo: { type: string, examples: ['Art. 18, II'] }
+        nivel: { $ref: '#/components/schemas/NivelVerificacao' }
+        por_que_o_nivel:
+          type: string
+          description: A escada fica visível para a exigência não parecer arbitrária.
+        fatores:
+          type: array
+          items: { type: string, enum: [codigo, dado_cadastro, documento] }
+        prazo_dias: { type: integer }
+        fundamento_do_prazo: { type: string }
+
+    VerificacaoAberta:
+      type: object
+      required: [id, nivel_exigido, fatores_exigidos, canal, expira_em]
+      properties:
+        id: { type: string }
+        nivel_exigido: { $ref: '#/components/schemas/NivelVerificacao' }
+        fatores_exigidos:
+          type: array
+          items: { type: string, enum: [codigo, dado_cadastro, documento] }
+        canal: { type: string, enum: [email, sms] }
+        expira_em: { type: string, format: date-time }
+        destino_do_documento:
+          type: string
+          description: |
+            Dito **antes** do envio, e não depois: uso único, fora do cadastro, descarte em 30 dias
+            com registro. Presente apenas no nível 3.
+
+    SessaoDoTitular:
+      type: object
+      required: [sessao, nivel_atingido, direito, expira_em]
+      properties:
+        sessao: { type: string, description: Vai no cabeçalho `X-Verificacao`. }
+        nivel_atingido: { $ref: '#/components/schemas/NivelVerificacao' }
+        direito: { $ref: '#/components/schemas/Direito' }
+        expira_em: { type: string, format: date-time }
+        documento_descartado_em:
+          type: string
+          format: date-time
+          description: Presente no nível 3 — a promessa de descarte vira uma data, e a data fica no trail.
+
+    SolicitacaoAberta:
+      type: object
+      required: [protocolo, direito, nivel_verificacao, prazo_limite]
+      properties:
+        protocolo: { type: string }
+        direito: { $ref: '#/components/schemas/Direito' }
+        nivel_verificacao:
+          $ref: '#/components/schemas/NivelVerificacao'
+          description: O derivado. Nunca o que veio no corpo.
+        prazo_limite:
+          type: string
+          format: date-time
+          description: 'Data absoluta, calculada do direito e gravada antes da resposta.'
+        prazo_dias: { type: integer }
+        fundamento_do_prazo: { type: string }
+        proximos_passos:
+          type: array
+          items: { type: string }
+          description: As etapas seguintes, ditas antes de o titular sair da tela.
+
+    ItemRetido:
+      type: object
+      required: [item, base_legal, retencao_ate]
+      properties:
+        item: { type: string, description: O que ficou, em linguagem de pessoa. }
+        base_legal: { $ref: '#/components/schemas/BaseLegal' }
+        artigo: { type: string }
+        retencao_ate:
+          type: string
+          format: date
+          description: 'A data da eliminação do resíduo. Prazo é data, nunca "conforme a lei".'
+        motivo: { type: string }
+
+    SolicitacaoDoTitular:
+      type: object
+      required: [protocolo, direito, estado, prazo_limite]
+      properties:
+        protocolo: { type: string }
+        direito: { $ref: '#/components/schemas/Direito' }
+        rotulo: { type: string, description: O direito em linguagem de pessoa. }
+        estado: { type: string, enum: [recebida, em_analise, concluida, recusada_com_fundamento] }
+        prazo_limite: { type: string, format: date-time }
+        desfecho: { type: string, enum: [atendido, atendido_parcialmente, recusado_com_fundamento] }
+        fundamento: { type: string }
+        andamento:
+          type: array
+          items:
+            type: object
+            properties:
+              etapa: { type: string }
+              quando: { type: string, format: date-time }
+              concluida: { type: boolean }
+        apagados:
+          type: array
+          items: { type: string }
+        retidos:
+          type: array
+          items: { $ref: '#/components/schemas/ItemRetido' }
+        mensagens:
+          type: array
+          items:
+            type: object
+            properties:
+              remetente: { type: string, enum: [titular, dpo] }
+              corpo: { type: string }
+              quando: { type: string }
+        caminho_da_anpd:
+          type: string
+          description: |
+            Oferecido lado a lado com a revisão sempre que há retenção ou recusa. Esconder a
+            autoridade é o que transforma insatisfação em denúncia.
+
+    PacoteDeResposta:
+      type: object
+      required: [uri, expira_em, hash]
+      properties:
+        uri: { type: string }
+        expira_em: { type: string, format: date-time }
+        hash: { type: string, description: Assinatura do pacote, para o titular conferir a integridade. }
+        por_que_expira:
+          type: string
+          description: 'A frase que justifica a validade curta — e diz o que fazer depois.'
+        sumario:
+          type: array
+          items: { type: string }
+          description: O que há no arquivo, para não ser preciso abri-lo.
+
+    ConsentimentoDoTitular:
+      type: object
+      required: [id, texto, versao, coletado_em, canal, estado]
+      properties:
+        id: { type: string, description: Identificador do campo consentido. }
+        rotulo: { type: string }
+        texto: { type: string, description: 'O texto **na versão aceita** — a prova do Art. 8º, §2º.' }
+        versao: { type: string }
+        coletado_em: { type: string }
+        canal: { type: string }
+        hash: { type: string }
+        estado: { type: string, enum: [ativo, revogado, expirado] }
+        revogado_em: { type: string, format: date-time }
+        o_que_voce_perde:
+          type: array
+          items: { type: string }
+          description: |
+            A consequência da revogação, dita **antes** de confirmar. Revogação sem consequência
+            declarada é revogação de fachada.
+
+    Revogacao:
+      type: object
+      required: [revogacao_id, campo_id, revogado_em, cascata]
+      properties:
+        revogacao_id: { type: string }
+        campo_id: { type: string }
+        revogado_em: { type: string, format: date-time }
+        cascata:
+          type: array
+          items: { $ref: '#/components/schemas/ItemDaCascata' }
+        propagacao: { type: string, description: Caminho para consultar o andamento. }
+
+    ItemDaCascata:
+      type: object
+      required: [alvo, tipo, estado]
+      properties:
+        alvo: { type: string, description: Sistema, destinatário ou executor. }
+        tipo: { type: string, enum: [cessacao, notificacao, expurgo] }
+        efeito: { type: string, description: O que acontece ali, sem jargão. }
+        estado: { type: string, enum: [propagado, pendente] }
+
+    Propagacao:
+      type: object
+      required: [campo_id, itens, alerta]
+      properties:
+        campo_id: { type: string }
+        itens:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/ItemDaCascata'
+              - type: object
+                properties:
+                  confirmado_em: { type: string, format: date-time }
+                  pendente_ha_horas: { type: number }
+        pendentes: { type: integer }
+        alerta:
+          type: boolean
+          description: 'Verdadeiro quando algum item está pendente há mais de 24 h. Visível ao titular.'
+        alerta_desde: { type: string, format: date-time }
+
+    DecisaoAutomatizada:
+      type: object
+      required: [id, modelo, aprovado, fatores]
+      properties:
+        id: { type: string }
+        modelo: { type: string }
+        aprovado: { type: boolean }
+        fatores:
+          type: array
+          items:
+            type: object
+            properties:
+              fator: { type: string }
+              peso: { type: number }
+              sentido: { type: string, enum: [a_favor, contra] }
+        revisao:
+          type: object
+          nullable: true
+          properties:
+            resultado: { type: string, enum: [mantida, revertida, ajustada] }
+            fundamento: { type: string }
+            quando: { type: string, format: date-time }
+
     Campo:
       type: object
       required: [nome, categoria, base_legal, retencao]
@@ -587,6 +2075,10 @@ components:
         categoria: { type: string, enum: [anonimizado, pseudonimizado, pessoal, sensivel] }
         sensivel: { type: boolean }
         finalidade: { type: string }
+        finalidades_compativeis:
+          type: array
+          items: { type: string, enum: [atendimento, cobranca, auditoria, seguranca] }
+          description: 'Lista vazia significa **não revelável** — jamais "qualquer uma".'
         base_legal: { $ref: '#/components/schemas/BaseLegal' }
         lia_codigo: { type: string, nullable: true }
         retencao: { type: string, examples: ['P5Y'] }
@@ -598,6 +2090,43 @@ components:
               destino: { type: string }
               transferencia_internacional: { type: boolean }
               mecanismo: { type: string }
+
+    CampoParaValidar:
+      type: object
+      required: [nome, categoria, baseLegal, finalidadesCompativeis]
+      properties:
+        nome: { type: string }
+        campoId: { type: string }
+        tipoArmazenado: { type: string, enum: [bruto, hash, hmac, criptografado, agregado] }
+        categoria: { type: string, enum: [anonimizado, pseudonimizado, pessoal, sensivel] }
+        sensivel: { type: boolean }
+        baseLegal: { $ref: '#/components/schemas/BaseLegal' }
+        internacional: { type: boolean }
+        mecanismo: { type: string }
+        finalidadesCompativeis:
+          type: array
+          items: { type: string }
+          description: Ausente é erro de preenchimento; vazia é declaração deliberada de "não revelável".
+
+    FichaDoTitular:
+      type: object
+      properties:
+        id: { type: string }
+        campos:
+          type: array
+          items:
+            type: object
+            properties:
+              chave: { type: string }
+              rotulo: { type: string }
+              grupo: { type: string }
+              sensivel: { type: boolean }
+              mascara: { type: string, description: O que a tela mostra por padrão. O valor não vem aqui. }
+              baseLegal: { $ref: '#/components/schemas/BaseLegal' }
+        compartilhamentos:
+          type: array
+          items: { type: object, additionalProperties: true }
+        decisao: { type: object, additionalProperties: true, nullable: true }
 
     InventarioEntrada:
       type: object
@@ -672,16 +2201,114 @@ components:
         mensagem_humana: { type: string, description: 'Tradução exibida na tela T1.' }
         como_corrigir: { type: string }
 
-    RipdTrigger:
+    Epico:
       type: object
-      required: [id, categoria, critico]
       properties:
-        id: { type: string, pattern: '^T([1-9]|10)$' }
-        categoria: { type: string }
-        critico: { type: boolean }
-        evidencias:
+        id: { type: string }
+        titulo: { type: string }
+        repositorio: { type: string }
+        pbd:
+          type: array
+          items:
+            type: object
+            properties:
+              principio: { type: integer, minimum: 1, maximum: 7 }
+              marcado: { type: boolean }
+              evidencia: { type: string, nullable: true }
+        veredito:
+          type: object
+          properties:
+            aprovado: { type: boolean }
+            semEvidencia:
+              type: array
+              items: { type: integer }
+
+    ItemDaFila:
+      type: object
+      properties:
+        artefato: { type: string }
+        codigo: { type: string }
+        estado: { type: string }
+        titulo: { type: string }
+        prazo: { type: string, format: date-time, nullable: true }
+        atrasado: { type: boolean }
+
+    TabelaDeDecisao:
+      type: object
+      properties:
+        id: { type: string, enum: [d1, d2, d3] }
+        nome: { type: string }
+        vigente: { type: string }
+        versoes:
+          type: array
+          items:
+            type: object
+            properties:
+              versao: { type: string }
+              publicadaEm: { type: string }
+              regras:
+                type: array
+                items: { type: object, additionalProperties: true }
+
+    DecisaoRegistrada:
+      type: object
+      properties:
+        tabela: { type: string, enum: [d1, d2, d3] }
+        versao: { type: string }
+        entradas: { type: object, additionalProperties: true }
+        saida: { type: object, additionalProperties: true }
+        quando: { type: string, format: date-time }
+
+    Obrigacao:
+      type: object
+      properties:
+        codigo: { type: string }
+        titulo: { type: string }
+        tipo: { type: string }
+        vence_em: { type: string, format: date }
+        responsavel: { type: string }
+        dias_de_esforco: { type: number }
+        prorrogacoes:
+          type: array
+          items:
+            type: object
+            properties:
+              de: { type: string, format: date }
+              para: { type: string, format: date }
+              justificativa: { type: string }
+              quando: { type: string, format: date-time }
+
+    Incidente:
+      type: object
+      properties:
+        id: { type: string }
+        titulo: { type: string }
+        estado: { type: string, enum: [aberto, contido, decidido, comunicado, nao_comunicado, encerrado] }
+        camposIds:
           type: array
           items: { type: string }
+        titularesAfetados: { type: integer }
+        decisao: { type: string, enum: [comunicar, nao_comunicar], nullable: true }
+        fundamento: { type: string, nullable: true }
+        abertoEm: { type: string, format: date-time }
+
+    Consentimento:
+      type: object
+      properties:
+        campoId: { type: string }
+        versao: { type: string }
+        texto: { type: string }
+        coletadoEm: { type: string }
+        canal: { type: string }
+        hash: { type: string }
+        estado: { type: string, enum: [ativo, revogado, expirado] }
+        revogadoEm: { type: string, nullable: true }
+        titulares:
+          type: integer
+          description: |
+            Contagem agregada. A prova **por titular** é do portal
+            (`GET /me/consentimentos`) — e a entidade de consentimento por titular no schema de
+            produção é o Risco-002, ainda aberto.
 
     ExpurgoRun:
       type: object
@@ -751,19 +2378,30 @@ components:
         titular_pseudonimo:
           type: string
           description: Pseudônimo HMAC. O CPF nunca trafega nesta rota.
-        direito:
+        direito: { $ref: '#/components/schemas/Direito' }
+        status:
           type: string
-          enum: [confirmacao, acesso, correcao, anonimizacao, bloqueio, eliminacao,
-                 portabilidade, compartilhamentos, revogacao, revisao_decisao]
-        status: { type: string, enum: [recebida, em_analise, aguardando_titular, concluida, recusada] }
+          enum: [recebida, em_analise, concluida, recusada_com_fundamento]
+        desfecho:
+          type: string
+          enum: [atendido, atendido_parcialmente, recusado_com_fundamento]
+        fundamento: { type: string, description: Já redigido pelo redator de PII. }
+        origem:
+          type: string
+          enum: [portal, balcao]
+          description: Aberta pelo próprio titular ou registrada pelo atendimento.
         nivel_verificacao:
-          type: integer
-          minimum: 1
-          maximum: 3
-          description: 1 sessão válida, 2 MFA, 3 verificação elevada (obrigatório para eliminação).
+          $ref: '#/components/schemas/NivelVerificacao'
+          description: Derivado do direito, no servidor. Gravado na abertura.
         prazo_limite: { type: string, format: date-time }
         restante_segundos: { type: integer }
         alerta_dpo: { type: boolean }
+        apagados:
+          type: array
+          items: { type: string }
+        retidos:
+          type: array
+          items: { $ref: '#/components/schemas/ItemRetido' }
 
     AuditLinha:
       type: object
@@ -775,6 +2413,8 @@ components:
         recurso_tipo: { type: string }
         recurso_id: { type: string }
         finalidade: { type: string, nullable: true }
+        protocolo: { type: string, nullable: true }
+        justificativa: { type: string, nullable: true, description: Já redigida antes do append. }
         campos:
           type: array
           items: { type: string }

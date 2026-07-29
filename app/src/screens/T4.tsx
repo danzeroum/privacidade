@@ -4,7 +4,18 @@ import { useSessao } from '../store/sessao';
 import { hashCpf } from '../lib/sha256';
 import { redigir, resumoDaRedacao } from '../lib/redator';
 import { pode } from '../mock/permissoes';
-import type { DesfechoSolicitacao, Finalidade, ResultadoRevisao, Solicitacao } from '../mock/types';
+import { BASES_LEGAIS } from '../mock/types';
+import type { BaseLegal, DesfechoSolicitacao, Finalidade, ResultadoRevisao, Solicitacao } from '../mock/types';
+
+/** Linha do editor de retidos. `retencaoAte` é string porque vem de um `<input type="date">`. */
+interface RetidoEmEdicao { item: string; baseLegal: BaseLegal; artigo: string; retencaoAte: string }
+
+/** Atualiza uma linha da lista sem mutar as outras. */
+const atualizar = (
+  set: React.Dispatch<React.SetStateAction<RetidoEmEdicao[]>>,
+  indice: number,
+  troca: Partial<RetidoEmEdicao>,
+) => set((v) => v.map((r, i) => (i === indice ? { ...r, ...troca } : r)));
 
 const DIA = 86_400_000;
 
@@ -13,6 +24,7 @@ const ROTULO_DIREITO: Record<string, string> = {
   anonimizacao: 'Anonimização (IV)', bloqueio: 'Bloqueio (IV)', eliminacao: 'Eliminação (VI)',
   portabilidade: 'Portabilidade (V)', compartilhamentos: 'Compartilhamentos (VII)',
   revogacao: 'Revogação (VIII)', revisao_decisao: 'Revisão de decisão (Art. 20)',
+  oposicao: 'Oposição (§2º)',
 };
 
 const ROTULO_DESFECHO: Record<DesfechoSolicitacao, string> = {
@@ -494,17 +506,40 @@ function PainelConclusao({ solicitacao }: { solicitacao: Solicitacao }) {
   useSessao((s) => s.versao);
   const [desfecho, setDesfecho] = useState<DesfechoSolicitacao>('atendido');
   const [evidencia, setEvidencia] = useState('');
+  const [retidos, setRetidos] = useState<RetidoEmEdicao[]>([]);
 
   const encerrado = encerrada(solicitacao);
   const previa = redigir(evidencia);
   const exigeFundamento = desfecho === 'recusado_com_fundamento';
+  /**
+   * PR 16 — parcial e recusa passam a exigir a lista do que ficou.
+   *
+   * O painel não ganhou tela nova: ganhou as três colunas que faltavam para o
+   * DPO conseguir responder o que a tela 07 do portal mostra ao titular. Sem
+   * elas, o botão só saberia produzir um 422 — e a regra nova viraria um
+   * obstáculo em vez de um caminho.
+   */
+  const exigeRetidos = desfecho !== 'atendido';
+  const retidosValidos = retidos.length > 0
+    && retidos.every((r) => r.item.trim() && r.baseLegal && /^\d{4}-\d{2}-\d{2}$/.test(r.retencaoAte));
 
   const concluir = () => {
     const res = chamar({
       metodo: 'POST', caminho: `/v1/requests/${solicitacao.id}/concluir`,
-      body: { desfecho, evidencia },
+      body: {
+        desfecho,
+        evidencia,
+        ...(exigeRetidos
+          ? {
+            retidos: retidos.map((r) => ({
+              item: r.item, base_legal: r.baseLegal, artigo: r.artigo || undefined,
+              retencao_ate: r.retencaoAte,
+            })),
+          }
+          : {}),
+      },
     });
-    if (res.status === 200) setEvidencia('');
+    if (res.status === 200) { setEvidencia(''); setRetidos([]); }
   };
 
   if (encerrado) {
@@ -567,11 +602,64 @@ function PainelConclusao({ solicitacao }: { solicitacao: Solicitacao }) {
             {' '}<span className="mono">{previa.texto}</span>
           </Nota>
         )}
+        {exigeRetidos && (
+          <div style={{ marginTop: 12 }}>
+            <label>O que ficou retido</label>
+            <p className="hint" style={{ marginTop: 2 }}>
+              Um item por linha, com a lei que sustenta a retenção e a data em que ele é eliminado.
+              É exatamente o que o titular vê — “parte foi retida por obrigação legal” não é resposta,
+              é reticência.
+            </p>
+            {retidos.map((r, i) => (
+              <div className="row" key={i} style={{ gap: 6, marginTop: 6, alignItems: 'flex-start' }}>
+                <input
+                  aria-label={`Item retido ${i + 1}`}
+                  placeholder="Ex.: notas fiscais das suas compras"
+                  value={r.item}
+                  onChange={(e) => atualizar(setRetidos, i, { item: e.target.value })}
+                  style={{ flex: 2 }}
+                />
+                <select
+                  aria-label={`Base legal do item ${i + 1}`}
+                  value={r.baseLegal}
+                  onChange={(e) => atualizar(setRetidos, i, { baseLegal: e.target.value as BaseLegal })}
+                  style={{ flex: 1 }}
+                >
+                  {BASES_LEGAIS.map((b) => <option key={b} value={b}>{b}</option>)}
+                </select>
+                <input
+                  aria-label={`Retenção até, item ${i + 1}`}
+                  type="date"
+                  value={r.retencaoAte}
+                  onChange={(e) => atualizar(setRetidos, i, { retencaoAte: e.target.value })}
+                  style={{ flex: 1 }}
+                />
+                <button
+                  className="btn"
+                  aria-label={`Remover item ${i + 1}`}
+                  onClick={() => setRetidos((v) => v.filter((_, j) => j !== i))}
+                >
+                  −
+                </button>
+              </div>
+            ))}
+            <button
+              className="btn"
+              style={{ marginTop: 6 }}
+              onClick={() => setRetidos((v) => [...v, {
+                item: '', baseLegal: 'obrigacao_legal', artigo: '', retencaoAte: '',
+              }])}
+            >
+              + item retido
+            </button>
+          </div>
+        )}
         <div className="row" style={{ marginTop: 10 }}>
           <button
             className="btn primary"
             style={{ width: '100%', justifyContent: 'center' }}
-            disabled={exigeFundamento && evidencia.trim().length < 20}
+            disabled={(exigeFundamento && evidencia.trim().length < 20)
+              || (exigeRetidos && !retidosValidos)}
             onClick={concluir}
           >
             Registrar conclusão
