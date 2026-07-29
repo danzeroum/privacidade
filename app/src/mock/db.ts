@@ -2,7 +2,7 @@ import { sha256 } from '../lib/sha256';
 import { CENARIOS } from './scenarios';
 import type {
   AuditLinha, Cenario, Finalidade, Papel, Reclassificacao,
-  RevogacaoTitular, SessaoTitular, VerificacaoTitular,
+  OposicaoTitular, RevogacaoTitular, SessaoTitular, VerificacaoTitular,
 } from './types';
 
 export interface EntradaAudit {
@@ -75,6 +75,9 @@ export class BancoMock {
   /** Revogações por titular, com a cascata de cada uma. */
   revogacoesTitular: RevogacaoTitular[] = [];
 
+  /** Oposições por titular (Art. 18, §2º), uma por LIA. */
+  oposicoesTitular: OposicaoTitular[] = [];
+
   private proximoIdPortal = 1;
 
   /** Identificador sequencial do portal. Separado do `proximoId` do trail de propósito. */
@@ -115,6 +118,24 @@ export class BancoMock {
   /** A revogação deste titular para este campo, se houver. */
   revogacaoDe(titularId: string, campoId: string): RevogacaoTitular | undefined {
     return this.revogacoesTitular.find((r) => r.titularId === titularId && r.campoId === campoId);
+  }
+
+  /** A oposição deste titular a esta LIA, se houver — acolhida ou já recusada. */
+  oposicaoALia(titularId: string, liaCodigo: string): OposicaoTitular | undefined {
+    return this.oposicoesTitular.find((o) => o.titularId === titularId && o.liaCodigo === liaCodigo);
+  }
+
+  /**
+   * Este campo está sob oposição **acolhida** deste titular?
+   *
+   * É a pergunta que a revelação faz antes de devolver um valor. Só `acolhida`
+   * bloqueia: a oposição recusada com fundamento continua registrada — o
+   * pedido aconteceu — e deixa de barrar o tratamento.
+   */
+  oposicaoVigenteSobre(titularId: string, campoId: string): OposicaoTitular | undefined {
+    return this.oposicoesTitular.find(
+      (o) => o.titularId === titularId && o.estado === 'acolhida' && o.camposIds.includes(campoId),
+    );
   }
 
   constructor(cenarioId: string) {

@@ -23,7 +23,9 @@ import {
 } from '../src/mock/decisoes';
 import { requestPortal } from '../src/mock/portal';
 import { DIREITOS, REGIME, nivelExigido } from '../src/mock/direitos';
-import { OPERACOES, RAIZES_DO_MOCK, ROTAS_APENAS_DEMO } from '../src/mock/rotas';
+import {
+  CAMINHO_DA_OPOSICAO, OPERACOES, RAIZES_DO_MOCK, ROTAS_APENAS_DEMO, canalDeOposicao, operacaoDe,
+} from '../src/mock/rotas';
 import { REGRAS, derivarFila, eDe, minhaFila } from '../src/mock/fila';
 import type { ContadoresDaFila, ItemDaFila } from '../src/mock/fila';
 import {
@@ -4666,8 +4668,8 @@ function sessaoDoPortal(
 }
 
 describe('PR 16 · invariante — o nível de verificação é derivado do direito, no servidor', () => {
-  it('a tabela declara os dez direitos, e só ela decide o nível', () => {
-    expect(DIREITOS).toHaveLength(10);
+  it('a tabela declara os onze direitos, e só ela decide o nível', () => {
+    expect(DIREITOS).toHaveLength(11);
     for (const d of DIREITOS) {
       expect(REGIME[d].nivel, `${d} sem nível declarado`).toBeGreaterThanOrEqual(1);
       expect(REGIME[d].nivel).toBeLessThanOrEqual(3);
@@ -4678,6 +4680,12 @@ describe('PR 16 · invariante — o nível de verificação é derivado do direi
       .toEqual(['anonimizacao', 'eliminacao', 'portabilidade']);
     expect(DIREITOS.filter((d) => REGIME[d].nivel === 1).sort())
       .toEqual(['compartilhamentos', 'confirmacao']);
+    // `bloqueio` e `oposicao` dividem a linha 2 e continuam distintos: um
+    // suspende um dado, o outro objeta ao fundamento. Fundi-los deixaria a LIA
+    // publicando um canal que decide outra coisa.
+    expect(REGIME.oposicao.nivel).toBe(2);
+    expect(REGIME.oposicao.artigo).toContain('§2º');
+    expect(REGIME.bloqueio.artigo).not.toBe(REGIME.oposicao.artigo);
   });
 
   it('pedir eliminação com nivel_verificacao 1 no corpo não reduz a exigência', () => {
@@ -4785,9 +4793,9 @@ describe('PR 16 · invariante — o 401 não diz se o cadastro existe', () => {
 });
 
 describe('PR 16 · as doze rotas — verificação: existem e respondem o contrato?', () => {
-  it('as doze do portal estão declaradas no contrato e têm política própria', () => {
+  it('as treze do portal estão declaradas no contrato e têm política própria', () => {
     const portal = OPERACOES.filter((o) => o.superficie === 'portal');
-    expect(portal).toHaveLength(12);
+    expect(portal).toHaveLength(13);
     for (const op of portal) {
       const caminho = op.contrato.replace(/\{[^}]+\}/g, 'x').replace(/^\//, '');
       const politica = POLITICAS.find((p) => p.superficie === 'portal'
@@ -4813,8 +4821,9 @@ describe('PR 16 · as doze rotas — verificação: existem e respondem o contra
       ['GET', '/v1/me/consentimentos/xx/propagacao'],
       ['GET', '/v1/me/decisoes/xx'],
       ['POST', '/v1/me/decisoes/xx/revisao'],
+      ['POST', '/v1/titulares/me/oposicao?lia=LIA-SCORING-001'],
     ];
-    expect(chamadas).toHaveLength(12);
+    expect(chamadas).toHaveLength(13);
     for (const [metodo, caminho] of chamadas) {
       const res = requestPortal<{ erro?: string }>(banco, { metodo, caminho, sessao: token, body: {} });
       expect(String(res.body?.erro ?? ''), `${metodo} ${caminho} caiu no 404 terminal`)
@@ -4822,10 +4831,11 @@ describe('PR 16 · as doze rotas — verificação: existem e respondem o contra
     }
   });
 
-  it('GET /me/direitos devolve os dez, com nível e prazo, e nenhum dado de titular', () => {
+  it('GET /me/direitos devolve os onze, com nível e prazo, e nenhum dado de titular', () => {
     const res = requestPortal<{ direitos: any[] }>(banco, { metodo: 'GET', caminho: '/v1/me/direitos' });
     expect(res.status).toBe(200);
-    expect(res.body.direitos).toHaveLength(10);
+    expect(res.body.direitos).toHaveLength(11);
+    expect(res.body.direitos.find((d) => d.direito === 'oposicao').nivel).toBe(2);
     expect(res.body.direitos.find((d) => d.direito === 'eliminacao').nivel).toBe(3);
     expect(res.body.direitos.find((d) => d.direito === 'revisao_decisao').prazo_dias).toBe(5);
     const corpo = JSON.stringify(res.body);
@@ -5241,5 +5251,208 @@ describe('PR 16 · T4 na tela — o balcão consegue responder o que o portal mo
     expect(s.retidos).toEqual([expect.objectContaining({
       item: 'Notas fiscais', baseLegal: 'obrigacao_legal', retencaoAte: '2031-07-29',
     })]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 17 · oposição (Art. 18, §2º) — o último sub-item do P0
+//
+// Verificação e validação separadas, como sempre: primeiro *a rota existe no
+// caminho que a LIA anuncia?*, depois *o titular consegue se opor e o
+// tratamento para?*. A primeira pergunta é a que fecha o Risco-001; a segunda é
+// a que impede a rota de ser um 201 decorativo.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('PR 17 · verificação — a rota existe no caminho que a LIA anuncia', () => {
+  const SEED = readFileSync(join('..', 'db', 'seed.sql'), 'utf8');
+
+  /** O canal como o banco de produção o publica, extraído do próprio seed. */
+  const canalNoSeed = (): string => {
+    const m = SEED.match(/'(POST [^']*oposicao[^']*)'/);
+    expect(m, 'db/seed.sql precisa publicar um canal_oposicao').toBeTruthy();
+    return m![1];
+  };
+
+  it('o canal publicado pela LIA é exatamente o que o código serve', () => {
+    // Falha se alguém renomear qualquer um dos dois lados. Era este o defeito:
+    // a LIA anunciava POST /api/v1/titulares/me/oposicao e nenhuma linha de
+    // código sabia disso — o canal e a rota nunca se olharam.
+    expect(canalNoSeed()).toBe(canalDeOposicao('LIA-SCORING-001'));
+    expect(canalNoSeed()).toContain(CAMINHO_DA_OPOSICAO);
+  });
+
+  it('esse caminho está no contrato, e a catraca de paridade o conhece', () => {
+    const semPrefixo = CAMINHO_DA_OPOSICAO.replace(/^\/v1/, '');
+    const doc = parseYaml(readFileSync(join('..', 'api', 'openapi.yaml'), 'utf8')) as any;
+    expect(doc.paths[semPrefixo]?.post, 'o contrato não declara o caminho que a LIA publica').toBeTruthy();
+    expect(operacaoDe('POST', semPrefixo), 'rotas.ts não declara a operação').toBeTruthy();
+    // E o enum do contrato tem os onze.
+    expect(doc.components.schemas.Direito.enum).toHaveLength(11);
+    expect(doc.components.schemas.Direito.enum).toContain('oposicao');
+  });
+
+  it('o enum de onze vale nos três lugares: contrato, schema e vocabulário do mock', () => {
+    const schema = readFileSync(join('..', 'db', 'schema.sql'), 'utf8');
+    const enumSql = schema.match(/CREATE TYPE direito_titular AS ENUM \(([\s\S]*?)\);/)![1];
+    const valores = [...enumSql.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+    expect(valores.sort()).toEqual([...DIREITOS].sort());
+  });
+
+  it('a rota responde no caminho anunciado — e nada além dela usa esse endereço', () => {
+    const { token } = sessaoDoPortal(banco, 'oposicao');
+    const res = requestPortal<any>(banco, {
+      metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-SCORING-001`, sessao: token,
+    });
+    expect(res.status).toBe(201);
+    // O console continua sem servir este endereço: a superfície é outra.
+    const noConsole = chamar('dpo', { metodo: 'POST', caminho: CAMINHO_DA_OPOSICAO, body: {} });
+    expect(String((noConsole.body as any).erro)).toContain('Rota não encontrada');
+  });
+
+  it('a tela da LIA lê o canal do registro, e não de uma string própria', () => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [], recusas: {} });
+    render(<MemoryRouter><T8 /></MemoryRouter>);
+    expect(screen.getByText(canalDeOposicao('LIA-SCORING-001').replace('POST ', 'POST ')))
+      .toBeInTheDocument();
+    // A grafia antiga não sobrevive em lugar nenhum da tela.
+    expect(screen.queryByText(/\/api\/v1\//)).toBeNull();
+  });
+});
+
+describe('PR 17 · validação — o titular consegue se opor, e o tratamento para', () => {
+  const revelarHistorico = (b: BancoMock, indice = 0) => request(b, {
+    papel: 'dpo', ator: 'teste', metodo: 'POST', caminho: '/v1/pseudonyms/resolve',
+    purpose: 'auditoria',
+    body: {
+      titularId: b.cenario.titulares[indice].id,
+      campo: 'historico',
+      justificativa: 'Conferência do histórico usado no modelo, sob o protocolo em atendimento.',
+      protocolo: b.cenario.solicitacoes.find((s) => s.titularId === b.cenario.titulares[indice].id)!.protocolo,
+    },
+  });
+
+  const opor = (b: BancoMock, indice = 0) => {
+    const { token } = sessaoDoPortal(b, 'oposicao', indice);
+    return requestPortal<any>(b, {
+      metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-SCORING-001`, sessao: token,
+      body: { texto: 'Não concordo que meu histórico alimente o modelo de vocês.' },
+    });
+  };
+
+  it('a oposição abre protocolo com prazo de 15 dias e devolve a cessação já em vigor', () => {
+    const res = opor(banco);
+    expect(res.status).toBe(201);
+    expect(res.body.prazo_dias).toBe(15);
+    expect(res.body.protocolo).toBeTruthy();
+    expect(res.body.cessacao).toHaveLength(1);
+    expect(res.body.cessacao[0].campo).toBe('Histórico de compras');
+    expect(res.body.como_o_controlador_pode_retomar).toContain('escrita');
+  });
+
+  it('o nível continua vindo do direito: nivel_verificacao 1 no corpo não reduz nada', () => {
+    const { token } = sessaoDoPortal(banco, 'oposicao');
+    const res = requestPortal<any>(banco, {
+      metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-SCORING-001`, sessao: token,
+      body: { nivel_verificacao: 1 },
+    });
+    expect(res.body.nivel_verificacao).toBe(2);
+    const gravada = banco.cenario.solicitacoes.find((s) => s.protocolo === res.body.protocolo)!;
+    expect(gravada.nivelVerificacao).toBe(2);
+    expect(gravada.direito).toBe('oposicao');
+
+    // E a confirmação de bloqueio não empresta credencial para oposição: são
+    // direitos distintos, e a sessão é presa a um deles.
+    const comBloqueio = requestPortal(banco, {
+      metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-SCORING-001`,
+      sessao: sessaoDoPortal(banco, 'bloqueio').token,
+    });
+    expect(comBloqueio.status).toBe(403);
+  });
+
+  it('acolhida a oposição, o tratamento por legítimo interesse é recusado com 422', () => {
+    expect(revelarHistorico(banco).status).toBe(200);
+    opor(banco);
+    const depois = revelarHistorico(banco);
+    expect(depois.status).toBe(422);
+    expect(String((depois.body as any).erro)).toContain('se opôs');
+    expect(banco.auditoria.some((l) => l.acao === 'OPOSICAO_ACOLHIDA')).toBe(true);
+    // A cessação é deste titular. Joana (t3) não se opôs e segue sob a mesma LIA.
+    expect(banco.oposicoesTitular).toHaveLength(1);
+    expect(banco.oposicaoVigenteSobre('t3', 'b-hist')).toBeUndefined();
+  });
+
+  it('bloqueio segue reversível e distinto: pedir bloqueio não cessa o legítimo interesse', () => {
+    const { token } = sessaoDoPortal(banco, 'bloqueio');
+    const res = requestPortal<any>(banco, {
+      metodo: 'POST', caminho: '/v1/requests', sessao: token, body: { direito: 'bloqueio' },
+    });
+    expect(res.status).toBe(201);
+    expect(banco.oposicoesTitular).toHaveLength(0);
+    expect(revelarHistorico(banco).status).toBe(200);
+  });
+
+  it('o controlador só retoma por escrito — recusa fundamentada devolve o tratamento', () => {
+    const protocolo = opor(banco).body.protocolo;
+    expect(revelarHistorico(banco).status).toBe(422);
+
+    const solicitacao = banco.cenario.solicitacoes.find((s) => s.protocolo === protocolo)!;
+    chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/estados/solicitacao/${protocolo}`, body: { para: 'em_analise' },
+    });
+    const conclusao = chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/requests/${solicitacao.id}/concluir`,
+      body: {
+        desfecho: 'recusado_com_fundamento',
+        evidencia: 'Prevalece a prevenção à fraude no crédito, com a LIA rebalanceada em 29/07 e comunicada.',
+        retidos: [{
+          item: 'Histórico de compras usado no modelo', base_legal: 'legitimo_interesse',
+          artigo: 'Art. 10, §3º', retencao_ate: '2027-01-29',
+        }],
+      },
+    });
+    expect(conclusao.status).toBe(200);
+    expect(banco.oposicoesTitular[0].estado).toBe('recusada');
+    expect(revelarHistorico(banco).status).toBe(200);
+  });
+
+  it('falha de log ao registrar a oposição: 503, nada cessa e nenhum protocolo nasce', () => {
+    const { token } = sessaoDoPortal(banco, 'oposicao');
+    const antes = banco.cenario.solicitacoes.length;
+    banco.simularFalhaDeLog = true;
+    const res = requestPortal(banco, {
+      metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-SCORING-001`, sessao: token,
+    });
+    expect(res.status).toBe(503);
+    banco.simularFalhaDeLog = false;
+    expect(banco.oposicoesTitular).toHaveLength(0);
+    expect(banco.cenario.solicitacoes).toHaveLength(antes);
+    expect(revelarHistorico(banco).status).toBe(200);
+  });
+
+  it('opor-se duas vezes à mesma LIA é 409, e LIA inexistente é 404', () => {
+    opor(banco);
+    const { token } = sessaoDoPortal(banco, 'oposicao');
+    expect(requestPortal(banco, {
+      metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-SCORING-001`, sessao: token,
+    }).status).toBe(409);
+    expect(requestPortal(banco, {
+      metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-NAO-EXISTE`, sessao: token,
+    }).status).toBe(404);
+    expect(requestPortal(banco, {
+      metodo: 'POST', caminho: CAMINHO_DA_OPOSICAO, sessao: token,
+    }).status).toBe(422);
+  });
+
+  it('opor-se não exige justificativa, e o texto livre passa pelo redator', () => {
+    const { token } = sessaoDoPortal(banco, 'oposicao');
+    const res = requestPortal<any>(banco, {
+      metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-SCORING-001`, sessao: token,
+      body: { texto: 'Meu CPF é 529.982.247-25 e não autorizo isso.' },
+    });
+    expect(res.status).toBe(201);
+    const gravada = banco.cenario.solicitacoes.find((s) => s.protocolo === res.body.protocolo)!;
+    expect(gravada.detalhe).toContain('[CPF removido]');
+    expect(banco.auditoria.at(-1)!.justificativa).not.toContain('529.982.247-25');
   });
 });

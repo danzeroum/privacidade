@@ -227,6 +227,23 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
           'Art. 8º, §5º e Art. 18, VIII: a revogação é individual, e cessa o tratamento que dependia dela.') as Res<T>;
       }
 
+      /**
+       * Art. 18, §2º — a oposição acolhida cessa o tratamento **deste** titular.
+       *
+       * É o par exato da revogação de consentimento logo acima, e pelo mesmo
+       * motivo: se a oposição mudasse um estado que nenhuma leitura consulta, a
+       * salvaguarda que a LIA publica seria decorativa — e é justamente a
+       * existência dessa salvaguarda que sustenta o balanceamento do Art. 10,
+       * §3º. Só `acolhida` barra; recusada com fundamento, o tratamento volta.
+       */
+      if (catalogado.baseLegal === 'legitimo_interesse'
+        && banco.oposicaoVigenteSobre(titularId, catalogado.id)) {
+        registrarNegativa(banco, ator, papel, campo, 'oposicao acolhida');
+        return erro(422, `Este titular se opôs ao tratamento de ${catalogado.nome} por legítimo interesse.`,
+          'Art. 18, §2º: acolhida a oposição, o tratamento cessa até que uma razão legítima prevalecente '
+          + 'seja escrita e comunicada — a recusa fundamentada da solicitação é o caminho para retomá-lo.') as Res<T>;
+      }
+
       if (!justificativa || justificativa.trim().length < 20) {
         return erro(422, 'A justificativa precisa de ao menos 20 caracteres.',
           'Justificativa curta não sustenta o acesso em auditoria.') as Res<T>;
@@ -900,6 +917,20 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         s.fundamento = fundamento;
         s.apagados = Array.isArray(body.apagados) ? body.apagados.map(String) : [];
         s.retidos = retidos;
+
+        /**
+         * A oposição foi acolhida no instante em que chegou, e a análise só
+         * pode fazer uma coisa com isso: mantê-la, ou derrubá-la **por escrito**.
+         *
+         * Recusar com fundamento é a única forma de o tratamento voltar, e o
+         * fundamento já foi exigido e redigido acima. Sem esta linha o
+         * controlador não teria como demonstrar razão legítima prevalecente
+         * (Art. 10, §3º) e a oposição seria irreversível — o que a lei não diz.
+         */
+        if (s.direito === 'oposicao' && desfecho === 'recusado_com_fundamento') {
+          const oposicao = banco.oposicoesTitular.find((o) => o.protocolo === s.protocolo);
+          if (oposicao) { oposicao.estado = 'recusada'; oposicao.decididaEmMs = agora; }
+        }
         s.concluidaEmMs = agora;
         s.concluidaEm = new Date(agora).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
         return ok({ protocolo: s.protocolo, status: s.status, dentroDoPrazo: agora <= s.prazoLimiteMs }) as Res<T>;

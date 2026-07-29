@@ -4,7 +4,9 @@
  * O balcão do DPO existia inteiro; a porta de entrada do titular não existia em
  * contrato algum. Pela régua do próprio checklist do repositório, *direito sem
  * endpoint com prazo, autenticação e log não existe no sistema* — e o contrato
- * enumerava dez direitos sem nenhuma rota que os exercesse.
+ * enumerava dez direitos sem nenhuma rota que os exercesse. O décimo primeiro,
+ * `oposicao`, nem enumerado estava: existia só como endereço publicado por uma
+ * LIA vigente, apontando para o vazio.
  *
  * Este arquivo é uma **superfície separada**, e não mais um punhado de `case`
  * em `api.ts`. O motivo não é organização:
@@ -122,6 +124,17 @@ export function requestPortal<T = unknown>(banco: BancoMock, req: ReqPortal): Re
     case 'GET requests':
     case 'POST requests':
       return rotasDeSolicitacao<T>(banco, req, partes, body, sessao, agora);
+
+    /**
+     * A oposição mora fora de `/me/` porque é o endereço que a LIA vigente
+     * publica — e o endereço de uma salvaguarda anunciada em artefato assinado
+     * não se troca por simetria de URL.
+     */
+    case 'POST titulares':
+      if (partes[1] === 'me' && partes[2] === 'oposicao') {
+        return oporSe<T>(banco, req, sessao!, body, agora);
+      }
+      break;
 
     default:
       break;
@@ -747,6 +760,137 @@ function propagacao<T>(
       }
       : {}),
   }) as Res<T>;
+}
+
+// ── oposição (Art. 18, §2º) ──────────────────────────────────────────────────
+
+/**
+ * A rota que a LIA promete.
+ *
+ * O canal de oposição estava publicado em `lia.canal_oposicao` e não existia em
+ * contrato algum — sub-item 3 do Risco-001. O efeito disso não é uma promessa
+ * fraca: o balanceamento do Art. 10, §3º se sustenta na salvaguarda oferecida
+ * ao titular, e uma salvaguarda que aponta para o vazio não sustenta nada.
+ *
+ * A oposição alcança **todos os campos que a LIA sustenta**, e não um campo
+ * escolhido: quem se opõe objeta ao fundamento, não cataloga dados. E a
+ * cessação vale já — o padrão fecha. Tratar enquanto se analisa faria o titular
+ * esperar pelo fim de uma análise da qual ele é o objeto.
+ */
+function oporSe<T>(
+  banco: BancoMock, req: ReqPortal, sessao: SessaoTitular,
+  body: Record<string, any>, agora: number,
+): Res<T> {
+  if (sessao.direito !== 'oposicao' || sessao.nivelAtingido < nivelExigido('oposicao')) {
+    return erro(403, 'Esta confirmação não alcança a oposição.',
+      'Opor-se é o direito do Art. 18, §2º, e a verificação precisa ser dele — bloqueio e oposição '
+      + 'não são o mesmo pedido e não emprestam confirmação um ao outro.') as Res<T>;
+  }
+
+  const liaCodigo = new URLSearchParams(req.caminho.split('?')[1] ?? '').get('lia') ?? '';
+  if (!liaCodigo) {
+    return erro(422, 'Falta dizer a qual análise de legítimo interesse você se opõe.',
+      'O canal que a LIA publica já traz o código dela: é o ?lia= do endereço.') as Res<T>;
+  }
+  const lia = banco.cenario.lias.find((l) => l.codigo === liaCodigo);
+  if (!lia) return erro(404, 'Não encontrado.') as Res<T>;
+
+  const titular = banco.cenario.titulares.find((t) => t.id === sessao.titularId)!;
+  if (banco.oposicaoALia(titular.id, liaCodigo)) {
+    return erro(409, 'Você já se opôs a este tratamento.',
+      'A oposição é ato único: o andamento está no protocolo que ela abriu.') as Res<T>;
+  }
+
+  /**
+   * Os campos alcançados: os que a LIA sustenta, que este titular tem, e cuja
+   * base é de fato legítimo interesse. A terceira condição não é redundante —
+   * uma LIA pode listar campo que mudou de base depois, e cessar o que já não
+   * depende dela seria parar um tratamento que a oposição não alcança.
+   */
+  const alcancados = titular.campos.filter((c) => {
+    if (!c.campoCatalogoId || !lia.camposIds.includes(c.campoCatalogoId)) return false;
+    const catalogado = banco.cenario.campos.find((k) => k.id === c.campoCatalogoId);
+    return catalogado?.baseLegal === 'legitimo_interesse';
+  });
+
+  const detalhe = body.texto ? redigir(String(body.texto)).texto : undefined;
+  const prazoLimiteMs = prazoLimiteDe('oposicao', agora);
+  const protocolo = banco.proximoProtocoloPortal();
+
+  /**
+   * Grava antes de cessar e antes de responder. Se o trail falha, **nada cessa**
+   * e nenhum protocolo nasce: cessação sem registro é indistinguível de um bug
+   * de produção, e o titular ficaria com um tratamento parado que ninguém sabe
+   * explicar.
+   */
+  try {
+    banco.auditAppend({
+      ator: 'portal', atorPapel: 'titular', acao: 'OPOSICAO_ACOLHIDA',
+      recursoTipo: 'lia', recursoId: lia.codigo, protocolo,
+      justificativa: detalhe,
+      campos: [
+        pseudonimo(titular), `prazo_limite=${data(prazoLimiteMs)}`,
+        ...alcancados.map((c) => `cessa:${c.campoCatalogoId}`),
+      ],
+    });
+  } catch (e) {
+    const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a oposição.';
+    return erro(503, msg,
+      'Sem registro nada cessa: um tratamento parado que o trail não explica é pior que um '
+      + 'tratamento em curso que ele explica.') as Res<T>;
+  }
+
+  banco.oposicoesTitular.push({
+    id: novoId('opo'),
+    titularId: titular.id,
+    liaCodigo,
+    camposIds: alcancados.map((c) => c.campoCatalogoId!),
+    protocolo,
+    estado: 'acolhida',
+    abertaEmMs: agora,
+  });
+
+  banco.cenario.solicitacoes.push({
+    id: novoId('sol'),
+    protocolo,
+    titularId: titular.id,
+    titularPseudonimo: pseudonimo(titular),
+    direito: 'oposicao',
+    status: 'recebida',
+    nivelVerificacao: nivelExigido('oposicao'),
+    origem: 'portal',
+    detalhe,
+    sistemas: banco.cenario.sistemas.map((s) => s.slug),
+    recebidaEm: data(agora),
+    prazoLimiteMs,
+    metaInternaMs: agora + 7 * MS_POR_DIA,
+    mensagens: [],
+  });
+
+  return ok({
+    protocolo,
+    direito: 'oposicao' as Direito,
+    nivel_verificacao: nivelExigido('oposicao'),
+    prazo_limite: iso(prazoLimiteMs),
+    prazo_dias: prazoDiasDe('oposicao'),
+    fundamento_do_prazo: REGIME.oposicao.fundamentoDoPrazo,
+    lia: lia.codigo,
+    cessacao: alcancados.map((c) => {
+      const catalogado = banco.cenario.campos.find((k) => k.id === c.campoCatalogoId);
+      return {
+        campo: c.rotulo,
+        finalidade: catalogado?.finalidade ?? lia.finalidade,
+        efeito: 'Parou agora. Ninguém aqui usa mais este dado para isso enquanto sua oposição estiver de pé.',
+      };
+    }),
+    como_o_controlador_pode_retomar: 'Se houver razão legítima que prevaleça sobre a sua, ela precisa '
+      + 'ser escrita e comunicada a você no protocolo — só então o tratamento volta. Até lá, está parado.',
+    proximos_passos: [
+      'O tratamento já parou — isso não depende da análise.',
+      `Analisamos sua oposição e respondemos até ${data(prazoLimiteMs)}.`,
+      'Se discordar da resposta, você pode reclamar à ANPD — e a resposta vai dizer como.',
+    ],
+  }, 201) as Res<T>;
 }
 
 // ── decisão automatizada ─────────────────────────────────────────────────────

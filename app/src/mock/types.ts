@@ -301,13 +301,24 @@ export interface Lia {
   diasParaVencer: number;
   assinaturaDpo?: string;
   documentoHash?: string;
+  /**
+   * O canal de oposição que esta LIA publica — espelho da coluna
+   * `lia.canal_oposicao`, que o schema declara `NOT NULL`.
+   *
+   * Estava só como texto fixo dentro da T8: a tela anunciava um canal que o
+   * registro da LIA não carregava, e ninguém podia notar a diferença olhando
+   * o artefato assinado. Agora a tela lê daqui, e o teste confere contra o
+   * `db/seed.sql` e contra a rota servida.
+   */
+  canalOposicao: string;
 }
 
 export type DesfechoSolicitacao = 'atendido' | 'atendido_parcialmente' | 'recusado_com_fundamento';
 
 export type Direito =
   | 'confirmacao' | 'acesso' | 'correcao' | 'anonimizacao' | 'bloqueio'
-  | 'eliminacao' | 'portabilidade' | 'compartilhamentos' | 'revogacao' | 'revisao_decisao';
+  | 'eliminacao' | 'portabilidade' | 'compartilhamentos' | 'revogacao' | 'revisao_decisao'
+  | 'oposicao';
 
 export interface Titular {
   id: string;
@@ -659,6 +670,28 @@ export interface ItemDaCascata {
  * (`Consentimento`) continua onde estava; a entidade de consentimento por
  * titular no schema de produção é o próximo bloco.
  */
+/**
+ * A oposição de um titular ao fundamento de uma LIA (Art. 18, §2º).
+ *
+ * `estado` nasce `acolhida`: registrada a oposição, o tratamento por legítimo
+ * interesse daqueles campos cessa **antes** de qualquer análise. Se o
+ * controlador tiver razões legítimas prevalecentes, ele as demonstra concluindo
+ * o protocolo com recusa fundamentada — e é a conclusão que passa o estado a
+ * `recusada` e retoma o tratamento. Tratar enquanto se decide faria o titular
+ * esperar pelo fim de uma análise da qual ele é justamente o objeto.
+ */
+export interface OposicaoTitular {
+  id: string;
+  titularId: string;
+  liaCodigo: string;
+  /** Os campos que a LIA sustenta e que este titular tem. */
+  camposIds: string[];
+  protocolo: string;
+  estado: 'acolhida' | 'recusada';
+  abertaEmMs: number;
+  decididaEmMs?: number;
+}
+
 export interface RevogacaoTitular {
   id: string;
   titularId: string;

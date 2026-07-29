@@ -242,7 +242,13 @@ export default function T8() {
             <Passo n={4} titulo="Transparência e oposição" desc="Onde o titular vê isso e como ele se opõe — em um clique, não em um formulário." feito>
               <dl className="kv">
                 <dt>Onde aparece</dt><dd>Aviso de privacidade e tela de resultado do tratamento.</dd>
-                <dt>Canal de oposição</dt><dd className="mono" style={{ fontSize: 12.5 }}>POST /api/v1/titulares/me/oposicao?lia={lia.codigo}</dd>
+                {/*
+                  Lido do registro da LIA, e não escrito aqui.
+                  Era texto fixo nesta linha: a tela anunciava um canal que o
+                  artefato assinado não carregava, e ninguém podia notar a
+                  diferença olhando a LIA. Agora divergir exige mudar o dado.
+                */}
+                <dt>Canal de oposição</dt><dd className="mono" style={{ fontSize: 12.5 }}>{lia.canalOposicao}</dd>
                 <dt>Oposições no mês</dt><dd>4 · todas atendidas em até 48 h</dd>
               </dl>
             </Passo>

@@ -24,6 +24,7 @@ const ROTULO_DIREITO: Record<string, string> = {
   anonimizacao: 'Anonimização (IV)', bloqueio: 'Bloqueio (IV)', eliminacao: 'Eliminação (VI)',
   portabilidade: 'Portabilidade (V)', compartilhamentos: 'Compartilhamentos (VII)',
   revogacao: 'Revogação (VIII)', revisao_decisao: 'Revisão de decisão (Art. 20)',
+  oposicao: 'Oposição (§2º)',
 };
 
 const ROTULO_DESFECHO: Record<DesfechoSolicitacao, string> = {

@@ -79,6 +79,9 @@ export const OPERACOES: Operacao[] = [
     nota: 'Os fatores da decisão automatizada (Art. 20, §1º).' },
   { metodo: 'POST', contrato: '/me/decisoes/{id}/revisao', superficie: 'portal', mock: null,
     nota: 'A contestação do titular — o pedido, não o ato de rever.' },
+  { metodo: 'POST', contrato: '/titulares/me/oposicao', superficie: 'portal', mock: null,
+    nota: 'Art. 18, §2º. O caminho é o que a LIA vigente publica em canal_oposicao, letra por letra — '
+      + 'e a cessação do legítimo interesse é imediata, não posterior à análise.' },
 
   // ── Catálogo ─────────────────────────────────────────────────────────────
   { metodo: 'POST', contrato: '/catalog/inventories', superficie: 'console', mock: null, motivo: 'ingestao_ci',
@@ -232,6 +235,24 @@ export const RAIZES_DO_MOCK: Set<string> = new Set(
     ...ROTAS_APENAS_DEMO,
   ].map(({ metodo, mock }) => `${metodo} ${mock.replace(/^\/v1\//, '').split('?')[0].split('/')[0]}`),
 );
+
+/**
+ * O caminho da oposição, e o canal que a LIA publica derivado dele.
+ *
+ * Existia como texto solto em três lugares — a coluna `lia.canal_oposicao` no
+ * banco, a linha do `db/seed.sql` e uma string fixa dentro da T8 — e apontava
+ * para uma rota que não existia em contrato algum (Risco-001, sub-item 3). Uma
+ * LIA que anuncia canal inexistente não tem promessa fraca: tem o balanceamento
+ * do Art. 10, §3º sustentado por uma salvaguarda que nunca foi construída.
+ *
+ * Agora o caminho tem um dono. O SQL continua sendo uma string literal — é um
+ * artefato de banco, não código —, e é o teste de paridade que amarra os dois:
+ * renomear qualquer um dos lados quebra a suíte.
+ */
+export const CAMINHO_DA_OPOSICAO = '/v1/titulares/me/oposicao';
+
+export const canalDeOposicao = (liaCodigo: string): string =>
+  `POST ${CAMINHO_DA_OPOSICAO}?lia=${liaCodigo}`;
 
 export const operacaoDe = (metodo: MetodoHttp, contrato: string): Operacao | undefined =>
   OPERACOES.find((o) => o.metodo === metodo && o.contrato === contrato);

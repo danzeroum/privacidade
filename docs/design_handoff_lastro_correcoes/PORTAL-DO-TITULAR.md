@@ -33,7 +33,7 @@ telefone destacar na apresentação — em produção é o `#E9EDEE` de sempre.
 
 ## As onze telas, e o que cada uma decide
 
-**01 · O que você pode pedir.** Não pergunta nada antes de oferecer. Os dez direitos em linguagem de
+**01 · O que você pode pedir.** Não pergunta nada antes de oferecer. Os onze direitos em linguagem de
 pessoa, ordenados por leveza (confirmar antes de apagar). Atalho para quem já tem protocolo.
 → `GET /me/direitos`
 
@@ -42,7 +42,7 @@ pessoa, ordenados por leveza (confirmar antes de apagar). Atalho para quem já t
 | Nível | O que pede | Direitos |
 |---|---|---|
 | 1 | código no canal já conhecido | confirmação, compartilhamentos |
-| 2 | código + um dado de cadastro | acesso, correção, oposição, revogação, revisão Art. 20 |
+| 2 | código + um dado de cadastro | acesso, correção, **bloqueio**, **oposição**, revogação, revisão Art. 20 |
 | 3 | código + documento com foto | eliminação, anonimização, portabilidade |
 
 A escada fica **visível** para a exigência não parecer arbitrária, e o destino do documento é dito
@@ -104,7 +104,7 @@ Tentativa não confirmada não cria cadastro e é descartada em 7 dias.
 
 ## O que isto muda no contrato (`api/openapi.yaml`)
 
-Doze rotas novas. As quatro do bloco P0 primeiro:
+Treze rotas novas. As quatro do bloco P0 primeiro:
 
 ```
 POST   /requests                              abre solicitação { direito, nivel_verificacao, texto? }
@@ -115,12 +115,13 @@ GET    /requests/{id}/pacote                  link assinado, TTL 24 h
 
 POST   /me/verificacao                        inicia verificação no nível exigido pelo direito
 POST   /me/verificacao/{id}/codigo            confirma; 401 sem vazar existência de cadastro
-GET    /me/direitos                           os 10 direitos com nível e prazo de cada
+GET    /me/direitos                           os 11 direitos com nível e prazo de cada
 GET    /me/consentimentos                     texto versionado, data, canal, estado
 POST   /me/consentimentos/{id}/revogacao      revoga + dispara cascata
 GET    /me/consentimentos/{id}/propagacao     estado por sistema, pendência > 24 h
 POST   /me/decisoes/{id}/revisao              contestação Art. 20 { fundamento }
 GET    /me/decisoes/{id}                      fatores da decisão automatizada
+POST   /titulares/me/oposicao?lia={codigo}    oposição Art. 18 §2º; cessa o legítimo interesse
 ```
 
 **Invariante do nível de verificação:** o nível não é parâmetro que o cliente escolhe — é **derivado
@@ -145,3 +146,30 @@ Sem interface, sem desenho a fazer: gate de privacidade varrendo o repositório 
 hash cobrindo justificativa e base legal (Risco-004), `X-Purpose` nas 25 operações (Risco-011), DPA
 programático (Risco-008), teste de disparidade no pipeline (Risco-007), autenticação real
 (Risco-037).
+
+---
+
+## Adendo — 2026-07-29 · o décimo primeiro direito
+
+Este handoff foi escrito com **dez** direitos, e a tabela da tela 02 colocava "oposição" na linha do
+nível 2 sem que ela existisse no vocabulário do sistema: o enum do contrato tinha dez valores, e
+nenhum era `oposicao`. Quem implementasse pelo desenho acabaria mapeando oposição em `bloqueio`,
+porque é o que sobrava na linha.
+
+Os dois **não** são o mesmo direito. Bloqueio (Art. 18, IV) suspende um dado. Oposição (Art. 18, §2º)
+objeta ao **fundamento** — e é a salvaguarda que a análise de legítimo interesse oferece em troca de
+dispensar o consentimento (Art. 10, §3º). A LIA vigente do cenário de crédito já publicava um canal
+de oposição em `lia.canal_oposicao`; ele apontava para uma rota que não existia em contrato algum.
+Uma salvaguarda que aponta para o vazio não sustenta o balanceamento que a LIA afirma ter feito.
+
+O que mudou: `oposicao` entrou como décimo primeiro valor do enum (contrato, schema e mock), com
+nível 2 e prazo de 15 dias, e a rota passou a existir **no endereço que a LIA publica** — hoje
+`POST /v1/titulares/me/oposicao?lia={codigo}`, a mesma string dos dois lados, com teste que quebra se
+alguém renomear um deles. O prefixo `/api/v1` da LIA original foi normalizado para o `/v1` que o
+resto do sistema usa; foi a única letra alterada no artefato.
+
+Uma consequência de desenho para a tela 02: a escada continua com três degraus, mas a linha 2 agora
+tem **dois** rótulos distintos, e eles precisam se distinguir sem jargão — algo como "parar de usar
+meus dados para isso" (bloqueio) e "discordar de vocês usarem meus dados sem me perguntar"
+(oposição). Se a tela oferecer os dois com o mesmo texto, a diferença que a lei faz volta a se perder
+onde ela sempre se perde: no rótulo.

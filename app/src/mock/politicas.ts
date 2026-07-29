@@ -65,7 +65,7 @@ export const POLITICAS: PoliticaRota[] = [
   {
     metodo: 'GET', caminho: /^me\/direitos$/, superficie: 'portal',
     tipo: 'leitura', foraDeEscopo: '401_uniforme', exigeSessao: false,
-    nota: 'O cardápio dos dez direitos, com nível e prazo. Não carrega dado de titular, e por isso '
+    nota: 'O cardápio dos onze direitos, com nível e prazo. Não carrega dado de titular, e por isso '
       + 'é a única do portal que responde antes de qualquer verificação.',
   },
   {
@@ -126,6 +126,13 @@ export const POLITICAS: PoliticaRota[] = [
     metodo: 'GET', caminho: /^me\/decisoes\/[^/]+$/, superficie: 'portal',
     tipo: 'leitura', foraDeEscopo: '401_uniforme', exigeSessao: true,
     nota: 'Os fatores da decisão automatizada, em linguagem de pessoa (Art. 20, §1º).',
+  },
+  {
+    metodo: 'POST', caminho: /^titulares\/me\/oposicao$/, superficie: 'portal',
+    tipo: 'escrita', foraDeEscopo: '401_uniforme', exigeSessao: true,
+    nota: 'Oposição do Art. 18, §2º — o caminho que a LIA vigente publica. Vive fora de /me/ porque '
+      + 'é o endereço que o artefato assinado anuncia, e mudar o endereço seria mudar a promessa. '
+      + 'Não colide com a ficha do balcão em GET titulares/{id}: método, superfície e segmento diferem.',
   },
 
   // ══ CONSOLE INTERNO ═══════════════════════════════════════════════════════

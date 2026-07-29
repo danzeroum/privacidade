@@ -45,7 +45,7 @@ INSERT INTO lia (id, tenant_id, codigo, titulo, finalidade, categoria_finalidade
    3,2,'media',
    'Pseudonimização HMAC pré-prompt; retenção de 180 dias; exclusão do CEP como feature; teste de disparate impact a cada release.',
    'Aviso de privacidade, seção 4 "Como decidimos seu crédito", e tela de resultado da proposta.',
-   'POST /api/v1/titulares/me/oposicao?lia=LIA-SCORING-001',
+   'POST /v1/titulares/me/oposicao?lia=LIA-SCORING-001',
    'sustenta_com_mitigacao','vigente', DATE '2026-02-01', DATE '2027-02-01',
    's3://gov-docs/lia/LIA-SCORING-001.md',
    '7c1f0a9b3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f7a',

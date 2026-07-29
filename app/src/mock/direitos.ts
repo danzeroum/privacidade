@@ -1,5 +1,5 @@
 /**
- * Os dez direitos do Art. 18, e o regime de cada um.
+ * Os onze direitos do Art. 18, e o regime de cada um.
  *
  * Este arquivo existe para responder **no servidor** a uma pergunta que o
  * cliente não pode responder: quanto de identidade o exercício deste direito
@@ -34,15 +34,15 @@ export interface RegimeDoDireito {
 /**
  * A escada da tela 02, transcrita sem acréscimo:
  *
- * | 1 | código no canal já conhecido        | confirmação, compartilhamentos                       |
- * | 2 | código + um dado de cadastro        | acesso, correção, bloqueio, revogação, revisão       |
- * | 3 | código + documento com foto         | eliminação, anonimização, portabilidade              |
+ * | 1 | código no canal já conhecido   | confirmação, compartilhamentos                            |
+ * | 2 | código + um dado de cadastro   | acesso, correção, bloqueio, oposição, revogação, revisão   |
+ * | 3 | código + documento com foto    | eliminação, anonimização, portabilidade                   |
  *
- * `bloqueio` ocupa a linha que o desenho chamou de "oposição": é a cessação
- * **reversível** do tratamento (Art. 18, IV), do mesmo peso que opor-se. Os
- * três do nível 3 são os irreversíveis (eliminação, anonimização) e o que
- * produz um pacote exportável fora da plataforma (portabilidade) — dano
- * concreto se a identidade estiver errada.
+ * `bloqueio` e `oposicao` dividem a linha 2 e continuam sendo direitos
+ * distintos: os dois cessam tratamento sem destruir nada, e o erro de
+ * identidade é reversível nos dois. Os três do nível 3 são os irreversíveis
+ * (eliminação, anonimização) e o que produz um pacote exportável fora da
+ * plataforma (portabilidade) — dano concreto se a identidade estiver errada.
  */
 export const REGIME: Record<Direito, RegimeDoDireito> = {
   confirmacao: {
@@ -117,6 +117,24 @@ export const REGIME: Record<Direito, RegimeDoDireito> = {
     prazoDias: 15,
     fundamentoDoPrazo: 'Art. 19, II — declaração completa em até 15 dias.',
   },
+  /**
+   * Art. 18, §2º — e **não** um apelido de `bloqueio`.
+   *
+   * Bloqueio suspende um dado, por qualquer razão. Oposição objeta ao
+   * *fundamento*: o titular não está dizendo "não use esse campo", está dizendo
+   * "essa base legal não me alcança". É a salvaguarda que a LIA oferece como
+   * contrapartida do legítimo interesse (Art. 10, §3º), e é o canal que ela
+   * publica. Fundir os dois deixaria a LIA apontando para uma rota que decide
+   * outra coisa — que é a forma mais silenciosa de a salvaguarda não existir.
+   */
+  oposicao: {
+    rotulo: 'Discordar de vocês usarem meus dados sem me perguntar',
+    artigo: 'Art. 18, §2º c/c Art. 10, §3º',
+    nivel: 2,
+    porQueONivel: 'Faz o tratamento parar na hora: nível 1 deixaria qualquer um desligar o serviço alheio.',
+    prazoDias: 15,
+    fundamentoDoPrazo: 'Art. 19, II — declaração completa em até 15 dias. A cessação, porém, é imediata.',
+  },
   revisao_decisao: {
     rotulo: 'Pedir que uma pessoa revise a decisão automática',
     artigo: 'Art. 20',
@@ -136,7 +154,7 @@ export const REGIME: Record<Direito, RegimeDoDireito> = {
 /** A lista, na ordem em que a tela 01 oferece: do mais leve ao mais pesado. */
 export const DIREITOS: Direito[] = [
   'confirmacao', 'compartilhamentos', 'acesso', 'correcao', 'bloqueio',
-  'revogacao', 'revisao_decisao', 'portabilidade', 'anonimizacao', 'eliminacao',
+  'oposicao', 'revogacao', 'revisao_decisao', 'portabilidade', 'anonimizacao', 'eliminacao',
 ];
 
 /**

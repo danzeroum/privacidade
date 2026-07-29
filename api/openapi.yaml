@@ -497,6 +497,80 @@ paths:
           description: Esta decisão já foi revisada — rever de novo é solicitação nova.
         '503': { $ref: '#/components/responses/FalhaDeRegistro' }
 
+  /titulares/me/oposicao:
+    servers:
+      - url: https://portal.lastro.exemplo/v1
+        description: Portal do titular.
+    post:
+      tags: [portal do titular]
+      summary: Opor-se ao tratamento sustentado por legítimo interesse (Art. 18, §2º)
+      description: |
+        **Este é o caminho que a LIA vigente publica** no campo `canal_oposicao` — o mesmo endereço,
+        letra por letra. Uma LIA que anuncia um canal inexistente não é uma promessa fraca: ela
+        derruba o balanceamento que sustenta a base legal, porque a salvaguarda oferecida ao titular
+        nunca existiu (Art. 10, §3º c/c Art. 18, §2º).
+
+        A oposição alcança **todos os campos que a LIA sustenta**, e não um campo escolhido pelo
+        titular: quem se opõe está objetando ao fundamento, não catalogando dados.
+
+        **A cessação é imediata e o padrão fecha.** Registrada a oposição, o tratamento por legítimo
+        interesse daqueles campos para de valer para este titular antes de qualquer análise. Se o
+        controlador tiver razões legítimas prevalecentes, elas se demonstram concluindo o protocolo
+        com `recusado_com_fundamento` — e é essa conclusão que retoma o tratamento. O contrário
+        (tratar enquanto se decide) faria o titular esperar pelo fim de uma análise da qual ele é
+        justamente o objeto.
+
+        Como toda rota do portal, o nível de verificação é derivado do direito: `oposicao` é
+        nível 2, e `nivel_verificacao` no corpo é ignorado.
+      security:
+        - sessaoTitular: []
+      parameters:
+        - name: lia
+          in: query
+          required: true
+          description: Código da LIA à qual o titular se opõe — o mesmo que a LIA publica no canal.
+          schema: { type: string, examples: ['LIA-SCORING-001'] }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                texto:
+                  type: string
+                  description: Opcional. Opor-se não depende de justificativa (Art. 18, §2º).
+      responses:
+        '201':
+          description: Oposição registrada e tratamento cessado
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SolicitacaoAberta'
+                  - type: object
+                    required: [cessacao]
+                    properties:
+                      lia: { type: string }
+                      cessacao:
+                        type: array
+                        description: O que parou, campo a campo, já em vigor nesta resposta.
+                        items:
+                          type: object
+                          properties:
+                            campo: { type: string }
+                            finalidade: { type: string }
+                            efeito: { type: string }
+                      como_o_controlador_pode_retomar:
+                        type: string
+        '401': { $ref: '#/components/responses/NaoConfirmado' }
+        '403':
+          description: A sessão não é de oposição, ou não alcança o nível 2.
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '409':
+          description: Já existe oposição vigente deste titular a esta LIA.
+        '422': { $ref: '#/components/responses/ErroValidacao' }
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
   # ══════════════════════════════════════════════════════════════════════════
   # CONSOLE INTERNO
   # ══════════════════════════════════════════════════════════════════════════
@@ -1747,9 +1821,16 @@ components:
 
     Direito:
       type: string
-      description: Os dez direitos do Art. 18 que o portal exerce.
+      description: |
+        Os onze direitos que o portal exerce.
+
+        `oposicao` (Art. 18, §2º) **não** é sinônimo de `bloqueio` (Art. 18, IV), e os dois
+        coexistem de propósito: bloqueio é a suspensão de um dado específico, pedida por qualquer
+        razão; oposição é a objeção ao *fundamento* do tratamento — é a salvaguarda que a LIA cita
+        como contrapartida do legítimo interesse (Art. 10, §3º). Tratar um como apelido do outro
+        deixaria a LIA apontando para um canal que decide outra coisa.
       enum: [confirmacao, acesso, correcao, anonimizacao, bloqueio, eliminacao,
-             portabilidade, compartilhamentos, revogacao, revisao_decisao]
+             portabilidade, compartilhamentos, revogacao, revisao_decisao, oposicao]
 
     NivelVerificacao:
       type: integer
