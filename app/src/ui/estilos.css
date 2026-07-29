@@ -361,3 +361,24 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.45; }
 .fila-passo.atual { color: var(--accent); border-color: var(--accent); font-weight: 600; }
 
 .fila-pe { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 12px; }
+
+/* ── PR 10 · T10 · Calendário do ano ───────────────────────────────────────
+   A grade de doze meses e a barra de carga provisionada. */
+.chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--text-2); cursor: pointer; font: inherit; font-size: 12.5px; }
+.chip.sel { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+
+.ano { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.mes { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 12px; display: flex; flex-direction: column; gap: 8px; min-height: 148px; }
+.mes-topo { display: flex; justify-content: space-between; align-items: baseline; }
+.mes-rot { font-size: 13.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; }
+.mes-barra { height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
+.mes-barra i { display: block; height: 100%; background: var(--accent); }
+.mes-barra i.warn { background: var(--warn); }
+.mes-barra i.crit { background: var(--crit); }
+.mes-itens { display: flex; flex-direction: column; gap: 6px; }
+.mes-item { font-size: 12.5px; padding: 3px 8px; border-left: 3px solid var(--line-strong); background: var(--surface-2); border-radius: 0 3px 3px 0; color: var(--text-2); }
+.mes-item.na-fila { font-weight: 600; color: var(--text); }
+.mes-item.cumprida { opacity: .55; text-decoration: line-through; }
+
+.regras-sync { margin: 0; padding-left: 20px; font-size: 13px; color: var(--text-2); display: flex; flex-direction: column; gap: 9px; }
+.regras-sync b { color: var(--text); }

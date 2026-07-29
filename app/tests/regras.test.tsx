@@ -13,14 +13,19 @@ import {
   CATEGORIAS, GATILHOS, TABELAS, TABELAS_IDS, aplicar, condicoesDe, nivelDoRisco,
   reproduzir, tomDoRisco, ultimaDecisao, vigenteDe,
 } from '../src/mock/decisoes';
-import { REGRAS, derivarFila } from '../src/mock/fila';
+import { REGRAS, derivarFila, minhaFila } from '../src/mock/fila';
 import type { ContadoresDaFila, ItemDaFila } from '../src/mock/fila';
+import {
+  CAPACIDADE_DIAS_MES, RESERVA_DEMANDA, assinaturaDoFeed, cargaDoAno, mesDe,
+} from '../src/mock/calendario';
+import type { Obrigacao } from '../src/mock/calendario';
 import { CampoPII, Didatico, Explica } from '../src/ui/primitivos';
 import { MemoryRouter } from 'react-router-dom';
 import T2 from '../src/screens/T2';
 import { Casca, TELAS } from '../src/App';
 import T0 from '../src/screens/T0';
 import T1 from '../src/screens/T1';
+import T10 from '../src/screens/T10';
 import T3 from '../src/screens/T3';
 import T5 from '../src/screens/T5';
 import T7 from '../src/screens/T7';
@@ -2592,8 +2597,15 @@ describe('PR 9 · a fila derivada — a tabela e a derivação', () => {
     }
   });
 
-  it('todo item aponta para um estado que a faixa de passos contém', () => {
+  it('todo item de artefato aponta para um estado que a faixa de passos contém', () => {
     for (const item of derivarFila(new BancoMock('banco').cenario, HOJE)) {
+      if (item.artefato === 'obrigacao') {
+        // Obrigação não tem máquina de estados, e a faixa fica vazia em vez de
+        // ganhar uma barra falsa só para o cartão ficar simétrico.
+        expect(item.estados, item.id).toEqual([]);
+        expect(item.estadoAtual).toBe(-1);
+        continue;
+      }
       expect(item.estadoAtual, `${item.id}`).toBeGreaterThanOrEqual(0);
       expect(item.estados.length).toBeGreaterThan(item.estadoAtual);
     }
@@ -2806,18 +2818,31 @@ describe('PR 9 · T0 na tela', () => {
     expect(screen.getByText('De outros papéis').parentElement!.textContent).toMatch(/\d/);
   });
 
-  it('concluir a ação em outra tela tira o item da fila sem recarregar', () => {
-    montarT0('dpo');
+  it('o item muda de dono com a pendência, e some quando a ação é concluída', () => {
+    // PR 10 — `em_revisao` com P0 aberta é de engenharia; sem P0, é do DPO. É o
+    // mesmo estado, e quem separa os dois é a condição declarada na regra.
+    montarT0('engenharia');
     const b = useSessao.getState().banco;
     const ripd = b.cenario.ripds[0];
     expect(screen.getByText(ripd.codigo)).toBeInTheDocument();
+    expect(screen.getByText(/Fechar as recomendações P0/)).toBeInTheDocument();
 
-    // Fecha a P0 pendente e aprova, como a T3 faz.
+    cleanup();
+    montarT0('dpo');
+    useSessao.setState({ banco: b });
+    act(() => { useSessao.setState((s) => ({ versao: s.versao + 1 })); });
+    expect(screen.queryByText(ripd.codigo)).not.toBeInTheDocument();
+
+    // Engenharia fecha a P0: o item atravessa para a fila do DPO.
     ripd.recomendacoes.forEach((r) => { r.concluida = true; });
+    act(() => { useSessao.setState((s) => ({ versao: s.versao + 1 })); });
+    expect(screen.getByText(ripd.codigo)).toBeInTheDocument();
+    expect(screen.getByText('Aprovar o RIPD')).toBeInTheDocument();
+
+    // E some de vez quando o DPO aprova, sem recarregar.
     const res = request(b, { papel: 'dpo', ator: 'teste', metodo: 'POST', caminho: `/v1/ripds/${ripd.id}/aprovar` });
     expect(res.status).toBe(200);
     expect(ripd.status).toBe('vigente');
-
     act(() => { useSessao.setState((s) => ({ versao: s.versao + 1 })); });
     expect(screen.queryByText(ripd.codigo)).not.toBeInTheDocument();
   });
@@ -2828,5 +2853,427 @@ describe('PR 9 · T0 na tela', () => {
     render(<MemoryRouter initialEntries={['/']}><Casca /></MemoryRouter>);
     expect(screen.getByRole('heading', { level: 1, name: 'Minha fila' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /T0 Minha fila/ })).toBeInTheDocument();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('PR 10 · o calendário como dado, e a promoção à fila', () => {
+  const HOJE = Date.UTC(2026, 6, 28, 12, 0, 0);
+  const emDias = (n: number) => new Date(HOJE + n * 86_400_000).toISOString().slice(0, 10);
+
+  const obrigacao = (over: Partial<Obrigacao> = {}): Obrigacao => ({
+    codigo: 'OBR-TESTE-01', titulo: 'Revalidar consentimento v3', curto: 'Consentimento',
+    trilha: 'legal', tipo: 'prazo', vence: emDias(60), antecedenciaDias: 30,
+    preparar: 'Campanha de revalidação aberta 30 dias antes',
+    seFalhar: 'o campo perde base legal e o gate bloqueia dois repositórios',
+    cargaDias: 6, acao: 'assinar_lia', tela: '/t2', ...over,
+  });
+
+  it('obrigação fora da antecedência não está na fila; dentro, está', () => {
+    const b = new BancoMock('banco');
+    // 60 dias com antecedência de 30: existe no ano, não ocupa ninguém.
+    b.cenario.obrigacoes = [obrigacao()];
+    expect(derivarFila(b.cenario, HOJE).some((i) => i.artefato === 'obrigacao')).toBe(false);
+
+    // 20 dias: entrou. Faixa "30d", com a consequência declarada no travado.
+    b.cenario.obrigacoes = [obrigacao({ vence: emDias(20) })];
+    const item = derivarFila(b.cenario, HOJE).find((i) => i.artefato === 'obrigacao')!;
+    expect(item).toBeDefined();
+    expect(item.prazo.urgencia).toBe('30d');
+    expect(item.prazo.texto).toBe('em 20 dia(s)');
+    expect(item.travado).toContain('Se passar: o campo perde base legal e o gate bloqueia');
+    expect(item.proximaAcao).toBe('Campanha de revalidação aberta 30 dias antes');
+    expect(item.rito.texto).toContain('antecedência de 30 dias');
+    expect(item.rito.fonte).toBe('calendario.ts · legal');
+  });
+
+  it('a fronteira da antecedência é exata, e vencida não sai da fila', () => {
+    const b = new BancoMock('banco');
+    const daFila = (o: Obrigacao) => derivarFila({ ...b.cenario, obrigacoes: [o] }, HOJE)
+      .filter((i) => i.artefato === 'obrigacao');
+
+    expect(daFila(obrigacao({ vence: emDias(31) })), 'um dia fora').toHaveLength(0);
+    expect(daFila(obrigacao({ vence: emDias(30) })), 'no limite').toHaveLength(1);
+    // Prazo estourado não sai da fila por ter estourado — vira "vencido".
+    const vencida = daFila(obrigacao({ vence: emDias(-3) }))[0];
+    expect(vencida.prazo.urgencia).toBe('vencido');
+    expect(vencida.prazo.texto).toBe('vencido há 3 dia(s)');
+    // Cumprida sai, mesmo dentro da janela.
+    expect(daFila(obrigacao({ vence: emDias(10), cumpridaEm: emDias(-1) }))).toHaveLength(0);
+  });
+
+  it('a obrigação só entra na fila de quem responde por ela', () => {
+    const b = new BancoMock('banco');
+    b.cenario.obrigacoes = [obrigacao({ vence: emDias(10), acao: 'ver_pipeline_rotacao' })];
+    const todos = derivarFila(b.cenario, HOJE);
+    const alcanca = (['engenharia', 'dpo', 'produto', 'seguranca', 'auditor'] as Papel[])
+      .filter((p) => minhaFila(todos, p).some((i) => i.artefato === 'obrigacao'));
+    expect(alcanca).toEqual(['engenharia', 'seguranca']);
+  });
+
+  it('a carga do mês é somada das obrigações, não digitada', () => {
+    const b = new BancoMock('banco');
+    const carga = cargaDoAno(b.cenario.obrigacoes);
+    expect(carga).toHaveLength(12);
+    for (const c of carga) {
+      const somaDoMes = b.cenario.obrigacoes
+        .filter((o) => mesDe(o) === c.mes).reduce((s, o) => s + o.cargaDias, 0);
+      expect(c.provisionado, `mês ${c.mes}`).toBe(somaDoMes);
+      expect(c.reservado).toBe(Math.round(CAPACIDADE_DIAS_MES * RESERVA_DEMANDA));
+      expect(c.percentual).toBe(
+        Math.min(100, Math.round(((somaDoMes + c.reservado) / CAPACIDADE_DIAS_MES) * 100)),
+      );
+    }
+    // Mexer numa obrigação muda a barra do mês dela, e só dela.
+    const antes = cargaDoAno(b.cenario.obrigacoes).map((c) => c.percentual);
+    const alvo = b.cenario.obrigacoes[0];
+    alvo.cargaDias += 30;
+    const depois = cargaDoAno(b.cenario.obrigacoes).map((c) => c.percentual);
+    const mudaram = depois.map((p, i) => (p === antes[i] ? null : i)).filter((i) => i !== null);
+    expect(mudaram).toEqual([mesDe(alvo)]);
+  });
+
+  it('o mês sem obrigação nenhuma ainda carrega a reserva de demanda', () => {
+    const vazio = cargaDoAno([])[0];
+    expect(vazio.provisionado).toBe(0);
+    expect(vazio.percentual).toBe(Math.round(RESERVA_DEMANDA * 100));
+  });
+
+  it('toda obrigação semeada declara consequência, antecedência e ação', () => {
+    for (const id of ['banco', 'varejo', 'midia']) {
+      const b = new BancoMock(id);
+      expect(b.cenario.obrigacoes.length, id).toBe(22);
+      const codigos = new Set<string>();
+      for (const o of b.cenario.obrigacoes) {
+        expect(o.seFalhar.length, `${o.codigo}: consequência`).toBeGreaterThan(20);
+        expect(o.preparar.length, `${o.codigo}: preparar`).toBeGreaterThan(10);
+        expect(o.antecedenciaDias, `${o.codigo}`).toBeGreaterThan(0);
+        expect(o.cargaDias, `${o.codigo}`).toBeGreaterThan(0);
+        expect(o.vence, `${o.codigo}`).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        expect(codigos.has(o.codigo), `código repetido: ${o.codigo}`).toBe(false);
+        codigos.add(o.codigo);
+      }
+    }
+  });
+});
+
+describe('PR 10 · o feed ICS', () => {
+  const feed = (papel: Papel, token?: string) => {
+    const t = token ?? assinaturaDoFeed(papel, sha256);
+    return chamar<string>(papel, { metodo: 'GET', caminho: `/v1/calendario.ics?papel=${papel}&token=${t}` });
+  };
+
+  it('responde só as obrigações do papel pedido', () => {
+    for (const papel of ['engenharia', 'dpo', 'seguranca'] as Papel[]) {
+      const res = feed(papel);
+      expect(res.status, papel).toBe(200);
+      const uids = [...res.body.matchAll(/UID:(OBR-[^@]+)@lastro/g)].map((m) => m[1]);
+      const esperados = banco.cenario.obrigacoes.filter((o) => pode(papel, o.acao)).map((o) => o.codigo);
+      expect(uids.sort(), papel).toEqual(esperados.sort());
+      expect(uids.length, `${papel}: feed vazio não prova nada`).toBeGreaterThan(0);
+    }
+    // Produto e auditor não respondem por obrigação nenhuma: feed sem eventos,
+    // e não feed com as dos outros.
+    for (const papel of ['produto', 'auditor'] as Papel[]) {
+      expect(feed(papel).body).not.toContain('BEGIN:VEVENT');
+    }
+  });
+
+  it('a assinatura é a credencial: a de outro papel não abre o feed', () => {
+    expect(feed('dpo', assinaturaDoFeed('engenharia', sha256)).status).toBe(403);
+    expect(feed('dpo', 'token-inventado').status).toBe(403);
+    expect(chamar('dpo', { metodo: 'GET', caminho: '/v1/calendario.ics?papel=ninguem&token=x' }).status).toBe(403);
+    // E a rota devolve a assinatura do papel da sessão, nunca a de outro.
+    const minha = chamar<{ papel: string; caminho: string }>('dpo', { metodo: 'GET', caminho: '/v1/calendario/assinatura' });
+    expect(minha.body.papel).toBe('dpo');
+    expect(minha.body.caminho).toContain(assinaturaDoFeed('dpo', sha256));
+  });
+
+  it('nenhum dado pessoal no ICS de nenhum dos cinco papéis', () => {
+    // Mesma varredura do PR 9, agora sobre o texto do feed.
+    const proibidos = [
+      ...banco.cenario.titulares.flatMap((t) => [t.id, t.cpfHash]),
+      ...banco.cenario.solicitacoes.flatMap((s) => [s.protocolo, s.titularPseudonimo]),
+      ...banco.cenario.incidentes.map((i) => i.id),
+    ];
+    for (const papel of ['engenharia', 'dpo', 'produto', 'seguranca', 'auditor'] as Papel[]) {
+      const linhas = feed(papel).body.replace(/\r\n /g, '').split('\r\n');
+
+      // O que vai para o cliente de calendário como texto: é aqui que um vazamento
+      // apareceria. A `URL:` sai da varredura por substring e entra numa asserção
+      // de forma — mais forte, porque `/t1` casaria com o id de titular `t1` por
+      // acidente e esconderia o que a checagem devia provar.
+      const texto = linhas.filter((l) => /^(SUMMARY|DESCRIPTION|CATEGORIES|UID|X-WR-)/.test(l)).join('\n');
+      for (const p of proibidos) {
+        expect(new RegExp(`\\b${p}\\b`).test(texto), `${papel}: "${p}" vazou para o ICS`).toBe(false);
+      }
+      for (const url of linhas.filter((l) => l.startsWith('URL:'))) {
+        expect(url, `${papel}: URL com carga inesperada`)
+          .toMatch(/^URL:https:\/\/lastro\.exemplo\/#\/t\d+\?obrigacao=OBR-[\w-]+$/);
+      }
+
+      // Nada por demanda sai: incidente, direito do titular e achado ficam dentro.
+      expect(texto).not.toContain('ATTENDEE');
+      expect(texto).not.toMatch(/ACH-|INC-/);
+    }
+  });
+
+  it('o ICS é bem formado: escapado, dobrado e declarado somente leitura', () => {
+    const texto = feed('dpo').body;
+    expect(texto.startsWith('BEGIN:VCALENDAR\r\n')).toBe(true);
+    expect(texto.endsWith('END:VCALENDAR')).toBe(true);
+    expect((texto.match(/BEGIN:VEVENT/g) ?? []).length).toBe((texto.match(/END:VEVENT/g) ?? []).length);
+    // RFC 5545 §3.1: nenhuma linha passa de 75 octetos.
+    for (const linha of texto.split('\r\n')) {
+      expect(linha.length, `linha longa: ${linha.slice(0, 40)}…`).toBeLessThanOrEqual(75);
+    }
+    // §3.3.11: vírgula em TEXT vai escapada, senão o cliente lê dois valores.
+    const comVirgula = banco.cenario.obrigacoes.find((o) => o.seFalhar.includes(','));
+    if (comVirgula) expect(texto).toContain('\\,');
+    // O feed diz de si mesmo que é somente leitura: quem consome precisa saber
+    // antes de tentar mover a data no cliente. Desdobrado, porque a linha é
+    // longa e a RFC manda dobrar.
+    expect(texto.replace(/\r\n /g, '')).toContain('mover a data no cliente nao altera o prazo');
+  });
+
+  it('não existe rota de escrita no calendário vinda de fora', () => {
+    // Direção única: o ICS entra na agenda de quem assina, e nada volta. Não há
+    // rota que aceite escrita vinda do calendário externo — a única porta é a
+    // prorrogação, que exige justificativa e sessão.
+    expect(chamar('dpo', { metodo: 'POST', caminho: '/v1/calendario.ics' }).status).toBe(404);
+    expect(chamar('dpo', { metodo: 'PATCH', caminho: '/v1/calendario' }).status).toBe(404);
+    expect(chamar('dpo', { metodo: 'POST', caminho: '/v1/calendario' }).status).toBe(404);
+  });
+});
+
+describe('PR 10 · prorrogar é ato registrado', () => {
+  const alvo = () => banco.cenario.obrigacoes.find((o) => !o.cumpridaEm && o.acao === 'conduzir_ciclo')!;
+  const prorrogar = (papel: Papel, body: Record<string, unknown>, codigo?: string) =>
+    chamar<{ de: string; para: string }>(papel, {
+      metodo: 'POST', caminho: `/v1/calendario/${codigo ?? alvo().codigo}/prorrogar`, body,
+    });
+
+  it('sem justificativa é 422, e a data não muda', () => {
+    const o = alvo();
+    const antes = o.vence;
+    const res = prorrogar('dpo', { para: '2027-01-15', justificativa: 'urgente' });
+    expect(res.status).toBe(422);
+    expect(o.vence).toBe(antes);
+    expect(o.prorrogacoes).toBeUndefined();
+  });
+
+  it('com justificativa grava no trail antes de a data nova valer', () => {
+    const o = alvo();
+    const de = o.vence;
+    const nTrail = banco.auditoria.length;
+    const res = prorrogar('dpo', {
+      para: '2027-01-15',
+      justificativa: 'Comitê remarcado por indisponibilidade do jurídico; a consequência foi absorvida no ciclo seguinte.',
+    });
+
+    expect(res.status).toBe(200);
+    expect(banco.auditoria).toHaveLength(nTrail + 1);
+    const linha = banco.auditoria.at(-1)!;
+    expect(linha.acao).toBe('OBRIGACAO_PRORROGADA');
+    // A data antiga e a nova entram no payload do hash, com a justificativa.
+    expect(linha.campos).toEqual([de, '2027-01-15']);
+    expect(linha.justificativa).toContain('Comitê remarcado');
+    expect(banco.auditVerificar().integro).toBe(true);
+
+    expect(o.vence).toBe('2027-01-15');
+    expect(o.prorrogacoes).toHaveLength(1);
+    expect(o.prorrogacoes![0].de).toBe(de);
+  });
+
+  it('se o log falhar, a data antiga continua valendo', () => {
+    const o = alvo();
+    const de = o.vence;
+    banco.simularFalhaDeLog = true;
+    const res = prorrogar('dpo', { para: '2027-02-01', justificativa: 'Justificativa suficientemente longa para passar.' });
+    expect(res.status).toBe(503);
+    expect(o.vence).toBe(de);
+    expect(o.prorrogacoes).toBeUndefined();
+  });
+
+  it('prorrogar move para frente, e é de quem responde pela obrigação', () => {
+    const o = alvo();
+    const justificativa = 'Justificativa suficientemente longa para ser aceita pela rota.';
+    expect(prorrogar('dpo', { para: o.vence, justificativa }).status).toBe(422);
+    expect(prorrogar('dpo', { para: '2020-01-01', justificativa }).status).toBe(422);
+    expect(prorrogar('dpo', { para: '15/01/2027', justificativa }).status).toBe(422);
+    // `conduzir_ciclo` é do DPO: engenharia escreve, mas não responde por esta.
+    expect(prorrogar('engenharia', { para: '2027-01-15', justificativa }).status).toBe(403);
+    expect(prorrogar('dpo', { para: '2027-01-15', justificativa }, 'OBR-INEXISTENTE').status).toBe(404);
+  });
+
+  it('prorrogar tira o item da fila quando a data sai da antecedência', () => {
+    const b = new BancoMock('banco');
+    const o = b.cenario.obrigacoes.find((x) => !x.cumpridaEm)!;
+    const agora = Date.now();
+    o.vence = new Date(agora + 5 * 86_400_000).toISOString().slice(0, 10);
+    o.antecedenciaDias = 30;
+    expect(derivarFila(b.cenario, agora).some((i) => i.id === o.codigo)).toBe(true);
+
+    // Derivação, não cópia: mover a data faz o item sair sozinho.
+    const res = request(b, {
+      papel: 'dpo', ator: 'teste', metodo: 'POST', caminho: `/v1/calendario/${o.codigo}/prorrogar`,
+      body: {
+        para: new Date(agora + 200 * 86_400_000).toISOString().slice(0, 10),
+        justificativa: 'Realocada para o ciclo seguinte com aval do comitê e capacidade reservada.',
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(derivarFila(b.cenario, agora).some((i) => i.id === o.codigo)).toBe(false);
+  });
+});
+
+describe('PR 10 · as duas decisões do PR 9', () => {
+  it('a condição declarada separa engenharia do DPO no mesmo estado', () => {
+    const b = new BancoMock('banco');
+    const ripd = b.cenario.ripds[0];
+    expect(ripd.status).toBe('em_revisao');
+    expect(ripd.recomendacoes.some((r) => r.prioridade === 'P0' && !r.concluida)).toBe(true);
+
+    const comP0 = derivarFila(b.cenario, Date.now()).find((i) => i.id === ripd.codigo)!;
+    expect(comP0.acao).toBe('gerar_ripd');
+    expect(pode('engenharia', comP0.acao)).toBe(true);
+    expect(pode('dpo', comP0.acao)).toBe(false);
+
+    ripd.recomendacoes.forEach((r) => { r.concluida = true; });
+    const semP0 = derivarFila(b.cenario, Date.now()).find((i) => i.id === ripd.codigo)!;
+    expect(semP0.acao).toBe('aprovar_ripd');
+    expect(semP0.proximaAcao).toBe('Aprovar o RIPD');
+    // O mesmo estado: quem mudou foi a condição, não a máquina.
+    expect(ripd.status).toBe('em_revisao');
+  });
+
+  it('condição indefinida não libera regra nenhuma', () => {
+    // Só o RIPD define pendência. Uma regra `com_pendencia` sobre artefato que
+    // não a define nunca casaria — e é isso que impede a condição de virar um
+    // "talvez" que libera por omissão.
+    for (const r of REGRAS.filter((x) => x.quando === 'com_pendencia' || x.quando === 'sem_pendencia')) {
+      expect(r.artefato, `${r.artefato} não define pendência`).toBe('ripd');
+    }
+  });
+
+  it('nenhum par (artefato, estado) mistura "sempre" com condição', () => {
+    // Se misturasse, a regra condicional seria inalcançável: `sempre` casa antes.
+    const porPar = new Map<string, string[]>();
+    for (const r of REGRAS) {
+      const par = `${r.artefato}:${r.estado}`;
+      porPar.set(par, [...(porPar.get(par) ?? []), r.quando]);
+    }
+    for (const [par, quandos] of porPar) {
+      if (quandos.length > 1) expect(quandos, par).not.toContain('sempre');
+    }
+  });
+
+  it('o achado é de engenharia e do DPO — e de mais ninguém', () => {
+    const b = new BancoMock('banco');
+    const achado = b.cenario.achados[0];
+    achado.status = 'causa_raiz';
+    const todos = derivarFila(b.cenario, Date.now());
+    const alcanca = (['engenharia', 'dpo', 'produto', 'seguranca', 'auditor'] as Papel[])
+      .filter((p) => minhaFila(todos, p).some((i) => i.id === achado.codigo));
+    expect(alcanca).toEqual(['engenharia', 'dpo']);
+    expect(todos.find((i) => i.id === achado.codigo)!.acao).toBe('gerenciar_achado');
+  });
+
+  it('todo estado aberto do achado tem regra, e o encerrado não tem', () => {
+    const comRegra = REGRAS.filter((r) => r.artefato === 'achado').map((r) => r.estado).sort();
+    expect(comRegra).toEqual(['aberto', 'causa_raiz', 'executado', 'plano', 'reaberto', 'verificado']);
+    expect(comRegra).not.toContain('encerrado');
+  });
+});
+
+describe('PR 10 · T10 na tela', () => {
+  const montarT10 = (papel: Papel) => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel, banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    return render(<MemoryRouter><T10 /></MemoryRouter>);
+  };
+
+  it('a grade tem doze meses e a barra é a carga recomputada', () => {
+    const { container } = montarT10('dpo');
+    const ano = screen.getByRole('list', { name: 'Os doze meses do ano' });
+    expect(within(ano).getAllByRole('listitem')).toHaveLength(12);
+
+    const carga = cargaDoAno(useSessao.getState().banco.cenario.obrigacoes);
+    const barras = container.querySelectorAll('[role="meter"]');
+    expect(barras).toHaveLength(12);
+    barras.forEach((b, i) => {
+      expect(Number(b.getAttribute('aria-valuenow')), `mês ${i}`).toBe(carga[i].percentual);
+      // A largura desenhada é o mesmo número, não um valor à parte.
+      expect((b.firstElementChild as HTMLElement).style.width).toBe(`${carga[i].percentual}%`);
+    });
+  });
+
+  it('o cartão da obrigação não monta faixa de estados vazia', () => {
+    limparBancosDaSessao();
+    const b = new BancoMock('banco');
+    const o = b.cenario.obrigacoes.find((x) => !x.cumpridaEm)!;
+    o.vence = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
+    o.antecedenciaDias = 30;
+    useSessao.setState({ papel: 'dpo', banco: b, versao: 0, avisos: [] });
+    render(<MemoryRouter><T0 /></MemoryRouter>);
+
+    const cartao = screen.getByText(o.codigo).closest('article') as HTMLElement;
+    // Lista rotulada e vazia é ruído para leitor de tela: não se monta.
+    expect(within(cartao).queryByRole('list')).not.toBeInTheDocument();
+    expect(within(cartao).getByText(new RegExp(`Se passar: ${o.seFalhar}`))).toBeInTheDocument();
+  });
+
+  it('cada obrigação mostra o que acontece se passar', () => {
+    montarT10('dpo');
+    const b = useSessao.getState().banco;
+    for (const o of b.cenario.obrigacoes.slice(0, 4)) {
+      expect(screen.getByText(o.seFalhar), o.codigo).toBeInTheDocument();
+    }
+  });
+
+  it('prorrogar é ausência para quem não responde pela obrigação', () => {
+    montarT10('auditor');
+    expect(screen.queryAllByRole('button', { name: 'Prorrogar' })).toHaveLength(0);
+    // A leitura do ano continua: o auditor perde o ato, não a informação.
+    const ano = screen.getByRole('list', { name: 'Os doze meses do ano' });
+    expect(within(ano).getAllByRole('listitem')).toHaveLength(12);
+
+    cleanup();
+    montarT10('dpo');
+    expect(screen.getAllByRole('button', { name: 'Prorrogar' }).length).toBeGreaterThan(0);
+  });
+
+  it('a recusa da prorrogação fica no controle que falhou, não na faixa do topo', () => {
+    montarT10('dpo');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Prorrogar' })[0]);
+    fireEvent.change(screen.getByLabelText(/Justificativa/), { target: { value: 'curto' } });
+    fireEvent.change(screen.getByLabelText(/Nova data/), { target: { value: '2027-12-31' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar prorrogação' }));
+
+    const alerta = screen.getByRole('alert');
+    expect(alerta.textContent).toContain('justificativa de ao menos 20 caracteres');
+    // Um só alerta na região, e o modal continua aberto para corrigir.
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(screen.getByLabelText(/Justificativa/)).toBeInTheDocument();
+  });
+
+  it('o feed mostrado é o do papel da sessão, e o corpo não traz dado pessoal', () => {
+    montarT10('dpo');
+    expect(screen.getByText(new RegExp(assinaturaDoFeed('dpo', sha256)))).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Ver o feed de dpo/ }));
+    const texto = screen.getByText(/BEGIN:VCALENDAR/).textContent ?? '';
+    expect(texto).toContain('BEGIN:VEVENT');
+    for (const s of useSessao.getState().banco.cenario.solicitacoes) {
+      expect(texto.includes(s.protocolo)).toBe(false);
+    }
+  });
+
+  it('T10 entra no trilho ao lado da fila, no grupo Trabalho', () => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    render(<MemoryRouter initialEntries={['/t10']}><Casca /></MemoryRouter>);
+    expect(screen.getByRole('heading', { level: 1, name: 'Calendário do ano' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /T10 Calendário do ano/ })).toBeInTheDocument();
+    expect(TELAS.filter((t) => t.grupo === 'Trabalho').map((t) => t.rota)).toEqual(['/t0', '/t10']);
   });
 });

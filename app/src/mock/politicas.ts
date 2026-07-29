@@ -100,6 +100,26 @@ export const POLITICAS: PoliticaRota[] = [
     nota: 'Mover artefato entre estados. A sequência é da tabela de mock/estados.ts; o conteúdo exigido, da rota.',
   },
 
+  // ── Calendário do ano (PR 10 · T10) ───────────────────────────────────────
+  {
+    metodo: 'GET', caminho: /^calendario(\/assinatura)?$/,
+    tipo: 'leitura', foraDeEscopo: '403',
+    nota: 'O ano provisionado. Leitura ampla: obrigação não carrega dado pessoal, e quem audita '
+      + 'precisa ver o ano inteiro, não só a própria parte.',
+  },
+  {
+    metodo: 'GET', caminho: /^calendario\.ics$/,
+    tipo: 'leitura', foraDeEscopo: '403',
+    nota: 'Feed ICS somente leitura, assinado por papel. A guarda de papel é a assinatura da URL, '
+      + 'checada na rota: quem consome é um cliente de calendário sem sessão.',
+  },
+  {
+    metodo: 'POST', caminho: /^calendario\/[^/]+\/prorrogar$/,
+    tipo: 'escrita', foraDeEscopo: '403',
+    nota: 'Prorrogar exige justificativa e grava antes de a data nova valer. A permissão fina é a '
+      + 'da própria obrigação, checada na rota.',
+  },
+
   // ── Fila de trabalho (PR 9 · T0) ──────────────────────────────────────────
   {
     metodo: 'GET', caminho: /^fila$/,

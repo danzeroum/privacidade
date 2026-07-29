@@ -134,18 +134,25 @@ function ItemDaFilaCard({ item }: { item: ItemDaFila }) {
       </div>
 
       {/* A faixa vem de `estadosDe(artefato)`: a mesma tabela que decidiu que
-          este item existe é a que desenha por onde ele passa. */}
-      <ol className="fila-passos" aria-label={`Estado de ${item.id}`}>
-        {item.estados.map((e, i) => (
-          <li
-            key={e}
-            className={`fila-passo ${i === item.estadoAtual ? 'atual' : ''} ${i < item.estadoAtual ? 'feito' : ''}`}
-            aria-current={i === item.estadoAtual ? 'step' : undefined}
-          >
-            {e.replace(/_/g, ' ')}
-          </li>
-        ))}
-      </ol>
+          este item existe é a que desenha por onde ele passa.
+
+          Obrigação de calendário não tem máquina de estados, e aí a faixa **não
+          é montada**: uma lista rotulada e vazia é ruído para quem usa leitor de
+          tela, e desenhar dois passos falsos só para o cartão ficar simétrico
+          seria inventar processo onde há compromisso. */}
+      {item.estados.length > 0 && (
+        <ol className="fila-passos" aria-label={`Estado de ${item.id}`}>
+          {item.estados.map((e, i) => (
+            <li
+              key={e}
+              className={`fila-passo ${i === item.estadoAtual ? 'atual' : ''} ${i < item.estadoAtual ? 'feito' : ''}`}
+              aria-current={i === item.estadoAtual ? 'step' : undefined}
+            >
+              {e.replace(/_/g, ' ')}
+            </li>
+          ))}
+        </ol>
+      )}
 
       <div className="fila-pe">
         <span className="hint" style={{ flex: 1, minWidth: 240 }}>

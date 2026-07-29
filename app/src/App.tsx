@@ -8,6 +8,7 @@ import { CENARIOS } from './mock/scenarios';
 import { Modal, Nota } from './ui/primitivos';
 import T0 from './screens/T0';
 import T1 from './screens/T1';
+import T10 from './screens/T10';
 import T2 from './screens/T2';
 import T3 from './screens/T3';
 import T4 from './screens/T4';
@@ -21,6 +22,9 @@ export const TELAS = [
   // PR 9 — a fila é a entrada: o programa começa pelo que depende de você, e o
   // painel responde pelo estado do programa logo abaixo.
   { rota: '/t0', id: 'T0', nome: 'Minha fila', grupo: 'Trabalho' },
+  // PR 10 — a fonte das obrigações que a fila promove a item. Fica ao lado dela
+  // no trilho: são as duas telas de trabalho, e não de artefato.
+  { rota: '/t10', id: 'T10', nome: 'Calendário do ano', grupo: 'Trabalho' },
   { rota: '/t1', id: 'T1', nome: 'Painel de governança', grupo: 'Esteira de entrega' },
   { rota: '/t2', id: 'T2', nome: 'Catálogo de dados', grupo: 'Esteira de entrega' },
   { rota: '/t3', id: 'T3', nome: 'RIPD e LINDDUN', grupo: 'Esteira de entrega' },
@@ -207,6 +211,7 @@ export function Casca() {
               <Route path="/t7" element={<T7 />} />
               <Route path="/t8" element={<T8 />} />
               <Route path="/t9" element={<T9 />} />
+              <Route path="/t10" element={<T10 />} />
               <Route path="*" element={<Navigate to="/t0" replace />} />
             </Routes>
           )}

@@ -23,6 +23,10 @@ export type {
 } from './decisoes';
 import type { DecisaoRegistrada } from './decisoes';
 
+/** PR 10 — as obrigações do ano moram em `mock/calendario.ts`. */
+export type { Obrigacao, Prorrogacao, Trilha, TipoObrigacao } from './calendario';
+import type { Obrigacao } from './calendario';
+
 export type Papel = 'engenharia' | 'dpo' | 'produto' | 'seguranca' | 'auditor';
 
 export type Finalidade = 'atendimento' | 'cobranca' | 'auditoria' | 'seguranca';
@@ -477,4 +481,11 @@ export interface Cenario {
   metricas: Metrica[];
   maturidade: Maturidade[];
   raci: { processo: string; letras: Record<string, 'R' | 'A' | 'C' | 'I'> }[];
+  /**
+   * PR 10 — o ano provisionado. Não são instâncias de processo: são compromissos
+   * agendados que **geram** item na fila quando entra a antecedência. Modelar
+   * como processo em execução é o que faz painel de governança encher de coisa
+   * que ninguém trata (MAPA §4).
+   */
+  obrigacoes: Obrigacao[];
 }
