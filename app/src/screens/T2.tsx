@@ -8,6 +8,16 @@ import { titularesAtivos } from '../mock/consentimento';
 import { estadoDoDpa } from '../mock/fornecedor';
 import type { Campo, Categoria, Finalidade, TipoArmazenado } from '../mock/types';
 
+/**
+ * Risco-011 — revogar é ato de atendimento, e a finalidade vem daí.
+ *
+ * A revogação operada pelo balcão acontece porque um titular pediu (Art. 18,
+ * VIII). A busca da mesma tela mantém o seletor: ali há escolha real entre
+ * atendimento e cobrança, e é por isso que a escolha é oferecida ali e não aqui.
+ */
+const FINALIDADE_DA_REVOGACAO: Finalidade = 'atendimento';
+
+
 const ICONE: Record<TipoArmazenado, string> = {
   hash: '🔒', hmac: '🎭', bruto: '📷', criptografado: '🔐', agregado: '📊',
 };
@@ -501,7 +511,10 @@ function RegistrosDeConsentimento() {
   }
 
   const revogar = (campoId: string) => {
-    const res = chamar({ metodo: 'POST', caminho: `/v1/consentimentos/${campoId}/revogar`, body: { motivo } });
+    const res = chamar({
+      metodo: 'POST', caminho: `/v1/consentimentos/${campoId}/revogar`,
+      purpose: FINALIDADE_DA_REVOGACAO, body: { motivo },
+    });
     if (res.status === 200) { setAlvo(null); setMotivo(''); }
   };
 

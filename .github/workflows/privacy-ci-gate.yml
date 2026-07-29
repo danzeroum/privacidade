@@ -71,3 +71,16 @@ jobs:
       - name: Varredura de privacidade
         run: npm run gate:privacidade
         working-directory: app
+
+      # Risco-036 — metade desta prova só existe no artefato construído: depois
+      # da minificação os nomes de constante somem, e o que sobrevive é o texto
+      # do segredo. Por isso o build vem antes, e a varredura reprova se o
+      # `dist/` não existir — aprovar por não ter olhado é o Risco-003 com outro
+      # nome.
+      - name: Construir o artefato
+        run: npm run build
+        working-directory: app
+
+      - name: Varredura de segredo estático
+        run: npm run varredura:segredos
+        working-directory: app

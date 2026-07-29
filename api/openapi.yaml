@@ -18,7 +18,13 @@ info:
     Regras válidas para toda a API:
 
     * **`X-Purpose` é obrigatório** em qualquer rota do console que toque dado de titular. Ausência
-      devolve 403 e grava `ACESSO_SEM_FINALIDADE` no audit trail.
+      devolve 403 e grava `ACESSO_SEM_FINALIDADE` no audit trail. **Toda** operação declara se exige
+      ou dispensa, e dispensar exige motivo escrito: a lista das isentas está em
+      `app/src/mock/politicas.ts`, uma linha por rota, e um invariante de comportamento reprova o
+      build se uma rota que revela dado de titular aparecer como dispensada.
+    * **Operação sensível exige confirmação de identidade recente** (step-up): revelar sem máscara,
+      exportar o trail, concluir atendimento e executar o expurgo. A janela é derivada da operação
+      no servidor — se vier no pedido, é ignorada. Ver `POST /step-up`.
     * **404, nunca 403**, para recurso de titular fora do escopo do ator — 403 confirmaria a existência.
     * **`totalItems` é omitido** para papéis não confiáveis; a paginação é por cursor (anti-enumeração).
     * **Toda leitura de dado pessoal grava antes de responder.** Se o log falha, a resposta falha (503).
@@ -206,9 +212,14 @@ paths:
       summary: Fila de solicitações de titular com cronômetro de SLA
       description: Console interno. O titular usa `GET /requests/{protocolo}`, que devolve só a dele.
       parameters:
+        - { $ref: '#/components/parameters/Purpose' }
         - { name: status, in: query, schema: { type: string } }
         - { name: alerta_dpo, in: query, schema: { type: boolean, description: 'menos de 24h para o prazo' } }
       responses:
+        '403':
+          description: |
+            Finalidade não declarada no cabeçalho `X-Purpose`. A recusa grava `ACESSO_SEM_FINALIDADE`
+            no audit trail antes de responder — o registro da tentativa é a contrapartida da exigência.
         '200':
           description: Fila
           content:
@@ -304,6 +315,17 @@ paths:
       security:
         - oidc: []
         - sessaoTitular: []
+      parameters:
+        - name: X-Purpose
+          in: header
+          required: false
+          description: |
+            Obrigatório na superfície do console (token `oidc`), onde o remetente é o DPO e a
+            operação alcança dado de titular. Dispensado na superfície do portal (`sessaoTitular`):
+            ali quem escreve é a própria pessoa, e o que autoriza é a verificação do Art. 18.
+          schema:
+            type: string
+            enum: [atendimento, cobranca, auditoria, seguranca]
       requestBody:
         required: true
         content:
@@ -574,6 +596,79 @@ paths:
   # ══════════════════════════════════════════════════════════════════════════
   # CONSOLE INTERNO
   # ══════════════════════════════════════════════════════════════════════════
+
+  # ── Step-up de autenticação (Risco-011) ────────────────────────────────────
+  #
+  # Duas rotas e não uma: com uma só, "confirmar identidade" seria uma chamada
+  # que confirma a si mesma. A janela de validade **não** é parâmetro de nenhuma
+  # das duas — ela é derivada da operação que vai ser executada, no servidor.
+  # Cliente que mandasse o próprio nível estaria alegando, não provando.
+  /step-up:
+    post:
+      tags: [sessão]
+      summary: Abre um desafio de confirmação de identidade
+      description: |
+        Em produção, o desafio é o claim de step-up do OIDC com MFA real (TOTP ou WebAuthn). Neste
+        protótipo o fator é **simulado** e isso está dito no código (`mock/stepup.ts`): o que está
+        instrumentado é a derivação da janela, a conferência do prazo, a recusa que nomeia o que
+        falta e o registro no trail — não a criptografia do fator.
+
+        O código **não volta na resposta**: vai pelo canal, como no portal.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fator]
+              properties:
+                fator: { type: string, enum: [totp, webauthn] }
+      responses:
+        '201':
+          description: Desafio aberto
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  fator: { type: string, enum: [totp, webauthn] }
+                  expiraEmMs: { type: integer, description: 'O desafio vence em 5 minutos.' }
+        '403': { description: 'Papel fora de escopo.' }
+        '422': { description: 'Fator desconhecido.' }
+
+  /step-up/{id}/confirmar:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [sessão]
+      summary: Confirma o desafio e abre a janela de step-up
+      description: |
+        A recusa é **uma só** para código errado, desafio vencido, tentativas esgotadas e desafio de
+        outra pessoa: mensagens diferentes seriam um oráculo sobre desafios em aberto. Três
+        tentativas por desafio.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [codigo]
+              properties:
+                codigo: { type: string, minLength: 6, maxLength: 6 }
+      responses:
+        '200':
+          description: Identidade confirmada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  confirmadoEmMs: { type: integer }
+                  fator: { type: string, enum: [totp, webauthn] }
+        '401': { description: 'Não foi possível confirmar a identidade — recusa uniforme.' }
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
 
   /catalog/inventories:
     post:
@@ -986,7 +1081,13 @@ paths:
       tags: [direitos]
       summary: Ficha do titular no balcão de atendimento
       description: Valores vêm mascarados. O valor em claro só existe por `/pseudonyms/resolve`.
+      parameters:
+        - { $ref: '#/components/parameters/Purpose' }
       responses:
+        '403':
+          description: |
+            Finalidade não declarada no cabeçalho `X-Purpose`. A recusa grava `ACESSO_SEM_FINALIDADE`
+            no audit trail antes de responder — o registro da tentativa é a contrapartida da exigência.
         '200':
           description: Ficha com campos mascarados, compartilhamentos e decisão automatizada
           content:
@@ -1004,6 +1105,8 @@ paths:
         O ato do DPO, não o pedido do titular — o pedido é `POST /me/decisoes/{id}/revisao`.
         Manter o resultado do modelo também é decisão humana e também exige fundamento: sem ele a
         revisão é homologação com outro nome. A devolutiva ao titular sai do mesmo ato.
+      parameters:
+        - { $ref: '#/components/parameters/Purpose' }
       requestBody:
         required: true
         content:
@@ -1015,6 +1118,10 @@ paths:
                 resultado: { type: string, enum: [mantida, revertida, ajustada] }
                 fundamento: { type: string, minLength: 20 }
       responses:
+        '403':
+          description: |
+            Finalidade não declarada no cabeçalho `X-Purpose`. A recusa grava `ACESSO_SEM_FINALIDADE`
+            no audit trail antes de responder — o registro da tentativa é a contrapartida da exigência.
         '200':
           description: Revisão registrada e devolutiva enviada
           content:
@@ -1042,6 +1149,8 @@ paths:
         Recusa exige fundamento (Art. 18, §4º). Atendimento parcial e recusa exigem, além disso,
         `retidos[]` **item a item, com base legal e data de eliminação** — porque "parte foi
         retida" sem dizer o quê, por qual lei e até quando não é resposta, é reticência.
+      parameters:
+        - { $ref: '#/components/parameters/Purpose' }
       requestBody:
         required: true
         content:
@@ -1059,6 +1168,10 @@ paths:
                   type: array
                   items: { $ref: '#/components/schemas/ItemRetido' }
       responses:
+        '403':
+          description: |
+            Finalidade não declarada no cabeçalho `X-Purpose`. A recusa grava `ACESSO_SEM_FINALIDADE`
+            no audit trail antes de responder — o registro da tentativa é a contrapartida da exigência.
         '200':
           description: Atendimento concluído
           content:
@@ -1079,7 +1192,13 @@ paths:
     get:
       tags: [consentimento]
       summary: Registros de consentimento — a prova que sustenta a base legal no ROPA
+      parameters:
+        - { $ref: '#/components/parameters/Purpose' }
       responses:
+        '403':
+          description: |
+            Finalidade não declarada no cabeçalho `X-Purpose`. A recusa grava `ACESSO_SEM_FINALIDADE`
+            no audit trail antes de responder — o registro da tentativa é a contrapartida da exigência.
         '200':
           description: Registros por campo
           content:
@@ -1098,7 +1217,13 @@ paths:
         Revoga o **registro do campo**, e por isso é do DPO: propaga para todos os titulares
         daquele consentimento. A revogação individual do Art. 18, VIII é
         `POST /me/consentimentos/{id}/revogacao`, no portal.
+      parameters:
+        - { $ref: '#/components/parameters/Purpose' }
       responses:
+        '403':
+          description: |
+            Finalidade não declarada no cabeçalho `X-Purpose`. A recusa grava `ACESSO_SEM_FINALIDADE`
+            no audit trail antes de responder — o registro da tentativa é a contrapartida da exigência.
         '200':
           description: Revogado, com a propagação declarada
           content:
@@ -1377,18 +1502,27 @@ paths:
                   token: { type: string }
                   caminho: { type: string }
 
-  /calendario.ics:
+  /calendario/{token}.ics:
+    parameters:
+      - { name: token, in: path, required: true, schema: { type: string },
+          description: "papel.expiraEmMs.assinatura — a credencial vai no caminho, e não na query, que é onde ela vaza por Referer e por log de proxy." }
     get:
       tags: [processos]
-      summary: Feed ICS somente leitura, assinado por papel
+      summary: Feed ICS somente leitura, com token expirável no caminho
       description: |
-        Quem consome é um cliente de calendário sem sessão, então a URL **é** a credencial.
-        Limitação de protótipo declarada (Risco-036): em produção o token precisa ser opaco, com
-        expiração e revogação, assinado no servidor.
+        Quem consome é um cliente de calendário sem sessão e sem cabeçalho: a URL **é** a credencial,
+        e isso é do protocolo. O que o PR 5 corrigiu (Risco-036) foram quatro coisas que eram nossas:
+        o segredo estava literal no código e portanto dentro do bundle publicado; o token não vencia;
+        ia na query string, onde credencial vaza por `Referer` e por log de proxy; e a assinatura
+        estava truncada em 16 hex.
+
+        Agora o segredo nasce por instância do servidor, o prazo entra no token e é conferido, a
+        credencial vai no caminho e a assinatura é o digest inteiro. Rotacionar o segredo revoga
+        todos os feeds emitidos — que é o mecanismo de revogação que faltava.
+
+        Limite declarado: o caminho também é registrado em log de acesso. Sair da query compra menos
+        superfície, não sigilo.
       security: []
-      parameters:
-        - { name: papel, in: query, required: true, schema: { type: string } }
-        - { name: token, in: query, required: true, schema: { type: string } }
       responses:
         '200':
           description: Calendário no formato iCalendar
@@ -1482,6 +1616,8 @@ paths:
 
         Obrigação legal prevalece sobre eliminação: o campo retido volta em `recusados[]`, com a
         norma e a data — nunca como erro.
+      parameters:
+        - { $ref: '#/components/parameters/Purpose' }
       requestBody:
         content:
           application/json:
@@ -1723,10 +1859,15 @@ paths:
       tags: [auditoria]
       summary: Audit trail append-only
       parameters:
+        - { $ref: '#/components/parameters/Purpose' }
         - { name: ator, in: query, schema: { type: string } }
         - { name: acao, in: query, schema: { type: string } }
         - { name: recurso_id, in: query, schema: { type: string } }
       responses:
+        '403':
+          description: |
+            Finalidade não declarada no cabeçalho `X-Purpose`. A recusa grava `ACESSO_SEM_FINALIDADE`
+            no audit trail antes de responder — o registro da tentativa é a contrapartida da exigência.
         '200':
           description: Linhas do log
           content:
@@ -1777,6 +1918,12 @@ paths:
     post:
       tags: [auditoria]
       summary: Exporta o trail — e o próprio ato de exportar é gravado antes de o arquivo existir
+      description: |
+        Exige `X-Purpose` **e** confirmação de identidade recente (step-up de 10 minutos): é o trail
+        inteiro saindo da plataforma. Até o PR 5 esta operação citava o cabeçalho na prosa e não o
+        exigia no código — o registro de acessos saía sem finalidade nenhuma.
+      parameters:
+        - { $ref: '#/components/parameters/Purpose' }
       requestBody:
         content:
           application/json:
@@ -1797,7 +1944,10 @@ paths:
                   linhas: { type: integer }
                   formato: { type: string }
         '403':
-          description: Papel sem `exportar_auditoria`.
+          description: |
+            Papel sem `exportar_auditoria`, finalidade não declarada (`ACESSO_SEM_FINALIDADE` no
+            trail) ou confirmação de identidade fora da janela de 10 minutos. A mensagem diz qual
+            das três e o que fazer.
         '422': { $ref: '#/components/responses/ErroValidacao' }
         '503': { $ref: '#/components/responses/FalhaDeRegistro' }
 

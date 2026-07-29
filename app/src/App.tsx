@@ -56,6 +56,8 @@ export function Casca() {
   const cenarioId = useSessao((s) => s.cenarioId);
   const setCenario = useSessao((s) => s.setCenario);
   const banco = useSessao((s) => s.banco);
+  const confirmarIdentidade = useSessao((s) => s.confirmarIdentidade);
+  const identidadeConfirmadaEmMs = useSessao((s) => s.identidadeConfirmadaEmMs);
   const avisos = useSessao((s) => s.avisos);
   const fecharAviso = useSessao((s) => s.fecharAviso);
   const avisar = useSessao((s) => s.avisar);
@@ -188,6 +190,18 @@ export function Casca() {
               <span className="track" /> simular queda
             </label>
           )}
+          {/* Risco-011 — o step-up sai da prosa e vira controle. O rótulo diz o
+              estado; quem decide se a confirmação ainda vale é o servidor, que
+              lê a janela da operação. */}
+          <button
+            className="shield"
+            onClick={confirmarIdentidade}
+            title={identidadeConfirmadaEmMs
+              ? 'Identidade confirmada. Cada operação sensível tem a própria janela, derivada no servidor.'
+              : 'Operações sensíveis (revelar, exportar o trail, concluir atendimento, expurgar) exigem confirmação recente'}
+          >
+            {identidadeConfirmadaEmMs ? '🔓 Identidade confirmada' : '🔒 Confirmar identidade'}
+          </button>
           <button className="shield" onClick={() => setExplicando(true)}>
             🛡 Dados mascarados
           </button>

@@ -121,6 +121,13 @@ export const OPERACOES: Operacao[] = [
   { metodo: 'POST', contrato: '/lias/{id}/assinar', superficie: 'console', mock: '/v1/lias/nao-existe/assinar', papel: 'dpo',
     nota: 'Assina e gera o LIA.md.' },
 
+  // ── Step-up de autenticação (Risco-011) ──────────────────────────────────
+  { metodo: 'POST', contrato: '/step-up', superficie: 'console', mock: '/v1/step-up', papel: 'dpo',
+    nota: 'Abre o desafio. O código não sai na resposta: vai pelo canal, como no portal.' },
+  { metodo: 'POST', contrato: '/step-up/{id}/confirmar', superficie: 'console',
+    mock: '/v1/step-up/nao-existe/confirmar', papel: 'dpo',
+    nota: 'Confirma o desafio e abre a janela. Recusa única para código errado, vencido e alheio.' },
+
   // ── Titulares e revelação ────────────────────────────────────────────────
   { metodo: 'POST', contrato: '/pseudonyms/resolve', superficie: 'console', mock: '/v1/pseudonyms/resolve', papel: 'dpo',
     nota: 'Reidentificação sob finalidade, justificativa e protocolo.' },
@@ -172,7 +179,7 @@ export const OPERACOES: Operacao[] = [
     nota: 'O ano provisionado, com carga por mês.' },
   { metodo: 'GET', contrato: '/calendario/assinatura', superficie: 'console', mock: '/v1/calendario/assinatura', papel: 'dpo',
     nota: 'A URL do feed do próprio papel, e de mais nenhum.' },
-  { metodo: 'GET', contrato: '/calendario.ics', superficie: 'console', mock: '/v1/calendario.ics?papel=dpo&token=invalido', papel: 'dpo',
+  { metodo: 'GET', contrato: '/calendario/{token}.ics', superficie: 'console', mock: '/v1/calendario/invalido.ics', papel: 'dpo',
     nota: 'Feed assinado. A URL é a credencial — limitação declarada (Risco-036).' },
   { metodo: 'POST', contrato: '/calendario/{codigo}/prorrogar', superficie: 'console', mock: '/v1/calendario/nao-existe/prorrogar', papel: 'dpo',
     nota: 'Prorrogar exige justificativa, gravada antes de a data nova valer.' },
