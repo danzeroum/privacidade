@@ -13,6 +13,8 @@ import { contadoresDe, derivarFila, minhaFila } from './fila';
 import {
   assinaturaDoFeed, cargaDoAno, diasAte, naAntecedencia, paraIcs,
 } from './calendario';
+import { executarExpurgo, retencaoAteDoCampo, varrerVencimentos } from './expurgo';
+import { codigoDoAchado, diasDeAtraso } from './retencao';
 import { redigir } from '../lib/redator';
 import { hashEncadeado, sha256 } from '../lib/sha256';
 import { BASES_LEGAIS, BASES_PARA_SENSIVEL } from './types';
@@ -554,7 +556,47 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
       break;
     }
 
+    /**
+     * O executor do ciclo de vida (Risco-006).
+     *
+     * A plataforma registrava pós-fato o que um executor externo dizia ter
+     * feito. Agora ela executa, e a prova nasce do ato: cada lote grava antes
+     * de eliminar, e a falha de log derruba a execução inteira.
+     */
     case 'POST purge': {
+      if (partes[1] === 'executar') {
+        const hojeIso = String(body.data_referencia ?? new Date().toISOString().slice(0, 10));
+        const limite = Number(body.limite ?? 0) || undefined;
+        // Presente, é eliminação pedida por um titular; ausente, é a varredura
+        // do dia. É a distinção que decide se a obrigação legal recusa ou não.
+        const camposIds = Array.isArray(body.campos_ids) ? body.campos_ids.map(String) : undefined;
+        let resultado;
+        try {
+          resultado = executarExpurgo(banco, { hojeIso, ator, limite, camposIds });
+        } catch (e) {
+          const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar o expurgo.';
+          return erro(503, msg,
+            'Nada é eliminado sem par pré/pós no trail: a execução inteira foi desfeita.') as Res<T>;
+        }
+        // A varredura vem depois da execução: o que sobrou vencido é o que
+        // vira achado, e não o que estava vencido antes de o motor rodar.
+        const achados = varrerVencimentos(banco, hojeIso).map((a) => a.codigo);
+        return ok({
+          data_referencia: resultado.dataReferencia,
+          registros_total: resultado.registrosTotal,
+          lotes: resultado.entradas.length,
+          lotes_ignorados: resultado.lotesIgnorados,
+          entradas: resultado.entradas.map((e) => ({
+            campo_id: e.campoId, tabela: e.tabela, metodo: e.metodo, lote_chave: e.loteChave,
+            registros: e.registros, restante_antes: e.restanteAntes, restante_depois: e.restanteDepois,
+            hash_pre: e.hashPre, hash_pos: e.hashPos,
+          })),
+          recusados: resultado.recusados.map((r) => ({
+            campo_id: r.campoId, norma: r.norma, retencao_ate: r.retencaoAte, motivo: r.motivo,
+          })),
+          achados,
+        }) as Res<T>;
+      }
       if (partes[2] !== 'verificar') break;
       const run = banco.cenario.expurgos.find((r) => r.id === partes[1]);
       if (!run) return erro(404, 'Não encontrado.') as Res<T>;
@@ -950,6 +992,48 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
 
     case 'GET requests':
       return ok(banco.cenario.solicitacoes) as Res<T>;
+
+    /**
+     * A T6 · ciclo de vida do dado. Três estados, e a linha vermelha é o ponto:
+     * vencido sem expurgo é achado, não pendência silenciosa.
+     */
+    case 'GET retencao': {
+      if (partes[1]) break;
+      const hoje = new Date().toISOString().slice(0, 10);
+      return ok({
+        hoje,
+        campos: banco.cenario.campos.map((c) => {
+          const ate = retencaoAteDoCampo(c);
+          const atraso = diasDeAtraso(ate, hoje);
+          const codigo = codigoDoAchado(c.dataset, c.nome);
+          const achado = banco.cenario.achados.find((a) => a.codigo === codigo);
+          const ultimoLote = [...banco.auditoria].reverse()
+            .find((l) => l.acao === 'EXPURGO_LOTE' && l.recursoId === c.id);
+          return {
+            campo: `${c.dataset}.${c.nome}`,
+            retencao: c.retencao,
+            retencao_iso: c.retencaoIso ?? null,
+            fato_gerador: c.fatoGerador ?? null,
+            retencao_ate: ate,
+            registros: c.registrosEstimados ?? 0,
+            atraso_dias: atraso,
+            prova_pre_pos: ultimoLote?.campos.find((x) => x.startsWith('pre='))?.slice(4) ?? null,
+            /**
+             * A ordem importa. Um campo com prova de expurgo e nada restante
+             * está **comprovado**, mesmo que a data já tenha passado — foi
+             * justamente por ter passado que ele foi expurgado. Checar o atraso
+             * primeiro deixaria a linha vermelha para sempre, e a tela diria
+             * que o motor não rodou logo depois de ele rodar.
+             */
+            estado: !ate ? 'sem_prazo'
+              : (ultimoLote && (c.registrosEstimados ?? 0) === 0) ? 'expurgo_comprovado'
+                : atraso > 0 ? 'vencido_sem_expurgo'
+                  : 'a_vencer',
+            achado: achado?.codigo ?? null,
+          };
+        }),
+      }) as Res<T>;
+    }
 
     case 'GET metrics':
       return ok({ metricas: banco.cenario.metricas, maturidade: banco.cenario.maturidade }) as Res<T>;

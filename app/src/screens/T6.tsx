@@ -3,6 +3,27 @@ import { Cabecalho, Cartao, Didatico, Kpi, NaoImplementado, Nota, Permitido, Pil
 import { useSessao } from '../store/sessao';
 import { curto } from '../lib/sha256';
 
+interface CicloDeVida {
+  campo: string;
+  retencao_ate: string | null;
+  registros: number;
+  atraso_dias: number;
+  prova_pre_pos: string | null;
+  estado: 'a_vencer' | 'vencido_sem_expurgo' | 'expurgo_comprovado' | 'sem_prazo';
+  achado: string | null;
+}
+
+/** Os três estados do desenho, mais o quarto que o desenho não previa. */
+const TOM_DO_CICLO: Record<CicloDeVida['estado'], { tom: 'ok' | 'warn' | 'crit'; rotulo: string; cor: string }> = {
+  vencido_sem_expurgo: { tom: 'crit', rotulo: 'vencido sem expurgo', cor: 'var(--crit)' },
+  a_vencer:            { tom: 'warn', rotulo: 'a vencer', cor: 'var(--warn)' },
+  expurgo_comprovado:  { tom: 'ok', rotulo: 'expurgo comprovado', cor: 'var(--ok)' },
+  // O desenho tinha três estados; a implementação encontrou um quarto. Campo
+  // sem fato gerador declarado não tem prazo derivável, e dizer "a vencer" ali
+  // seria inventar uma data. Aparece como o que é.
+  sem_prazo:           { tom: 'warn', rotulo: 'sem fato gerador', cor: 'var(--tinta-3)' },
+};
+
 export default function T6() {
   const banco = useSessao((s) => s.banco);
   const chamar = useSessao((s) => s.chamar);
@@ -12,6 +33,25 @@ export default function T6() {
   const [integridade, setIntegridade] = useState<{ blocos: number; integro: boolean; primeiraDivergencia: number | null } | null>(null);
   const [filtro, setFiltro] = useState('');
   const [exportado, setExportado] = useState<string | null>(null);
+
+  /**
+   * Lido da rota, e não montado na tela: o estado de cada campo é derivado no
+   * servidor pela mesma função que o executor usa. Recalcular aqui produziria
+   * uma segunda verdade — e a que vale seria a que ninguém está olhando.
+   */
+  const ciclo = (chamar<{ campos: CicloDeVida[] }>({ metodo: 'GET', caminho: '/v1/retencao' })
+    .body?.campos ?? []);
+
+  const executarExpurgoDoDia = () => {
+    const res = chamar<{ registros_total: number; achados: string[] }>({
+      metodo: 'POST', caminho: '/v1/purge/executar', body: {},
+    });
+    if (res.status === 200) {
+      avisar('ok', `${res.body.registros_total.toLocaleString('pt-BR')} registro(s) eliminados`
+        + `${res.body.achados.length ? ` · ${res.body.achados.length} achado(s) em aberto` : ''}`,
+      'Cada lote gravou contagem pré, contagem pós e hash no trail antes de eliminar.');
+    }
+  };
 
   const runs = banco.cenario.expurgos;
   const hoje = runs[0];
@@ -173,6 +213,58 @@ export default function T6() {
               </NaoImplementado>
               <span className="hash">o CSV assinado acima é a exportação que existe e fica registrada</span>
             </div>
+          </Cartao>
+
+          {/*
+            O ciclo de vida do dado — a face visível do motor de retenção.
+
+            A tabela não mostra "5 anos": mostra `retencao_ate` **calculada** do
+            domínio e do fato gerador declarados no ROPA. A linha vermelha é o
+            ponto do bloco inteiro: prazo vencido sem execução abre achado na
+            T11 sozinho, porque prazo que não faz nada é rótulo, e rótulo não
+            cumpre o Art. 16.
+          */}
+          <Cartao titulo="Ciclo de vida do dado" hint="retenção como estrutura, não rótulo">
+            <p className="hint" style={{ marginTop: 0 }}>
+              Cada campo carrega <span className="mono">retencao_ate</span> derivada no servidor, e
+              nunca digitada. Vencido sem expurgo é achado, não pendência silenciosa.
+            </p>
+            <Tabela cabecalho={['Campo', 'Vence em', 'Registros', 'Prova pré/pós', 'Estado']}>
+              {ciclo.map((c) => (
+                <tr key={c.campo}>
+                  <td className="mono">{c.campo}</td>
+                  <td style={{ color: TOM_DO_CICLO[c.estado].cor, fontWeight: 600 }}>
+                    {c.retencao_ate
+                      ? (c.atraso_dias > 0
+                        ? `venceu há ${c.atraso_dias} dia${c.atraso_dias > 1 ? 's' : ''}`
+                        : c.retencao_ate)
+                      : 'sem fato gerador'}
+                  </td>
+                  <td>{c.registros.toLocaleString('pt-BR')}</td>
+                  <td className="mono">{c.prova_pre_pos ? curto(c.prova_pre_pos) : '—'}</td>
+                  <td>
+                    <Pill tom={TOM_DO_CICLO[c.estado].tom}>{TOM_DO_CICLO[c.estado].rotulo}</Pill>
+                    {c.achado && <span className="hint" style={{ marginLeft: 6 }}>{c.achado}</span>}
+                  </td>
+                </tr>
+              ))}
+            </Tabela>
+            <Permitido acao="rodar_expurgo" alternativa={
+              <Nota>Executar o expurgo é de quem responde por ele — engenharia, segurança e DPO.</Nota>
+            }>
+              <div className="row" style={{ marginTop: 10 }}>
+                <button className="btn primary" onClick={executarExpurgoDoDia}>
+                  Executar expurgo do dia
+                </button>
+                <span className="hint">
+                  grava antes de eliminar; falha de log derruba a execução inteira
+                </span>
+              </div>
+            </Permitido>
+            <Nota>
+              O que vencer e não for executado vira achado na T11 com criticidade por volume e dias
+              de atraso — a lista acima é a mesma que o motor varre.
+            </Nota>
           </Cartao>
 
           <Cartao

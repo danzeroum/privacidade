@@ -77,8 +77,76 @@ CREATE TYPE status_chave AS ENUM ('pendente', 'ativa', 'canary', 'depreciada', '
 
 CREATE TYPE papel_ator AS ENUM ('engenharia', 'dpo', 'produto', 'seguranca', 'juridico', 'dados', 'auditor_externo', 'system');
 
--- Nota de retenção legível por humano e por máquina: "5 anos", "P90D", "consentimento_revogado"
-CREATE DOMAIN retencao AS TEXT CHECK (VALUE ~ '^(P[0-9]+[DMY]|indeterminado|consentimento_revogado|obrigacao_legal:[a-z0-9_.\- ]+)$');
+-- Nota de retenção legível por humano e por máquina: "P90D", "consentimento_revogado",
+-- "obrigacao_legal:lei_8846_1994:P5Y".
+--
+-- A obrigação legal passou a exigir **prazo** além da norma. Antes era só o
+-- nome da norma, e norma sem prazo não deriva data nenhuma: a forma mais forte
+-- de retenção era a única sem vencimento calculável, o que é o avesso do que
+-- ela deveria ser.
+CREATE DOMAIN retencao AS TEXT CHECK (VALUE ~ '^(P[0-9]+[DMY]|indeterminado|consentimento_revogado|obrigacao_legal:[a-z0-9_.\- ]+:P[0-9]+[DMY])$');
+
+-- De que instante o prazo conta. Declarado por campo no ROPA, nunca escolhido
+-- no momento do expurgo: `retencao_ate` não é derivável de `retencao` sozinho
+-- ("P5Y" a partir de quê?), e é essa metade que faltava para a coluna existir.
+CREATE TYPE fato_gerador AS ENUM (
+  'coleta', 'ultima_atualizacao', 'fim_do_contrato',
+  'revogacao_do_consentimento', 'encerramento_da_solicitacao'
+);
+
+-- ---------------------------------------------------------------------
+-- 0b. A derivação de retencao_ate — a mesma regra de app/src/mock/retencao.ts
+--
+-- IMMUTABLE de propósito: é o que permite usá-la em coluna GENERATED, e coluna
+-- gerada é a forma mais forte de "derivada no servidor, nunca digitada" — o
+-- banco recusa o INSERT que tentar escrever o valor.
+--
+-- As duas implementações (esta e a de TypeScript) são cobradas contra a MESMA
+-- tabela de casos, db/retencao-casos.csv, por db/tests.sql e pela suíte do app.
+-- Divergir entre elas reprova dos dois lados.
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION gov.retencao_ate(p_retencao TEXT, p_marco DATE)
+RETURNS DATE
+LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS $fn$
+DECLARE
+  v_periodo TEXT;
+  v_n INT;
+  v_u TEXT;
+BEGIN
+  -- Indeterminado nunca vence. Só é aceito com justificativa no ROPA
+  -- (campo_indeterminado_exige_fonte), senão prazo sem fim entra por omissão.
+  IF p_retencao = 'indeterminado' THEN RETURN NULL; END IF;
+
+  -- Sem marco não há prazo: NULL aqui é "ainda não há fato gerador"
+  -- (consentimento não revogado, contrato em curso), e não "sem prazo".
+  IF p_marco IS NULL THEN RETURN NULL; END IF;
+
+  -- Carência de 30 dias após a revogação: o tempo de propagar a cascata antes
+  -- de eliminar. Zero faria a prova de execução chegar depois do dado sumir.
+  IF p_retencao = 'consentimento_revogado' THEN
+    RETURN (p_marco + INTERVAL '30 days')::DATE;
+  END IF;
+
+  v_periodo := CASE
+    WHEN p_retencao LIKE 'obrigacao_legal:%' THEN split_part(p_retencao, ':', 3)
+    ELSE p_retencao
+  END;
+
+  v_n := NULLIF(substring(v_periodo FROM '^P([0-9]+)'), '')::INT;
+  v_u := substring(v_periodo FROM '([DMY])$');
+  IF v_n IS NULL OR v_u IS NULL THEN RETURN NULL; END IF;
+
+  RETURN (p_marco + (v_n || CASE v_u
+                              WHEN 'D' THEN ' days'
+                              WHEN 'M' THEN ' months'
+                              ELSE ' years'
+                            END)::INTERVAL)::DATE;
+END;
+$fn$;
+
+COMMENT ON FUNCTION gov.retencao_ate(TEXT, DATE) IS
+  'Deriva a data de eliminação a partir do domínio retencao e do marco do fato gerador. '
+  'Espelhada em app/src/mock/retencao.ts; paridade cobrada por db/retencao-casos.csv.';
 
 -- ---------------------------------------------------------------------
 -- 1. Tenancy, atores e finalidades
@@ -170,6 +238,16 @@ CREATE TABLE campo (
   lia_id            UUID,                        -- FK adiada: obrigatória se base_legal = legitimo_interesse
   retencao          retencao NOT NULL,
   retencao_fonte    TEXT,                        -- norma que sustenta o prazo
+  fato_gerador      fato_gerador NOT NULL DEFAULT 'coleta',
+  -- Volume e marco alimentam o motor: o primeiro dá a criticidade do achado, o
+  -- segundo é de onde o prazo conta. Sem eles a retenção continuaria sendo um
+  -- texto que ninguém consegue executar.
+  registros_estimados     BIGINT NOT NULL DEFAULT 0 CHECK (registros_estimados >= 0),
+  registro_mais_antigo_em DATE,
+  -- GENERATED: o banco recusa quem tentar escrever esta coluna. É a forma mais
+  -- forte de "derivada no servidor, nunca digitada" — mais forte que confiar na
+  -- aplicação, porque não há caminho de escrita que a contorne.
+  retencao_ate      DATE GENERATED ALWAYS AS (gov.retencao_ate(retencao, registro_mais_antigo_em)) STORED,
   UNIQUE (dataset_id, nome),
 
   -- Art. 11: legítimo interesse, contrato e proteção de crédito não sustentam dado sensível.
@@ -184,12 +262,29 @@ CREATE TABLE campo (
   ),
   CONSTRAINT campo_pseudonimizado_reversivel CHECK (
     categoria <> 'pseudonimizado' OR tipo_armazenado IN ('hmac','criptografado')
+  ),
+  -- Prazo sem fim só existe declarado, nunca por omissão: "indeterminado" tem
+  -- de dizer qual norma ou finalidade o sustenta.
+  CONSTRAINT campo_indeterminado_exige_fonte CHECK (
+    retencao <> 'indeterminado' OR retencao_fonte IS NOT NULL
+  ),
+  -- Onde há marco e o domínio não é dos que nunca vencem, a data existe. Este
+  -- CHECK é o que impede a coluna de voltar a ser decorativa.
+  CONSTRAINT campo_retencao_ate_derivada CHECK (
+    retencao IN ('indeterminado','consentimento_revogado')
+    OR registro_mais_antigo_em IS NULL
+    OR retencao_ate IS NOT NULL
   )
 );
 
 CREATE INDEX campo_sensivel_idx      ON campo (sensivel) WHERE sensivel;
 CREATE INDEX campo_base_legal_idx    ON campo (base_legal);
 CREATE INDEX campo_lia_idx           ON campo (lia_id) WHERE lia_id IS NOT NULL;
+-- Índice PARCIAL: a maioria das linhas não tem prazo, e indexá-las custaria
+-- espaço sem servir à única consulta que importa — "o que venceu?". Com ele o
+-- executor faz varredura de faixa O(log n + k), k = vencidos; sem ele, O(n) por
+-- execução sobre a tabela inteira.
+CREATE INDEX campo_retencao_ate_idx  ON campo (retencao_ate) WHERE retencao_ate IS NOT NULL;
 
 CREATE TABLE compartilhamento (
   id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -560,6 +655,14 @@ CREATE TABLE solicitacao_titular (
                      ) STORED,
   motivo_recusa      TEXT,
   responsavel_id     UUID REFERENCES ator(id),
+  -- A prova de que o pedido foi atendido é obrigação legal (Art. 37): fica
+  -- cinco anos depois do encerramento, e só então é eliminada. `AT TIME ZONE
+  -- 'UTC'` porque o cast direto de timestamptz para date é STABLE, e coluna
+  -- gerada exige IMMUTABLE.
+  retencao_ate       DATE GENERATED ALWAYS AS (
+                       gov.retencao_ate('obrigacao_legal:art_37_lgpd:P5Y',
+                                        (concluida_em AT TIME ZONE 'UTC')::DATE)
+                     ) STORED,
   UNIQUE (tenant_id, protocolo),
   CONSTRAINT recusa_exige_motivo CHECK (status <> 'recusada' OR motivo_recusa IS NOT NULL),
   -- Eliminação exige verificação elevada (biometria/step-up).
@@ -567,6 +670,30 @@ CREATE TABLE solicitacao_titular (
 );
 
 CREATE INDEX solicitacao_sla_idx ON solicitacao_titular (tenant_id, status, prazo_limite);
+CREATE INDEX solicitacao_retencao_idx ON solicitacao_titular (retencao_ate) WHERE retencao_ate IS NOT NULL;
+
+-- O que ficou retido quando o atendimento foi parcial ou recusado.
+--
+-- O PR do portal passou a exigir esta lista item a item, e ela não tinha onde
+-- persistir: o titular via na tela algo que o desenho de produção não guardava.
+-- Cada resíduo nomeia a lei e traz a data — "parte foi retida por obrigação
+-- legal" sem dizer o quê, por qual norma e até quando não é resposta.
+CREATE TABLE solicitacao_retido (
+  id             BIGSERIAL PRIMARY KEY,
+  solicitacao_id UUID NOT NULL REFERENCES solicitacao_titular(id) ON DELETE CASCADE,
+  item           TEXT NOT NULL CHECK (length(btrim(item)) > 0),
+  base_legal     base_legal NOT NULL,
+  artigo         TEXT,
+  retencao       retencao NOT NULL,
+  marco          DATE NOT NULL,
+  retencao_ate   DATE GENERATED ALWAYS AS (gov.retencao_ate(retencao, marco)) STORED,
+  motivo         TEXT,
+  -- Reter sem data é reter para sempre. Aqui não há "indeterminado" que passe:
+  -- o resíduo de um pedido de titular tem fim, e a data é dita a ele.
+  CONSTRAINT retido_tem_data CHECK (retencao_ate IS NOT NULL)
+);
+
+CREATE INDEX solicitacao_retido_prazo_idx ON solicitacao_retido (retencao_ate);
 
 CREATE TABLE solicitacao_evento (
   id              BIGSERIAL PRIMARY KEY,
@@ -615,7 +742,10 @@ CREATE TABLE expurgo_run (
   data_referencia DATE NOT NULL,
   origem         TEXT NOT NULL DEFAULT 'cron' CHECK (origem IN ('cron','manual','solicitacao_titular','pos_restore')),
   status         TEXT NOT NULL DEFAULT 'executando' CHECK (status IN ('executando','concluido','falhou','parcial')),
-  registros_total BIGINT NOT NULL DEFAULT 0,
+  -- `registros_total` SAIU daqui de propósito. Era um contador, e contador
+  -- diverge do que foi contado no primeiro erro de incremento — exatamente o
+  -- número que uma auditoria de expurgo confere primeiro. O total agora é
+  -- derivado em gov.expurgo_run_resumo, somando os lotes.
   iniciado_em    TIMESTAMPTZ NOT NULL DEFAULT now(),
   concluido_em   TIMESTAMPTZ,
   executado_por  TEXT NOT NULL DEFAULT 'airflow-svc-account',
@@ -633,6 +763,12 @@ CREATE TABLE expurgo_entrada (
   metodo         TEXT NOT NULL CHECK (metodo IN ('hard_delete','crypto_shredding','anonimizacao','compactacao_log')),
   registros      BIGINT NOT NULL CHECK (registros >= 0),
   -- Identificadores afetados nunca em claro: hash com sal por execução.
+  campo_id       UUID REFERENCES campo(id) ON DELETE SET NULL,
+  -- A chave de idempotência. Deriva de coisas imutáveis — tabela, campo, data
+  -- de referência e índice do lote —, nunca do estado. Se derivasse da contagem
+  -- restante, reexecutar depois de eliminar mudaria a chave e o segundo passe
+  -- reinseriria tudo: o defeito que a idempotência existe para impedir.
+  lote_chave     TEXT NOT NULL,
   ids_afetados_hash TEXT NOT NULL,
   hash_pre       TEXT NOT NULL,
   hash_pos       TEXT NOT NULL,
@@ -642,7 +778,94 @@ CREATE TABLE expurgo_entrada (
   CONSTRAINT hashes_distintos CHECK (hash_pre <> hash_pos OR registros = 0)
 );
 
+CREATE UNIQUE INDEX expurgo_entrada_lote_uk ON expurgo_entrada (lote_chave);
 CREATE INDEX expurgo_entrada_run_idx ON expurgo_entrada (expurgo_run_id, tabela);
+
+-- O total, somado — nunca incrementado.
+CREATE VIEW gov.expurgo_run_resumo AS
+SELECT r.id, r.tenant_id, r.data_referencia, r.origem, r.status, r.iniciado_em, r.concluido_em,
+       r.executado_por, r.relatorio_uri, r.relatorio_hash,
+       coalesce(sum(e.registros), 0)::BIGINT AS registros_total,
+       count(e.id)::BIGINT                   AS lotes,
+       bool_and(coalesce(e.integro, true))   AS integro
+FROM expurgo_run r
+LEFT JOIN expurgo_entrada e ON e.expurgo_run_id = r.id
+GROUP BY r.id;
+
+-- ---------------------------------------------------------------------
+-- 9b. Achado de auditoria                                           [Tela T11]
+--
+-- O achado existia na interface e na máquina de estados do protótipo, e em
+-- nenhuma das 38 tabelas: o ciclo que a T11 opera não tinha onde persistir. Sem
+-- esta tabela, o achado que o motor de retenção abre sozinho morreria com o
+-- processo — e um prazo vencido voltaria a ser pendência silenciosa.
+-- ---------------------------------------------------------------------
+
+CREATE TYPE estado_achado AS ENUM (
+  'aberto', 'causa_raiz', 'plano', 'executado', 'verificado', 'encerrado', 'reaberto'
+);
+
+CREATE TABLE achado (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id         UUID NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
+  -- Determinístico para as origens automáticas (RET-<tabela>-<campo>): uma
+  -- varredura por dia sobre o mesmo campo vencido não pode abrir um achado por
+  -- dia. O UNIQUE é o que transforma a segunda varredura em atualização.
+  codigo            TEXT NOT NULL,
+  descricao         TEXT NOT NULL,
+  origem            TEXT NOT NULL,               -- 'auditoria_externa' | 'motor_de_retencao'
+  estado            estado_achado NOT NULL DEFAULT 'aberto',
+  criticidade       severidade NOT NULL,
+  reincidencias     SMALLINT NOT NULL DEFAULT 0 CHECK (reincidencias >= 0),
+  causa_raiz        TEXT,
+  plano             TEXT,
+  criterio_eficacia TEXT,
+  executado_por     UUID REFERENCES ator(id),
+  verificado_por    UUID REFERENCES ator(id),
+  eficacia_atingida BOOLEAN,
+  motivo_reabertura TEXT,
+  -- O que o motor de retenção aponta, quando é ele que abre.
+  campo_id          UUID REFERENCES campo(id) ON DELETE CASCADE,
+  atraso_dias       INT CHECK (atraso_dias IS NULL OR atraso_dias >= 0),
+  registros         BIGINT CHECK (registros IS NULL OR registros >= 0),
+  aberto_em         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  atualizado_em     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, codigo),
+  -- Quem executou não verifica: a independência da verificação é a razão de o
+  -- estado `verificado` existir separado de `executado`.
+  CONSTRAINT achado_verificacao_independente CHECK (
+    verificado_por IS NULL OR executado_por IS NULL OR verificado_por <> executado_por
+  ),
+  -- Encerrar exige que a verificação tenha concluído que resolveu.
+  CONSTRAINT achado_encerra_com_eficacia CHECK (
+    estado <> 'encerrado' OR eficacia_atingida IS TRUE
+  ),
+  -- Reabrir exige motivo: a reabertura eleva criticidade e conta reincidência.
+  CONSTRAINT achado_reabertura_exige_motivo CHECK (
+    estado <> 'reaberto' OR length(btrim(motivo_reabertura)) >= 20
+  ),
+  -- Achado do motor aponta para o campo vencido; sem isso ninguém sabe o que tratar.
+  CONSTRAINT achado_do_motor_aponta_campo CHECK (
+    origem <> 'motor_de_retencao' OR (campo_id IS NOT NULL AND atraso_dias IS NOT NULL)
+  )
+);
+
+CREATE INDEX achado_estado_idx ON achado (tenant_id, estado);
+CREATE INDEX achado_campo_idx  ON achado (campo_id) WHERE campo_id IS NOT NULL;
+
+-- Cadeia de custódia da evidência, append-only.
+CREATE TABLE achado_evidencia (
+  id          BIGSERIAL PRIMARY KEY,
+  achado_id   UUID NOT NULL REFERENCES achado(id) ON DELETE CASCADE,
+  arquivo     TEXT NOT NULL,
+  etapa       estado_achado NOT NULL,
+  por         UUID REFERENCES ator(id),
+  hash        TEXT NOT NULL,
+  hash_anterior TEXT,
+  anexada_em  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX achado_evidencia_idx ON achado_evidencia (achado_id, id);
 
 -- ---------------------------------------------------------------------
 -- 10. KMS — artefato (9) kms-rotation.yml                            [Tela T7]
@@ -760,20 +983,51 @@ CREATE TABLE audit_log (
   base_legal    base_legal,
   campos        TEXT[] NOT NULL DEFAULT '{}',    -- campos efetivamente retornados
   justificativa TEXT,
+  -- O hash da justificativa ENTRA na cadeia; o texto, não.
+  --
+  -- É a fronteira entre dois riscos que se atropelariam: a cadeia precisa
+  -- cobrir a justificativa (senão o campo mais exposto do trail é adulterável
+  -- sem detecção), e o trail precisa poder expurgar a justificativa (que é dado
+  -- pessoal do operador, sem prazo até aqui). Selar o hash resolve os dois:
+  -- adulterar o texto continua detectável, e apagá-lo preserva a cadeia.
+  justificativa_hash TEXT,
   ip            INET,
   user_agent    TEXT,
   resultado     TEXT NOT NULL DEFAULT 'sucesso' CHECK (resultado IN ('sucesso','negado','erro')),
+  -- A linha fica cinco anos (prova do Art. 37); a PII do operador sai em trinta
+  -- dias. Duas datas porque são duas obrigações diferentes sobre a mesma linha.
+  retencao_ate     DATE GENERATED ALWAYS AS (
+                     gov.retencao_ate('obrigacao_legal:art_37_lgpd:P5Y',
+                                      (ocorrido_em AT TIME ZONE 'UTC')::DATE)
+                   ) STORED,
+  pii_expurgo_ate  DATE GENERATED ALWAYS AS (
+                     gov.retencao_ate('P30D', (ocorrido_em AT TIME ZONE 'UTC')::DATE)
+                   ) STORED,
+  pii_expurgada_em TIMESTAMPTZ,
   hash_anterior TEXT,
   hash          TEXT NOT NULL,
+  -- Art. 37: acesso a dado pessoal exige finalidade e justificativa **no momento
+  -- do acesso**. Depois do prazo, o texto da justificativa é eliminado — ele é
+  -- dado pessoal do operador — e o que prova que ele existiu é o selo.
+  --
+  -- A segunda alternativa não afrouxa nada: `pii_expurgada_em` só pode ser
+  -- preenchido pelo caminho controlado do trigger, que por sua vez exige que
+  -- todo o resto da linha (inclusive `justificativa_hash`) fique idêntico. Não
+  -- há INSERT que alcance esse ramo — só o expurgo alcança.
   CONSTRAINT acesso_pii_exige_finalidade CHECK (
     acao NOT IN ('CAMPO_REVELADO','TITULAR_CONSULTADO','PSEUDONIMO_RESOLVIDO')
-    OR (finalidade IS NOT NULL AND justificativa IS NOT NULL)
+    OR (finalidade IS NOT NULL
+        AND (justificativa IS NOT NULL
+             OR (pii_expurgada_em IS NOT NULL AND justificativa_hash IS NOT NULL)))
   )
 );
 
 CREATE INDEX audit_log_recurso_idx ON audit_log (tenant_id, recurso_tipo, recurso_id);
 CREATE INDEX audit_log_tempo_idx   ON audit_log (tenant_id, ocorrido_em DESC);
 CREATE INDEX audit_log_ator_idx    ON audit_log (ator_id, ocorrido_em DESC);
+-- Parcial: só interessa a linha que ainda tem PII para expurgar.
+CREATE INDEX audit_log_pii_idx     ON audit_log (pii_expurgo_ate)
+  WHERE pii_expurgada_em IS NULL AND (ip IS NOT NULL OR user_agent IS NOT NULL OR justificativa IS NOT NULL);
 
 -- Encadeamento tipo Merkle: cada linha sela a anterior.
 CREATE OR REPLACE FUNCTION audit_log_encadeia() RETURNS TRIGGER AS $$
@@ -783,6 +1037,10 @@ DECLARE
 BEGIN
   SELECT hash INTO v_prev FROM audit_log WHERE tenant_id = NEW.tenant_id ORDER BY id DESC LIMIT 1;
 
+  -- Selado ANTES do payload: é este valor que entra na cadeia, e ele sobrevive
+  -- ao expurgo do texto.
+  NEW.justificativa_hash := encode(sha256(coalesce(NEW.justificativa, '')::bytea), 'hex');
+
   v_payload := coalesce(v_prev, 'genesis:' || NEW.tenant_id::text)
             || '|' || NEW.ocorrido_em::text
             || '|' || coalesce(NEW.ator_id::text, '-')
@@ -791,7 +1049,8 @@ BEGIN
             || '|' || coalesce(NEW.recurso_id, '-')
             || '|' || coalesce(NEW.finalidade, '-')
             || '|' || array_to_string(NEW.campos, ',')
-            || '|' || NEW.resultado;
+            || '|' || NEW.resultado
+            || '|' || NEW.justificativa_hash;
 
   NEW.hash_anterior := v_prev;
   NEW.hash := encode(sha256(v_payload::bytea), 'hex');
@@ -810,9 +1069,63 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- O trail é append-only, com UMA exceção nomeada: o expurgo da PII do operador.
+--
+-- Sem exceção alguma, `ip`, `user_agent` e `justificativa` ficariam para sempre
+-- — dado pessoal de colaborador sem prazo, que é o que a auditoria apontou. Com
+-- exceção larga (um `GRANT UPDATE` e boa-fé), o append-only vira convenção. A
+-- saída é uma exceção que o próprio banco delimita: qualquer UPDATE que mexa em
+-- outra coisa, ou que não zere as três, é recusado aqui.
+CREATE OR REPLACE FUNCTION audit_log_expurgo_de_pii() RETURNS TRIGGER AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Tabela audit_log é append-only: DELETE não é permitido.';
+  END IF;
+  IF NEW.ip IS NOT NULL OR NEW.user_agent IS NOT NULL OR NEW.justificativa IS NOT NULL THEN
+    RAISE EXCEPTION 'audit_log: a única atualização permitida zera ip, user_agent e justificativa.';
+  END IF;
+  IF NEW.pii_expurgada_em IS NULL THEN
+    RAISE EXCEPTION 'audit_log: o expurgo de PII precisa carimbar pii_expurgada_em.';
+  END IF;
+  IF (NEW.id, NEW.tenant_id, NEW.ocorrido_em, NEW.ator_id, NEW.ator_tipo, NEW.acao,
+      NEW.recurso_tipo, NEW.recurso_id, NEW.finalidade, NEW.base_legal, NEW.campos,
+      NEW.resultado, NEW.justificativa_hash, NEW.hash_anterior, NEW.hash)
+     IS DISTINCT FROM
+     (OLD.id, OLD.tenant_id, OLD.ocorrido_em, OLD.ator_id, OLD.ator_tipo, OLD.acao,
+      OLD.recurso_tipo, OLD.recurso_id, OLD.finalidade, OLD.base_legal, OLD.campos,
+      OLD.resultado, OLD.justificativa_hash, OLD.hash_anterior, OLD.hash) THEN
+    RAISE EXCEPTION 'audit_log: o expurgo de PII não altera nenhum outro campo.';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TRIGGER audit_log_imutavel
   BEFORE UPDATE OR DELETE ON audit_log
-  FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
+  FOR EACH ROW EXECUTE FUNCTION audit_log_expurgo_de_pii();
+
+-- O expurgo em si, por lote e idempotente: a linha já expurgada não volta.
+CREATE OR REPLACE FUNCTION gov.expurgar_pii_do_trail(p_tenant UUID, p_hoje DATE, p_limite INT DEFAULT 5000)
+RETURNS BIGINT AS $$
+DECLARE
+  v_afetadas BIGINT;
+BEGIN
+  WITH alvo AS (
+    SELECT id FROM audit_log
+     WHERE tenant_id = p_tenant
+       AND pii_expurgada_em IS NULL
+       AND pii_expurgo_ate <= p_hoje
+       AND (ip IS NOT NULL OR user_agent IS NOT NULL OR justificativa IS NOT NULL)
+     ORDER BY pii_expurgo_ate, id      -- keyset pelo índice parcial, nunca OFFSET
+     LIMIT p_limite
+  )
+  UPDATE audit_log a
+     SET ip = NULL, user_agent = NULL, justificativa = NULL, pii_expurgada_em = now()
+    FROM alvo WHERE a.id = alvo.id;
+  GET DIAGNOSTICS v_afetadas = ROW_COUNT;
+  RETURN v_afetadas;
+END;
+$$ LANGUAGE plpgsql;
 
 CREATE TRIGGER risco_reclassificacao_imutavel
   BEFORE UPDATE OR DELETE ON risco_reclassificacao
@@ -840,7 +1153,10 @@ BEGIN
      || '|' || coalesce(r.recurso_id, '-')
      || '|' || coalesce(r.finalidade, '-')
      || '|' || array_to_string(r.campos, ',')
-     || '|' || r.resultado)::bytea), 'hex');
+     || '|' || r.resultado
+     -- Lido da coluna, não recalculado do texto: é exatamente por isso que a
+     -- verificação continua íntegra depois de a justificativa ser expurgada.
+     || '|' || coalesce(r.justificativa_hash, ''))::bytea), 'hex');
 
     linha_id := r.id; esperado := v_calc; encontrado := r.hash; integro := (v_calc = r.hash);
     RETURN NEXT;

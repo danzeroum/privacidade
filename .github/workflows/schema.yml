@@ -1,0 +1,74 @@
+# O schema executado, e não só versionado.
+#
+# `db/schema.sql`, `db/seed.sql` e `db/tests.sql` estavam fora do CI: as
+# constraints que este repositório apresenta como prova de conformidade — Art.
+# 11, Art. 12, Art. 18-VI, Art. 33, Art. 37 — nunca tinham rodado contra um
+# Postgres. Um CHECK que ninguém executa é da mesma família da retenção que
+# ninguém executava: uma afirmação.
+#
+# O job sobe Postgres 16, aplica o schema, carrega a massa e roda as
+# invariantes com `ON_ERROR_STOP=1`. Cada bloco de `db/tests.sql` tenta violar
+# uma regra e espera ser barrado; um `assert_falha` que passa derruba o job.
+#
+# Como nos outros dois workflows, nenhuma etapa aqui tolera falha, e a palavra
+# que faria isso não aparece no arquivo — de propósito, para que uma varredura
+# simples confirme a ausência.
+name: Schema
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: schema-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  invariantes:
+    name: Constraints e invariantes do banco
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lastro
+          POSTGRES_PASSWORD: lastro
+          POSTGRES_DB: gov
+        ports: ['5432:5432']
+        # Sem o healthcheck, o primeiro psql corre contra um servidor que ainda
+        # está subindo e o job falha por corrida, não por defeito.
+        options: >-
+          --health-cmd "pg_isready -U lastro -d gov"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: lastro
+      PGPASSWORD: lastro
+      PGDATABASE: gov
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Instalar cliente do Postgres
+        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
+
+      - name: Aplicar o schema
+        run: psql -v ON_ERROR_STOP=1 -q -f db/schema.sql
+
+      - name: Carregar a massa de demonstração
+        run: psql -v ON_ERROR_STOP=1 -q -f db/seed.sql
+
+      # `db/tests.sql` usa \copy com caminho relativo à raiz do repositório para
+      # ler db/retencao-casos.csv — o mesmo arquivo que a suíte do app consome.
+      # É onde a derivação em SQL e a de TypeScript se encontram.
+      - name: Invariantes
+        run: psql -v ON_ERROR_STOP=1 -f db/tests.sql

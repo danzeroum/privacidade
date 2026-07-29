@@ -317,6 +317,14 @@ export const POLITICAS: PoliticaRota[] = [
   { metodo: 'GET', caminho: /^risks(\/.*)?$/, tipo: 'leitura', foraDeEscopo: '403', nota: 'Matriz de risco.' },
   { metodo: 'PATCH', caminho: /^risks\/[^/]+$/, tipo: 'escrita', foraDeEscopo: '403', acao: 'gerenciar_risco', nota: 'Reclassificação de risco.' },
   { metodo: 'POST', caminho: /^purge\/[^/]+\/verificar$/, tipo: 'escrita', foraDeEscopo: '403', nota: 'Verificação de lote de expurgo.' },
+  {
+    metodo: 'GET', caminho: /^retencao$/, tipo: 'leitura', foraDeEscopo: '403',
+    nota: 'O ciclo de vida do dado. Leitura ampla: prazo vencido escondido de quem audita é prazo que ninguém cobra.',
+  },
+  {
+    metodo: 'POST', caminho: /^purge\/executar$/, tipo: 'escrita', foraDeEscopo: '403', acao: 'rodar_expurgo',
+    nota: 'Executa o expurgo do dia. Grava antes de eliminar; falha de log derruba a execução inteira.',
+  },
   { metodo: 'GET', caminho: /^kms(\/.*)?$/, tipo: 'leitura', foraDeEscopo: '403', nota: 'Chaves e rotação.' },
   {
     metodo: 'POST', caminho: /^kms\/[^/]+\/(agendar-rotacao|promover-canary)$/,

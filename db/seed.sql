@@ -67,14 +67,17 @@ INSERT INTO lia_dataset (lia_id, dataset_id) VALUES
   ('66666666-6666-4666-8666-000000000001','55555555-5555-4555-8555-000000000001');
 
 -- ---------- campos do catálogo ---------------------------------------------
-INSERT INTO campo (id, dataset_id, nome, tipo_armazenado, categoria, sensivel, origem, finalidade, base_legal, lia_id, retencao, retencao_fonte) VALUES
-  ('77777777-7777-4777-8777-000000000001','55555555-5555-4555-8555-000000000001','cpf','hash','pessoal',false,'frontend_form','Identificação do titular para emissão de nota fiscal','execucao_contrato',NULL,'P5Y','Lei 8.846/1994 + Art. 7º, II'),
-  ('77777777-7777-4777-8777-000000000002','55555555-5555-4555-8555-000000000001','renda','criptografado','pessoal',false,'frontend_form','Análise de capacidade de pagamento','execucao_contrato',NULL,'P2Y','Encerramento contratual + 24 meses'),
-  ('77777777-7777-4777-8777-000000000003','55555555-5555-4555-8555-000000000001','score_serasa','criptografado','pessoal',false,'API Serasa','Avaliação de risco de inadimplência','protecao_credito',NULL,'P90D','Art. 7º, X'),
-  ('77777777-7777-4777-8777-000000000004','55555555-5555-4555-8555-000000000001','historico_compras','hmac','pseudonimizado',false,'eventos de transação','Enriquecimento do modelo de scoring','legitimo_interesse','66666666-6666-4666-8666-000000000001','P180D','LIA-SCORING-001'),
-  ('77777777-7777-4777-8777-000000000005','55555555-5555-4555-8555-000000000002','shap_values','agregado','anonimizado',false,'modelo LLM','Explicabilidade da decisão automatizada (Art. 20)','protecao_credito',NULL,'P90D','Art. 20, §1º'),
-  ('77777777-7777-4777-8777-000000000006','55555555-5555-4555-8555-000000000003','email','hmac','pseudonimizado',false,'frontend_form','Comunicação transacional','execucao_contrato',NULL,'consentimento_revogado','Art. 7º, V'),
-  ('77777777-7777-4777-8777-000000000007','55555555-5555-4555-8555-000000000003','biometria_facial','criptografado','sensivel',true,'app mobile','Prova de vida no onboarding','consentimento',NULL,'P30D','Art. 11, I');
+-- `fato_gerador`, `registros_estimados` e `registro_mais_antigo_em` são novos:
+-- sem eles `retencao_ate` não deriva, e a retenção continuaria sendo um texto
+-- que ninguém executa. O marco mais antigo é o que vence primeiro.
+INSERT INTO campo (id, dataset_id, nome, tipo_armazenado, categoria, sensivel, origem, finalidade, base_legal, lia_id, retencao, retencao_fonte, fato_gerador, registros_estimados, registro_mais_antigo_em) VALUES
+  ('77777777-7777-4777-8777-000000000001','55555555-5555-4555-8555-000000000001','cpf','hash','pessoal',false,'frontend_form','Identificação do titular para emissão de nota fiscal','execucao_contrato',NULL,'P5Y','Lei 8.846/1994 + Art. 7º, II','coleta',1204873, current_date - INTERVAL '3 years'),
+  ('77777777-7777-4777-8777-000000000002','55555555-5555-4555-8555-000000000001','renda','criptografado','pessoal',false,'frontend_form','Análise de capacidade de pagamento','execucao_contrato',NULL,'P2Y','Encerramento contratual + 24 meses','fim_do_contrato',842190, current_date - INTERVAL '18 months'),
+  ('77777777-7777-4777-8777-000000000003','55555555-5555-4555-8555-000000000001','score_serasa','criptografado','pessoal',false,'API Serasa','Avaliação de risco de inadimplência','protecao_credito',NULL,'P90D','Art. 7º, X','ultima_atualizacao',418902, current_date - INTERVAL '60 days'),
+  ('77777777-7777-4777-8777-000000000004','55555555-5555-4555-8555-000000000001','historico_compras','hmac','pseudonimizado',false,'eventos de transação','Enriquecimento do modelo de scoring','legitimo_interesse','66666666-6666-4666-8666-000000000001','P180D','LIA-SCORING-001','coleta',1284502, current_date - INTERVAL '186 days'),
+  ('77777777-7777-4777-8777-000000000005','55555555-5555-4555-8555-000000000002','shap_values','agregado','anonimizado',false,'modelo LLM','Explicabilidade da decisão automatizada (Art. 20)','protecao_credito',NULL,'P90D','Art. 20, §1º','coleta',96331, current_date - INTERVAL '30 days'),
+  ('77777777-7777-4777-8777-000000000006','55555555-5555-4555-8555-000000000003','email','hmac','pseudonimizado',false,'frontend_form','Comunicação transacional','execucao_contrato',NULL,'consentimento_revogado','Art. 7º, V','revogacao_do_consentimento',31207, NULL),
+  ('77777777-7777-4777-8777-000000000007','55555555-5555-4555-8555-000000000003','biometria_facial','criptografado','sensivel',true,'app mobile','Prova de vida no onboarding','consentimento',NULL,'P30D','Art. 11, I','coleta',8412, current_date - INTERVAL '12 days');
 
 INSERT INTO compartilhamento (campo_id, destino, papel_destino, finalidade, transferencia_internacional, pais_destino, mecanismo, evidencia_uri, evidencia_hash, dpa_assinado, dpa_expira_em, sla_incidente_horas) VALUES
   ('77777777-7777-4777-8777-000000000004','OpenAI','operador','Enriquecimento textual para o modelo de scoring',true,'EUA','clausulas_padrao_anpd','s3://gov-docs/dpa/openai-scc.pdf','d4e5f60718293a4b5c6d7e8f9012345678abcdef0123456789abcdef01234567',true,DATE '2027-08-01',24),
@@ -212,18 +215,20 @@ SELECT id,'dec_9f21c7','credit-scoring v2.3.1', false,
 FROM solicitacao_titular WHERE protocolo = '2026-0729';
 
 -- ---------- expurgo ---------------------------------------------------------
-INSERT INTO expurgo_run (id, tenant_id, data_referencia, origem, status, registros_total, iniciado_em, concluido_em, relatorio_uri, relatorio_hash) VALUES
- ('bbbbbbbb-bbbb-4bbb-8bbb-000000000001','11111111-1111-4111-8111-111111111111', current_date,'cron','concluido',18432, now() - INTERVAL '9 hours', now() - INTERVAL '8 hours 41 minutes','s3://gov-docs/expurgo/2026-07-28.pdf','c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3'),
- ('bbbbbbbb-bbbb-4bbb-8bbb-000000000002','11111111-1111-4111-8111-111111111111', current_date - 1,'cron','concluido',17110, now() - INTERVAL '33 hours', now() - INTERVAL '32 hours 44 minutes','s3://gov-docs/expurgo/2026-07-27.pdf','e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f7'),
- ('bbbbbbbb-bbbb-4bbb-8bbb-000000000003','11111111-1111-4111-8111-111111111111', current_date - 2,'cron','parcial',9204, now() - INTERVAL '57 hours', now() - INTERVAL '56 hours 30 minutes',NULL,NULL);
+-- `registros_total` saiu da tabela: o total vem de gov.expurgo_run_resumo,
+-- somando os lotes. Contador diverge do que foi contado; soma, não.
+INSERT INTO expurgo_run (id, tenant_id, data_referencia, origem, status, iniciado_em, concluido_em, relatorio_uri, relatorio_hash) VALUES
+ ('bbbbbbbb-bbbb-4bbb-8bbb-000000000001','11111111-1111-4111-8111-111111111111', current_date,'cron','concluido', now() - INTERVAL '9 hours', now() - INTERVAL '8 hours 41 minutes','s3://gov-docs/expurgo/2026-07-28.pdf','c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3'),
+ ('bbbbbbbb-bbbb-4bbb-8bbb-000000000002','11111111-1111-4111-8111-111111111111', current_date - 1,'cron','concluido', now() - INTERVAL '33 hours', now() - INTERVAL '32 hours 44 minutes','s3://gov-docs/expurgo/2026-07-27.pdf','e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f7'),
+ ('bbbbbbbb-bbbb-4bbb-8bbb-000000000003','11111111-1111-4111-8111-111111111111', current_date - 2,'cron','parcial', now() - INTERVAL '57 hours', now() - INTERVAL '56 hours 30 minutes',NULL,NULL);
 
-INSERT INTO expurgo_entrada (expurgo_run_id, sistema_slug, tabela, campo_tipo, metodo, registros, ids_afetados_hash, hash_pre, hash_pos, verificado_em, verificado_por, integro) VALUES
- ('bbbbbbbb-bbbb-4bbb-8bbb-000000000001','credit-scoring','decisoes_ia','shap_values','hard_delete',8120,'sha256:41ab…9d0e','a3f19c2b4d6e8f0a1b3c5d7e9f1a3b5c','7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b', now() - INTERVAL '8 hours','22222222-2222-4222-8222-000000000003',true),
- ('bbbbbbbb-bbbb-4bbb-8bbb-000000000001','credit-scoring','historico_compras','pseudonimizado','crypto_shredding',6301,'sha256:88cd…14fa','b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5','1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b', now() - INTERVAL '8 hours','22222222-2222-4222-8222-000000000003',true),
- ('bbbbbbbb-bbbb-4bbb-8bbb-000000000001','onboarding','biometria_facial','sensivel','crypto_shredding',411,'sha256:c1e2…77bb','d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7','3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d', now() - INTERVAL '8 hours','22222222-2222-4222-8222-000000000003',true),
- ('bbbbbbbb-bbbb-4bbb-8bbb-000000000001','analytics','eventos_brutos','pessoal','compactacao_log',3600,'sha256:02fa…3c9d','f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1','5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f',NULL,NULL,NULL),
- ('bbbbbbbb-bbbb-4bbb-8bbb-000000000002','credit-scoring','decisoes_ia','shap_values','hard_delete',9902,'sha256:7ab1…55ce','c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9','9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f', now() - INTERVAL '32 hours','22222222-2222-4222-8222-000000000003',true),
- ('bbbbbbbb-bbbb-4bbb-8bbb-000000000002','onboarding','cadastros','pessoal','anonimizacao',7208,'sha256:9d0e…41ab','e1f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1','b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9', now() - INTERVAL '32 hours','22222222-2222-4222-8222-000000000003',true);
+INSERT INTO expurgo_entrada (expurgo_run_id, sistema_slug, tabela, campo_tipo, metodo, registros, campo_id, lote_chave, ids_afetados_hash, hash_pre, hash_pos, verificado_em, verificado_por, integro) VALUES
+ ('bbbbbbbb-bbbb-4bbb-8bbb-000000000001','credit-scoring','decisoes_ia','shap_values','hard_delete',8120,'77777777-7777-4777-8777-000000000005','lote:d1:decisoes_ia:0','sha256:41ab…9d0e','a3f19c2b4d6e8f0a1b3c5d7e9f1a3b5c','7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b', now() - INTERVAL '8 hours','22222222-2222-4222-8222-000000000003',true),
+ ('bbbbbbbb-bbbb-4bbb-8bbb-000000000001','credit-scoring','historico_compras','pseudonimizado','crypto_shredding',6301,'77777777-7777-4777-8777-000000000004','lote:d1:historico_compras:0','sha256:88cd…14fa','b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5','1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b', now() - INTERVAL '8 hours','22222222-2222-4222-8222-000000000003',true),
+ ('bbbbbbbb-bbbb-4bbb-8bbb-000000000001','onboarding','biometria_facial','sensivel','crypto_shredding',411,'77777777-7777-4777-8777-000000000007','lote:d1:biometria_facial:0','sha256:c1e2…77bb','d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7','3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d', now() - INTERVAL '8 hours','22222222-2222-4222-8222-000000000003',true),
+ ('bbbbbbbb-bbbb-4bbb-8bbb-000000000001','analytics','eventos_brutos','pessoal','compactacao_log',3600,NULL,'lote:d1:eventos_brutos:0','sha256:02fa…3c9d','f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1','5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f',NULL,NULL,NULL),
+ ('bbbbbbbb-bbbb-4bbb-8bbb-000000000002','credit-scoring','decisoes_ia','shap_values','hard_delete',9902,'77777777-7777-4777-8777-000000000005','lote:d2:decisoes_ia:0','sha256:7ab1…55ce','c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9','9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f', now() - INTERVAL '32 hours','22222222-2222-4222-8222-000000000003',true),
+ ('bbbbbbbb-bbbb-4bbb-8bbb-000000000002','onboarding','cadastros','pessoal','anonimizacao',7208,NULL,'lote:d2:cadastros:0','sha256:9d0e…41ab','e1f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1','b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9', now() - INTERVAL '32 hours','22222222-2222-4222-8222-000000000003',true);
 
 -- ---------- KMS -------------------------------------------------------------
 INSERT INTO kms_chave (id, tenant_id, alias, arn, finalidade, status, criada_em, rotacao_prevista, suporta_cripto_shredding) VALUES

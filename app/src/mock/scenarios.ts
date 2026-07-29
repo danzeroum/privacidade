@@ -350,6 +350,15 @@ const solicitacoesPadrao = (titularIds: string[], sistemas: string[]): Solicitac
  * renomear um para casar com o outro seria consertar pelo lado errado. O que
  * liga os dois é o identificador, declarado aqui.
  */
+
+/**
+ * Marco de fato gerador, relativo a hoje. A massa precisa envelhecer junto com
+ * o relógio: uma data fixa faria "venceu há 6 dias" virar "venceu há 300" na
+ * primeira semana, e a demonstração mentiria sozinha.
+ */
+const diasAtras = (n: number): string =>
+  new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+
 const titular = (
   id: string, prefixo: 'b' | 'v' | 'm', cpf: string, nome: string, email: string,
   extras: { chave: string; rotulo: string; grupo: string; valor: string; mascara: string; catalogo: string; baseLegal: Titular['campos'][number]['baseLegal'] }[],
@@ -381,19 +390,19 @@ const camposBanco: Campo[] = [
   // inventário deixar de ser a fonte da verdade.
   { id: 'b-nome', sistema: 'credit-scoring', dataset: 'clientes', nome: 'nome_completo', tipoArmazenado: 'criptografado', categoria: 'pessoal', sensivel: false, finalidade: 'Identificação do titular no atendimento', finalidadesCompativeis: ['atendimento', 'cobranca', 'auditoria'], baseLegal: 'execucao_contrato', retencao: '5 anos', retencaoDias: 1825, origem: 'formulário web', compartilhamentos: [],
     linhagem: [{ etapa: 'Formulário', detalhe: 'coleta com máscara' }, { etapa: 'PostgreSQL', detalhe: 'envelope encryption' }, { etapa: 'Expurgo', detalhe: '5 anos' }] },
-  { id: 'b-cpf', sistema: 'credit-scoring', dataset: 'clientes', nome: 'cpf', tipoArmazenado: 'hash', categoria: 'pessoal', sensivel: false, finalidade: 'Identificação para emissão de nota fiscal', finalidadesCompativeis: ['atendimento', 'cobranca', 'auditoria'], baseLegal: 'execucao_contrato', retencao: '5 anos', retencaoDias: 1825, origem: 'formulário web', compartilhamentos: [],
+  { id: 'b-cpf', sistema: 'credit-scoring', dataset: 'clientes', nome: 'cpf', tipoArmazenado: 'hash', categoria: 'pessoal', sensivel: false, finalidade: 'Identificação para emissão de nota fiscal', finalidadesCompativeis: ['atendimento', 'cobranca', 'auditoria'], baseLegal: 'execucao_contrato', retencaoIso: 'obrigacao_legal:lei_8846_1994:P5Y', fatoGerador: 'coleta' as const, registrosEstimados: 1_204_873, registroMaisAntigoEm: diasAtras(1095), retencao: '5 anos', retencaoDias: 1825, origem: 'formulário web', compartilhamentos: [],
     linhagem: [{ etapa: 'Formulário', detalhe: 'coleta com máscara' }, { etapa: 'API', detalhe: 'POST, nunca na URL' }, { etapa: 'PostgreSQL', detalhe: 'hash SHA-256 + sal' }, { etapa: 'Expurgo', detalhe: '5 anos, hash pré/pós' }] },
   { id: 'b-renda', sistema: 'credit-scoring', dataset: 'clientes', nome: 'renda', tipoArmazenado: 'criptografado', categoria: 'pessoal', sensivel: false, finalidade: 'Análise de capacidade de pagamento', finalidadesCompativeis: ['cobranca', 'auditoria'], baseLegal: 'execucao_contrato', retencao: '2 anos', retencaoDias: 730, origem: 'formulário web', compartilhamentos: [],
     linhagem: [{ etapa: 'Formulário', detalhe: 'campo obrigatório' }, { etapa: 'API', detalhe: 'DTO por escopo' }, { etapa: 'PostgreSQL', detalhe: 'envelope encryption' }, { etapa: 'Expurgo', detalhe: '2 anos' }] },
-  { id: 'b-score', sistema: 'credit-scoring', dataset: 'clientes', nome: 'score_serasa', tipoArmazenado: 'criptografado', categoria: 'pessoal', sensivel: false, finalidade: 'Risco de inadimplência', finalidadesCompativeis: ['cobranca', 'auditoria'], baseLegal: 'protecao_credito', retencao: '90 dias', retencaoDias: 90, origem: 'API Serasa',
+  { id: 'b-score', sistema: 'credit-scoring', dataset: 'clientes', nome: 'score_serasa', tipoArmazenado: 'criptografado', categoria: 'pessoal', sensivel: false, finalidade: 'Risco de inadimplência', finalidadesCompativeis: ['cobranca', 'auditoria'], baseLegal: 'protecao_credito', retencaoIso: 'P90D', fatoGerador: 'ultima_atualizacao' as const, registrosEstimados: 418_902, registroMaisAntigoEm: diasAtras(60), retencao: '90 dias', retencaoDias: 90, origem: 'API Serasa',
     compartilhamentos: [{ destino: 'Serasa', finalidade: 'Consulta de score', internacional: false, mecanismo: 'nao_aplicavel' }],
     linhagem: [{ etapa: 'Serasa', detalhe: 'consulta autorizada', externo: true }, { etapa: 'API', detalhe: 'cache de 24h' }, { etapa: 'PostgreSQL', detalhe: 'envelope encryption' }, { etapa: 'Expurgo', detalhe: '90 dias' }] },
-  { id: 'b-hist', sistema: 'credit-scoring', dataset: 'clientes', nome: 'historico_compras', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, finalidade: 'Enriquecimento do modelo de scoring', finalidadesCompativeis: ['auditoria'], baseLegal: 'legitimo_interesse', liaCodigo: 'LIA-SCORING-001', retencao: '180 dias', retencaoDias: 180, origem: 'eventos de transação',
+  { id: 'b-hist', sistema: 'credit-scoring', dataset: 'clientes', nome: 'historico_compras', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, finalidade: 'Enriquecimento do modelo de scoring', finalidadesCompativeis: ['auditoria'], baseLegal: 'legitimo_interesse', liaCodigo: 'LIA-SCORING-001', retencaoIso: 'P180D', fatoGerador: 'coleta' as const, registrosEstimados: 1_284_502, registroMaisAntigoEm: diasAtras(186), retencao: '180 dias', retencaoDias: 180, origem: 'eventos de transação',
     compartilhamentos: [{ destino: 'OpenAI', finalidade: 'Enriquecimento textual do modelo', internacional: true, pais: 'EUA', mecanismo: 'clausulas_padrao_anpd', evidencia: 'dpa/openai-scc.pdf' }],
     linhagem: [{ etapa: 'Transações', detalhe: 'eventos agregados' }, { etapa: 'Pseudonimizador', detalhe: 'HMAC + KMS' }, { etapa: 'OpenAI', detalhe: 'EUA · SCC ANPD', externo: true }, { etapa: 'Decisão', detalhe: 'SHAP registrado' }, { etapa: 'Expurgo', detalhe: '180 dias' }] },
   { id: 'b-shap', sistema: 'credit-scoring', dataset: 'decisoes_ia', nome: 'shap_values', tipoArmazenado: 'agregado', categoria: 'anonimizado', sensivel: false, finalidade: 'Explicabilidade da decisão (Art. 20)', finalidadesCompativeis: ['auditoria'], baseLegal: 'protecao_credito', retencao: '90 dias', retencaoDias: 90, origem: 'modelo de scoring', compartilhamentos: [],
     linhagem: [{ etapa: 'Modelo', detalhe: 'saída agregada' }, { etapa: 'PostgreSQL', detalhe: 'sem identificador direto' }, { etapa: 'Expurgo', detalhe: '90 dias' }] },
-  { id: 'b-bio', sistema: 'onboarding', dataset: 'cadastros', nome: 'biometria_facial', tipoArmazenado: 'criptografado', categoria: 'sensivel', sensivel: true, finalidade: 'Prova de vida no onboarding', finalidadesCompativeis: [], baseLegal: 'consentimento', retencao: '30 dias', retencaoDias: 30, origem: 'app mobile', compartilhamentos: [],
+  { id: 'b-bio', sistema: 'onboarding', dataset: 'cadastros', nome: 'biometria_facial', tipoArmazenado: 'criptografado', categoria: 'sensivel', sensivel: true, finalidade: 'Prova de vida no onboarding', finalidadesCompativeis: [], baseLegal: 'consentimento', retencaoIso: 'P30D', fatoGerador: 'coleta' as const, registrosEstimados: 8_412, registroMaisAntigoEm: diasAtras(12), retencao: '30 dias', retencaoDias: 30, origem: 'app mobile', compartilhamentos: [],
     linhagem: [{ etapa: 'App', detalhe: 'captura com consentimento destacado' }, { etapa: 'KMS', detalhe: 'DEK por titular' }, { etapa: 'Cripto-shredding', detalhe: '30 dias' }] },
   { id: 'b-email', sistema: 'onboarding', dataset: 'cadastros', nome: 'email', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, finalidade: 'Comunicação transacional', finalidadesCompativeis: ['atendimento'], baseLegal: 'execucao_contrato', retencao: 'até revogação', retencaoDias: null, origem: 'formulário web',
     compartilhamentos: [{ destino: 'SendGrid', finalidade: 'Entrega de e-mail transacional', internacional: true, pais: 'EUA', mecanismo: 'clausulas_padrao_anpd', evidencia: 'dpa/sendgrid-scc.pdf' }],

@@ -1442,6 +1442,64 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/Epico' }
 
+  /retencao:
+    get:
+      tags: [expurgo]
+      summary: Ciclo de vida do dado — o que vence, quando, e com que prova
+      description: |
+        A tabela da T6. Cada campo carrega `retencao_ate` **calculada** a partir do domínio
+        `retencao` e do fato gerador declarado no ROPA, não um texto como "5 anos". Três estados:
+        *a vencer*, *vencido sem expurgo* e *expurgo comprovado*.
+
+        Prazo vencido sem execução abre achado automaticamente — prazo que não faz nada é rótulo,
+        e rótulo não cumpre o Art. 16.
+      responses:
+        '200':
+          description: Situação de cada campo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hoje: { type: string, format: date }
+                  campos:
+                    type: array
+                    items: { $ref: '#/components/schemas/CicloDeVida' }
+
+  /purge/executar:
+    post:
+      tags: [expurgo]
+      summary: Executa o expurgo do dia, por lote e de forma idempotente
+      description: |
+        Percorre os campos vencidos e elimina em lotes, gravando **antes** de eliminar. Cada lote
+        produz contagem pré, contagem pós e hash, encadeados no trail.
+
+        **Idempotente:** a chave do lote deriva de tabela, campo, data de referência e índice —
+        coisas imutáveis. Reexecutar a mesma data não duplica registro nem reconta eliminados.
+
+        **Transacional:** falha de log em qualquer lote derrubra a execução inteira e devolve 503;
+        nada é eliminado sem par pré/pós no trail.
+
+        Obrigação legal prevalece sobre eliminação: o campo retido volta em `recusados[]`, com a
+        norma e a data — nunca como erro.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data_referencia: { type: string, format: date }
+                limite: { type: integer, minimum: 1, description: Tamanho do lote. }
+      responses:
+        '200':
+          description: Execução concluída
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExecucaoDeExpurgo' }
+        '403':
+          description: Papel sem `rodar_expurgo`.
+        '503': { $ref: '#/components/responses/FalhaDeRegistro' }
+
   /purge/runs:
     post:
       tags: [expurgo]
@@ -2309,6 +2367,66 @@ components:
             Contagem agregada. A prova **por titular** é do portal
             (`GET /me/consentimentos`) — e a entidade de consentimento por titular no schema de
             produção é o Risco-002, ainda aberto.
+
+    CicloDeVida:
+      type: object
+      required: [campo, retencao, fato_gerador, estado]
+      properties:
+        campo: { type: string, examples: ['eventos.payload'] }
+        retencao: { type: string, examples: ['P180D', 'obrigacao_legal:lei_8846_1994:P5Y'] }
+        fato_gerador:
+          type: string
+          enum: [coleta, ultima_atualizacao, fim_do_contrato, revogacao_do_consentimento, encerramento_da_solicitacao]
+        retencao_ate:
+          type: string
+          format: date
+          nullable: true
+          description: 'Derivada no servidor. Nula significa "ainda não há fato gerador", nunca "sem prazo".'
+        registros: { type: integer }
+        atraso_dias: { type: integer }
+        prova_pre_pos: { type: string, nullable: true }
+        estado: { type: string, enum: [a_vencer, vencido_sem_expurgo, expurgo_comprovado, sem_prazo] }
+        achado: { type: string, nullable: true, description: 'Código do achado aberto pelo motor.' }
+
+    ExecucaoDeExpurgo:
+      type: object
+      required: [data_referencia, registros_total, entradas]
+      properties:
+        data_referencia: { type: string, format: date }
+        registros_total:
+          type: integer
+          description: Somado das entradas — nunca um contador.
+        lotes: { type: integer }
+        lotes_ignorados:
+          type: integer
+          description: Lotes que já constavam da mesma data de referência. É a idempotência visível.
+        entradas:
+          type: array
+          items:
+            type: object
+            properties:
+              campo_id: { type: string }
+              tabela: { type: string }
+              metodo: { type: string, enum: [hard_delete, crypto_shredding, anonimizacao, compactacao_log] }
+              lote_chave: { type: string }
+              registros: { type: integer }
+              restante_antes: { type: integer }
+              restante_depois: { type: integer }
+              hash_pre: { type: string }
+              hash_pos: { type: string }
+        recusados:
+          type: array
+          description: Campos que a obrigação legal impede de eliminar, com norma e data.
+          items:
+            type: object
+            properties:
+              campo_id: { type: string }
+              norma: { type: string }
+              retencao_ate: { type: string, format: date, nullable: true }
+              motivo: { type: string }
+        achados:
+          type: array
+          items: { type: string }
 
     ExpurgoRun:
       type: object

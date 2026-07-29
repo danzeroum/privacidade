@@ -78,6 +78,12 @@ export class BancoMock {
   /** Oposições por titular (Art. 18, §2º), uma por LIA. */
   oposicoesTitular: OposicaoTitular[] = [];
 
+  /**
+   * As chaves de lote já executadas — o `UNIQUE (lote_chave)` do schema, em
+   * memória. É o que faz a segunda execução do mesmo dia ser no-op.
+   */
+  lotesDeExpurgo = new Set<string>();
+
   private proximoIdPortal = 1;
 
   /** Identificador sequencial do portal. Separado do `proximoId` do trail de propósito. */
@@ -157,12 +163,52 @@ export class BancoMock {
   }
 
   // ── auditoria ────────────────────────────────────────────────────────────
+  /**
+   * O selo da justificativa entra na cadeia; o texto, não.
+   *
+   * É a fronteira entre dois riscos que se atropelariam. A cadeia precisa
+   * cobrir a justificativa — é o campo mais exposto do trail, e sem ele um
+   * texto adulterado passa sem detecção. E o trail precisa poder **expurgar** a
+   * justificativa, que é dado pessoal do operador e não tinha prazo nenhum até
+   * aqui. Selar o hash resolve os dois: adulterar o texto continua detectável,
+   * e apagá-lo preserva a cadeia.
+   *
+   * A mesma regra está no trigger `audit_log_encadeia()` de `db/schema.sql`, e
+   * é provada lá: `db/tests.sql` expurga a PII do trail e confere que a
+   * verificação de integridade continua fechando.
+   */
   private calcularHash(l: Omit<AuditLinha, 'hash'>): string {
     return sha256([
       l.hashAnterior ?? 'genesis',
       l.ocorridoEm, l.ator, l.acao, l.recursoTipo, l.recursoId,
       l.finalidade ?? '-', l.protocolo ?? '-', l.campos.join(','), l.resultado,
+      sha256(l.justificativa ?? ''),
     ].join('|'));
+  }
+
+  /**
+   * Expurga a PII do operador das linhas vencidas, preservando a cadeia.
+   *
+   * Idempotente: a linha já expurgada carrega `piiExpurgadaEm` e não volta.
+   * `hoje` é parâmetro porque simular a passagem do tempo editando o carimbo
+   * das linhas seria editar dado selado — e dado selado editado não é
+   * simulação, é adulteração com outro nome.
+   */
+  expurgarPiiDoTrail(hojeMs: number, limite = 5_000): number {
+    let n = 0;
+    for (const l of this.auditoria) {
+      if (n >= limite) break;
+      if (l.piiExpurgadaEm) continue;
+      const vence = Date.parse(l.ocorridoEm) + 30 * 24 * 60 * 60 * 1000;
+      if (vence > hojeMs) continue;
+      if (!l.justificativa && !l.ip && !l.userAgent) continue;
+      l.justificativa = undefined;
+      l.ip = undefined;
+      l.userAgent = undefined;
+      l.piiExpurgadaEm = new Date(hojeMs).toISOString();
+      n += 1;
+    }
+    return n;
   }
 
   auditAppend(e: EntradaAudit): AuditLinha {
@@ -195,7 +241,12 @@ export class BancoMock {
       resultado: e.resultado ?? 'sucesso',
       hashAnterior: anterior ? anterior.hash : null,
     };
-    const linha: AuditLinha = { ...parcial, hash: this.calcularHash(parcial) };
+    const linha: AuditLinha = {
+      ...parcial,
+      // O selo é gravado junto e sobrevive ao expurgo do texto.
+      justificativaSelo: e.justificativa ?? '',
+      hash: this.calcularHash(parcial),
+    };
     this.auditoria.push(linha);
     return linha;
   }
@@ -242,7 +293,10 @@ export class BancoMock {
       const esperado = this.calcularHash({
         id: l.id, ocorridoEm: l.ocorridoEm, ator: l.ator, atorPapel: l.atorPapel,
         acao: l.acao, recursoTipo: l.recursoTipo, recursoId: l.recursoId,
-        finalidade: l.finalidade, justificativa: l.justificativa, protocolo: l.protocolo,
+        finalidade: l.finalidade, protocolo: l.protocolo,
+        // Lido do selo, não recalculado do texto: é exatamente por isso que a
+        // verificação continua íntegra depois de a justificativa ser expurgada.
+        justificativa: l.justificativaSelo ?? l.justificativa,
         campos: l.campos, resultado: l.resultado, hashAnterior: anterior,
       });
       if (esperado !== l.hash && divergencia === null) divergencia = l.id;
