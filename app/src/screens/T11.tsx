@@ -66,7 +66,7 @@ export default function T11() {
       <Cabecalho
         fontes={['Art. 6º, X · responsabilização', 'audit_log · hash encadeado']}
         titulo="Achados e planos de ação"
-        resumo="O ciclo do achado do jeito que a auditoria cobra: causa antes de plano, critério antes de execução, e encerramento só depois de alguém que não executou dizer que funcionou."
+        resumo="Todo achado — de auditoria, do gate de privacidade ou de um incidente — corre um ciclo com causa raiz, plano com critério de eficácia, evidência e verificação independente. Encerrar antes de verificar é recusado."
         nota={{
           engenharia: 'A causa raiz, o plano e a execução são seus. O que você executou, você não verifica — a rota recusa o mesmo nome dos dois lados.',
           dpo: 'Você opera o ciclo inteiro e costuma ser quem verifica. Verificar é dizer se o critério foi atingido; encerrar é o ato seguinte, e só existe se a resposta foi sim.',
@@ -76,30 +76,53 @@ export default function T11() {
         }}
       />
 
+      <Cartao titulo="Achados em aberto" className="topo-14">
+        <Tabela cabecalho={['Código', 'Origem', 'Criticidade', 'Estado', 'Reincidência']}>
+          {achados.map((a) => (
+            <tr
+              key={a.id}
+              style={a.id === achado.id ? { background: 'var(--accent-soft)' } : undefined}
+            >
+              <td>
+                {/* O desenho seleciona pela linha. Um botão dentro da célula
+                    mantém o mesmo gesto e não deixa a seleção fora do teclado,
+                    que é o que uma `<tr onClick>` faria. */}
+                <button
+                  className="reveal mono"
+                  aria-pressed={a.id === achado.id}
+                  onClick={() => setSelecionado(a.id)}
+                >
+                  {a.codigo}
+                </button>
+              </td>
+              <td>{a.origem}</td>
+              <td><Pill tom={TOM[a.criticidade]}>{a.criticidade}</Pill></td>
+              <td>{ROTULO[a.status].toLowerCase()}</td>
+              <td className="hint">
+                {a.reincidencias === 0 ? '—' : `${a.reincidencias}ª reabertura`}
+              </td>
+            </tr>
+          ))}
+        </Tabela>
+        <Nota>
+          Selecionar define o achado de trabalho. Engenharia e o DPO operam por{' '}
+          <span className="mono">gerenciar_achado</span> — quando a ação virou própria, a segurança
+          deixou de ver o achado que não conduz.
+        </Nota>
+      </Cartao>
+
       <FaixaDoAchado achado={achado} />
 
-      {achados.length > 1 && (
-        <div className="row" style={{ marginTop: 12 }}>
-          {achados.map((a) => (
-            <button
-              key={a.id}
-              className="reveal mono"
-              aria-pressed={a.id === achado.id}
-              onClick={() => setSelecionado(a.id)}
-            >
-              {a.id === achado.id ? '● ' : ''}{a.codigo} · {ROTULO[a.status].toLowerCase()}
-            </button>
-          ))}
-        </div>
-      )}
-
       <div className="grid g2" style={{ marginTop: 14 }}>
-        <AnaliseEPlano achado={achado} />
-        <PainelDoCiclo achado={achado} />
+        <Diagnostico achado={achado} />
+        <PlanoDeAcao achado={achado} />
       </div>
 
-      <div className="sec-title">Cadeia de custódia</div>
+      <div className="sec-title">Evidências — cadeia de custódia</div>
       <CadeiaDeCustodia achado={achado} />
+
+      <div className="sec-title">Próxima ação</div>
+      <PainelDoCiclo achado={achado} />
     </>
   );
 }
@@ -152,24 +175,43 @@ function FaixaDoAchado({ achado }: { achado: Achado }) {
 
       {desviado && (
         <Nota tom="crit">
-          <b>{ROTULO[achado.status]}</b> não é etapa do plano: é desvio. O achado voltou para a apuração
-          da causa, com a criticidade elevada e a reincidência contada.
-          {achado.motivoDaReabertura && <> Motivo registrado: <i>{achado.motivoDaReabertura}</i></>}
+          <b>{ROTULO[achado.status]}</b> não é etapa do plano: é desvio. O achado voltou para a
+          apuração da causa, com a criticidade elevada e a reincidência contada.
         </Nota>
       )}
     </>
   );
 }
 
-/** O que já está registrado. Campo vazio aparece como vazio, e não some. */
-function AnaliseEPlano({ achado }: { achado: Achado }) {
+/** O que se sabe do problema. Campo vazio aparece como vazio, e não some. */
+function Diagnostico({ achado }: { achado: Achado }) {
   return (
-    <Cartao titulo="Análise e plano">
+    <Cartao titulo="Diagnóstico">
+      <p style={{ margin: '0 0 12px', fontSize: 13.5, fontWeight: 600 }}>{achado.descricao}</p>
       <dl className="kv">
+        <dt>Origem</dt>
+        <dd>{achado.origem}</dd>
         <dt>Causa raiz</dt>
         <dd>{achado.causaRaiz ?? <span className="hint">não registrada</span>}</dd>
-        <dt>Plano</dt>
-        <dd>{achado.plano ?? <span className="hint">não proposto</span>}</dd>
+      </dl>
+      {achado.reincidencias > 0 && (
+        <Nota tom="crit">
+          Reaberto: a verificação anterior não comprovou o controle. Reincidência eleva a criticidade
+          e leva o encerramento ao comitê.
+          {achado.motivoDaReabertura && <> Motivo registrado: <i>{achado.motivoDaReabertura}</i></>}
+        </Nota>
+      )}
+    </Cartao>
+  );
+}
+
+/** O que se prometeu fazer, e contra o que a verificação vai concluir. */
+function PlanoDeAcao({ achado }: { achado: Achado }) {
+  return (
+    <Cartao titulo="Plano de ação">
+      <dl className="kv">
+        <dt>Ação</dt>
+        <dd>{achado.plano ?? <span className="hint">não proposta</span>}</dd>
         <dt>Critério de eficácia</dt>
         <dd>{achado.criterioDeEficacia ?? <span className="hint">não declarado</span>}</dd>
         <dt>Executado por</dt>
@@ -190,7 +232,7 @@ function AnaliseEPlano({ achado }: { achado: Achado }) {
         </dd>
       </dl>
       <Nota>
-        O critério de eficácia é declarado no plano, <b>antes</b> de executar. Declarado depois, ele é
+        O critério de eficácia é declarado aqui, <b>antes</b> de executar. Declarado depois, ele é
         escrito por quem já sabe o resultado — e passa a descrever o que aconteceu em vez de cobrar o
         que deveria acontecer.
       </Nota>
@@ -234,16 +276,14 @@ function PainelDoCiclo({ achado }: { achado: Achado }) {
   const previaCausa = redigir(causaRaiz);
 
   return (
-    <Cartao
-      titulo="Avançar o ciclo"
-      hint={`daqui o achado vai para: ${proximos.map((p) => ROTULO[p].toLowerCase()).join(' ou ') || 'nenhum estado'}`}
-    >
+    <Cartao hint={`daqui o achado vai para: ${proximos.map((p) => ROTULO[p].toLowerCase()).join(' ou ') || 'nenhum estado'}`}>
       <Permitido
         acao="gerenciar_achado"
         alternativa={(
           <Nota>
-            O achado é de engenharia e do DPO. O seu papel lê o ciclo, a cadeia de custódia e o trail —
-            e nenhum controle de avanço é montado nesta sessão.
+            Conduzir achado é ação de engenharia e do DPO. Para o seu papel a tela é leitura — nenhum
+            controle de avanço é renderizado, e o ciclo, a cadeia de custódia e o trail continuam
+            inteiros.
           </Nota>
         )}
       >
@@ -498,16 +538,17 @@ function CadeiaDeCustodia({ achado }: { achado: Achado }) {
   );
 
   return (
-    <Cartao hint="cada evidência entra no trail antes de ser anexada ao achado">
+    <Cartao hint="cada evidência entra no audit trail com hash encadeado antes de ser anexada ao achado">
       {achado.evidencias.length === 0 ? (
         <Nota>
           Nenhuma evidência ainda. Ela entra em duas etapas — execução e verificação —, e não em
           qualquer transição: cadeia que aceita anexo em todo passo é depósito, não cadeia.
         </Nota>
       ) : (
-        <Tabela cabecalho={['Etapa', 'Arquivo', 'Quem', 'Aponta para', 'Hash']}>
+        <Tabela cabecalho={['Quando', 'Etapa', 'Evidência', 'Quem', 'Aponta para', 'Hash']}>
           {achado.evidencias.map((e) => (
             <tr key={e.hash}>
+              <td className="mono">{new Date(e.quando).toLocaleDateString('pt-BR')}</td>
               <td>{ROTULO[e.etapa]}</td>
               <td className="mono">{e.arquivo}</td>
               <td>{e.por}</td>

@@ -4491,10 +4491,11 @@ describe('PR 15 · T11 na tela — a fila chega em algum lugar que opera', () =>
       }
       // E não é `disabled` escondendo permissão: não há controle desligado na
       // região do ciclo.
-      const cartao = screen.getByText('Avançar o ciclo').closest('section') as HTMLElement;
+      const cartao = screen.getByText('Próxima ação').nextElementSibling as HTMLElement;
+      expect(cartao.className, `${papel}: âncora da seção`).toContain('card');
       expect(cartao.querySelectorAll('button, input, textarea, select')).toHaveLength(0);
       // A leitura permanece: o auditor perde o ato, não a informação.
-      expect(within(cartao).getByText(/lê o ciclo/)).toBeInTheDocument();
+      expect(within(cartao).getByText(/a tela é leitura/)).toBeInTheDocument();
     }
     cleanup();
 
