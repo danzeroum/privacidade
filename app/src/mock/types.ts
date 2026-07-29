@@ -499,6 +499,16 @@ export interface AuditLinha {
   recursoTipo: string;
   recursoId: string;
   finalidade?: Finalidade;
+  /**
+   * Risco-004 — a base legal que autorizou o tratamento, dentro do payload.
+   *
+   * Estava gravada no banco e fora da cadeia: trocar `consentimento` por
+   * `legitimo_interesse` na linha que registrou o acesso reescrevia a
+   * justificação jurídica do que foi feito, e a verificação de integridade
+   * continuava fechando. O Art. 37 manda registrar a base; selá-la é o que
+   * torna o registro prova em vez de anotação.
+   */
+  baseLegal?: BaseLegal;
   justificativa?: string;
   /**
    * T4-01 — o protocolo sob o qual o acesso aconteceu. Campo próprio, e dentro
@@ -511,11 +521,16 @@ export interface AuditLinha {
   hashAnterior: string | null;
   hash: string;
   /**
-   * O texto da justificativa como estava no append — o que entra no hash é
-   * `sha256` dele. Fica para a verificação poder recomputar a cadeia depois de
-   * o texto ser expurgado (Art. 16 sobre dado de operador, sem quebrar Art. 37).
+   * O **sha256** da justificativa — o digest, não o texto.
+   *
+   * Espelha a coluna `justificativa_hash` de `db/schema.sql`, e é este valor que
+   * entra no payload da cadeia. Obrigatório de propósito: enquanto o selo era
+   * opcional, `calcularHash` hasheava o texto por conta própria, e o campo que
+   * deveria guardar o digest guardava uma **cópia do texto** — de modo que o
+   * expurgo dos 30 dias limpava `justificativa` e deixava a PII do operador
+   * intacta ao lado. Guardar o digest é o que faz o expurgo expurgar.
    */
-  justificativaSelo?: string;
+  justificativaHash: string;
   ip?: string;
   userAgent?: string;
   /** Carimbo do expurgo da PII do operador. Preenchido só pelo caminho controlado. */

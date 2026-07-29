@@ -295,6 +295,10 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         banco.auditAppend({
           ator, atorPapel: papel, acao: 'CAMPO_REVELADO', recursoTipo: 'campo',
           recursoId: `${titularId}/${campo}`, finalidade: req.purpose,
+          // Art. 37: o registro do acesso diz sob qual base legal ele aconteceu,
+          // e a base vem do catálogo — não de quem revela. Quem escolhe a própria
+          // base legal no momento do acesso não está registrando, está alegando.
+          baseLegal: catalogado.baseLegal,
           justificativa: redacao.texto, protocolo, campos: [campo],
         });
       } catch (e) {

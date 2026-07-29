@@ -23,6 +23,29 @@ import type { MarcacaoPbd } from '../mock/pbd';
  * inventário ilegível reprova em vez de virar lista vazia; e evidência de PbD
  * que aponta para arquivo inexistente reprova como se não existisse — porque
  * não existe.
+ *
+ * ## PR 4 · o guardião passa a se vigiar (Risco-003)
+ *
+ * Até aqui a varredura lia **um** arquivo — o log de exemplo — e imprimia
+ * "nenhum achado" enquanto 45 CPFs formatados viviam em 7 arquivos de fonte,
+ * teste, SQL, HTML e documentação. O gate não estava errado no que dizia; estava
+ * errado no que olhava, que é a forma mais confortável de um controle falhar.
+ *
+ * Agora a varredura de PII cobre o repositório inteiro, e o que autoriza uma
+ * ocorrência é `.privacy/pii-sintetica.yaml` — lista fechada, valor a valor para
+ * documento e telefone, por domínio para e-mail. Valor não declarado reprova;
+ * valor declarado fora dos caminhos declarados reprova; e declaração que não
+ * corresponde mais a nada no repositório também reprova, porque lista que
+ * ninguém confere passa a autorizar o que já não está lá.
+ *
+ * ### Duas varreduras, dois escopos — e não é descuido
+ *
+ * A regra de **PII** varre tudo. A regra de **campo fora do catálogo** continua
+ * só em log, e a medição é o argumento: aplicada ao repositório inteiro ela
+ * produz 24.290 achados sobre 2.772 identificadores, porque `campo:` em
+ * TypeScript é declaração de variável e não registro escrito. Gate que produz
+ * vinte e quatro mil vermelhos é gate desligado pela equipe em duas semanas —
+ * que continua sendo o pior desfecho possível.
  */
 
 export type Severidade = 'bloqueia' | 'avisa';
@@ -40,11 +63,21 @@ export interface AchadoDoGate {
 export interface ResultadoDoGate {
   aprovado: boolean;
   achados: AchadoDoGate[];
-  /** Quantos arquivos a varredura de PII realmente leu. Zero é suspeito. */
+  /**
+   * Quantos arquivos a varredura de PII leu — o repositório inteiro, menos o
+   * que está declarado abaixo. Um é o número que o Risco-003 descreve.
+   */
   arquivosVarridos: number;
+  /** Subconjunto onde a regra de campo fora do catálogo também roda. */
+  logsVarridos: number;
+  /** Arquivos pulados por serem binários. Pulado em silêncio é buraco. */
+  binariosPulados: number;
+  /** Diretórios efetivamente encontrados e ignorados, não a lista teórica. */
+  diretoriosIgnorados: string[];
 }
 
 const DIR_PRIVACIDADE = '.privacy';
+const ARQUIVO_PII_SINTETICA = 'pii-sintetica.yaml';
 
 /**
  * Onde um log de exemplo mora, por convenção. A declaração do repositório só
@@ -56,35 +89,117 @@ const PADROES_DE_LOG = [/\.log$/, /[/\\]logs?[/\\]/, /[/\\]exemplos?[/\\]/, /[/\
 const IGNORAR = new Set(['node_modules', '.git', 'dist', 'coverage', '.next', 'build']);
 
 /**
- * Os padrões de dado pessoal procurados em log.
+ * Os padrões de dado pessoal procurados no repositório.
  *
  * Conservadores de propósito: cada um casa uma forma que **só** um dado pessoal
  * tem. Um padrão frouxo produz vermelho falso, e gate que cria vermelho falso é
  * desligado pela equipe em duas semanas — que é o pior desfecho possível.
+ *
+ * `chave` é o que a declaração precisa casar para autorizar a ocorrência. Para
+ * documento e telefone é o próprio valor; para e-mail é o domínio, porque o que
+ * torna um endereço sintético é o domínio não roteável e não a parte antes do
+ * arroba.
  */
-const PADROES_PII: { regra: string; nome: string; re: RegExp; comoCorrigir: string }[] = [
+const PADROES_PII: {
+  tipo: 'cpf' | 'cnpj' | 'email' | 'telefone';
+  nome: string; re: RegExp; comoCorrigir: string;
+  chave: (encontrado: string) => string;
+  rotulo: 'valor' | 'domínio';
+}[] = [
   {
-    regra: 'pii-em-log/cpf', nome: 'CPF',
+    tipo: 'cpf', nome: 'CPF',
     re: /\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/g,
-    comoCorrigir: 'Passe o registro pelo redator antes de escrever (app/src/lib/redator.ts). '
+    chave: (v) => v, rotulo: 'valor',
+    comoCorrigir: 'Se for dado real, remova. Se for massa sintética, declare o valor em '
+      + `${DIR_PRIVACIDADE}/${ARQUIVO_PII_SINTETICA} com o motivo e os caminhos onde pode aparecer. `
+      + 'Em log, passe o registro pelo redator antes de escrever (app/src/lib/redator.ts): '
       + 'CPF em log é acesso a dado pessoal sem finalidade declarada (Art. 37).',
   },
   {
-    regra: 'pii-em-log/cnpj', nome: 'CNPJ',
+    tipo: 'cnpj', nome: 'CNPJ',
     re: /\b\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}\b/g,
-    comoCorrigir: 'Redija o identificador antes de escrever no log.',
+    chave: (v) => v, rotulo: 'valor',
+    comoCorrigir: `Remova, ou declare o valor em ${DIR_PRIVACIDADE}/${ARQUIVO_PII_SINTETICA}. `
+      + 'Em log, redija o identificador antes de escrever.',
   },
   {
-    regra: 'pii-em-log/email', nome: 'e-mail',
+    tipo: 'email', nome: 'e-mail',
     re: /\b[\w.%+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g,
-    comoCorrigir: 'Substitua por hash ou máscara. E-mail identifica o titular tão bem quanto o documento.',
+    // O domínio, em caixa baixa: o mesmo endereço escrito com maiúsculas é a
+    // mesma autorização, e tratá-los como dois obrigaria a declarar variantes.
+    // (Este comentário não traz um exemplo literal de propósito: escrever um
+    // aqui seria e-mail não declarado neste arquivo, e o gate — corretamente —
+    // reprovaria a si mesmo. Foi o que ele fez na primeira execução do PR 4.)
+    chave: (v) => v.split('@')[1].toLowerCase(), rotulo: 'domínio',
+    comoCorrigir: 'Substitua por hash ou máscara — e-mail identifica o titular tão bem quanto o '
+      + `documento. Se o domínio for sintético, declare-o em ${DIR_PRIVACIDADE}/${ARQUIVO_PII_SINTETICA}; `
+      + 'prefira um TLD reservado pela RFC 2606 (.test, .example, .invalid), que ninguém pode registrar.',
   },
   {
-    regra: 'pii-em-log/telefone', nome: 'telefone',
+    tipo: 'telefone', nome: 'telefone',
     re: /\(\d{2}\)\s?9?\d{4}-\d{4}\b/g,
-    comoCorrigir: 'Substitua por máscara. Telefone é dado de contato do titular.',
+    chave: (v) => v, rotulo: 'valor',
+    comoCorrigir: 'Substitua por máscara — telefone é dado de contato do titular. Se for massa '
+      + `sintética, declare o valor em ${DIR_PRIVACIDADE}/${ARQUIVO_PII_SINTETICA}.`,
   },
 ];
+
+/**
+ * O gate não pode ser o próximo lugar onde o dado aparece em texto claro.
+ *
+ * O relatório vai para o log do CI, que é um sistema de armazenamento como
+ * qualquer outro — e imprimir o CPF encontrado ali seria copiá-lo para fora do
+ * repositório justamente na hora de reclamar dele. A máscara preserva o que
+ * torna o achado conferível à mão (a forma, os extremos, o arquivo e a linha) e
+ * larga o resto.
+ */
+export function mascarar(valor: string): string {
+  if (valor.includes('@')) return `•••@${valor.slice(valor.indexOf('@') + 1)}`;
+  const total = (valor.match(/\d/g) ?? []).length;
+  let i = -1;
+  return [...valor].map((c) => {
+    if (!/\d/.test(c)) return c;
+    i += 1;
+    return i < 3 || i >= total - 2 ? c : '•';
+  }).join('');
+}
+
+/** Uma entrada do inventário de PII sintética: o valor, por que existe e onde pode aparecer. */
+interface DeclaracaoDePii {
+  valor?: string;
+  dominio?: string;
+  motivo?: string;
+  onde?: string[];
+}
+
+interface PiiSintetica {
+  cpf?: DeclaracaoDePii[];
+  cnpj?: DeclaracaoDePii[];
+  telefone?: DeclaracaoDePii[];
+  email?: { dominios?: DeclaracaoDePii[] };
+}
+
+/** O que o gate guarda por chave declarada, para cobrar caminho e declaração morta no fim. */
+interface Autorizacao {
+  tipo: string;
+  chave: string;
+  onde: string[];
+  vista: boolean;
+}
+
+/**
+ * O caminho declarado cobre este arquivo?
+ *
+ * Entrada terminada em `/` é prefixo de diretório; o resto é arquivo exato. Não
+ * há glob de propósito: `**​/*.ts` autorizaria PII em qualquer TypeScript futuro,
+ * e uma autorização que se estende sozinha para arquivos que ainda não existem
+ * não é uma lista fechada.
+ */
+const cobre = (onde: string[], rel: string): boolean =>
+  onde.some((o) => {
+    const n = String(o).split(sep).join('/').replace(/\/+$/, '');
+    return rel === n || rel.startsWith(`${n}/`);
+  });
 
 /** Campo escrito num log estruturado: `campo=valor`, `"campo":` ou `campo: valor`. */
 const CAMPO_EM_LOG = /(?:^|[\s,{[])"?([a-z][a-z0-9_]{2,})"?\s*[=:]/gi;
@@ -116,14 +231,26 @@ interface EpicoDeclarado {
   pbd?: { chave: string; marcado?: boolean; evidencia?: string }[];
 }
 
-function arquivosDe(raiz: string, atual = raiz, acc: string[] = []): string[] {
+/**
+ * Todos os arquivos do repositório, e o que foi deixado de fora.
+ *
+ * Os ignorados voltam nomeados — e são os efetivamente encontrados, não a lista
+ * teórica. Diretório pulado em silêncio é buraco na varredura, e um relatório
+ * que diz "95 arquivos" sem dizer o que não olhou é um número sem denominador.
+ */
+function arquivosDe(
+  raiz: string, atual = raiz, acc: string[] = [], ignorados: string[] = [],
+): { arquivos: string[]; ignorados: string[] } {
   for (const nome of readdirSync(atual)) {
-    if (IGNORAR.has(nome)) continue;
     const caminho = join(atual, nome);
-    if (statSync(caminho).isDirectory()) arquivosDe(raiz, caminho, acc);
+    if (IGNORAR.has(nome)) {
+      ignorados.push(relative(raiz, caminho).split(sep).join('/'));
+      continue;
+    }
+    if (statSync(caminho).isDirectory()) arquivosDe(raiz, caminho, acc, ignorados);
     else acc.push(caminho);
   }
-  return acc;
+  return { arquivos: acc, ignorados };
 }
 
 const ehLog = (rel: string, extras: string[]): boolean => {
@@ -146,7 +273,8 @@ export function rodarGate(raiz: string): ResultadoDoGate {
   // ── falha fechada: sem declaração, reprova ────────────────────────────────
   if (!existsSync(dir)) {
     return {
-      aprovado: false, arquivosVarridos: 0,
+      aprovado: false,
+      arquivosVarridos: 0, logsVarridos: 0, binariosPulados: 0, diretoriosIgnorados: [],
       achados: [{
         regra: 'declaracao/ausente', severidade: 'bloqueia', arquivo: DIR_PRIVACIDADE,
         mensagem: 'O repositório não declara nada sobre os dados que trata.',
@@ -204,27 +332,117 @@ export function rodarGate(raiz: string): ResultadoDoGate {
   const catalogo = new Set((inventario.campos ?? []).map((c) => String(c.nome).toLowerCase()));
   const extras = inventario.logs ?? [];
 
-  // ── varredura de PII e de campo fora do catálogo ──────────────────────────
-  const todos = arquivosDe(raiz).map((a) => ({ abs: a, rel: relative(raiz, a) }));
-  const logs = todos.filter((a) => ehLog(a.rel, extras));
+  // ── inventário de PII sintética: ausente ou ilegível reprova ──────────────
+  const caminhoPii = `${DIR_PRIVACIDADE}/${ARQUIVO_PII_SINTETICA}`;
+  const autorizacoes = new Map<string, Autorizacao>();
+  let inventarioDePiiUtilizavel = false;
 
-  for (const { abs, rel } of logs) {
+  if (!existsSync(join(raiz, caminhoPii))) {
+    achados.push({
+      regra: 'pii/inventario-ausente', severidade: 'bloqueia', arquivo: caminhoPii,
+      mensagem: 'O repositório não declara qual PII sintética publica.',
+      comoCorrigir: `Crie ${caminhoPii} com os valores de CPF, CNPJ e telefone e os domínios de `
+        + 'e-mail que a massa de demonstração usa, cada um com motivo e caminhos. '
+        + 'PII sintética existente é inventário a declarar, não exceção a esconder.',
+    });
+  } else {
+    try {
+      const bruto: PiiSintetica = parse(readFileSync(join(raiz, caminhoPii), 'utf8')) ?? {};
+      const declaradas: [string, DeclaracaoDePii[]][] = [
+        ['cpf', bruto.cpf ?? []], ['cnpj', bruto.cnpj ?? []],
+        ['telefone', bruto.telefone ?? []], ['email', bruto.email?.dominios ?? []],
+      ];
+      for (const [tipo, lista] of declaradas) {
+        for (const d of lista) {
+          const chave = String(d.dominio ?? d.valor ?? '').toLowerCase().trim();
+          if (!chave) continue;
+          autorizacoes.set(`${tipo}:${chave}`, {
+            tipo, chave, onde: (d.onde ?? []).map(String), vista: false,
+          });
+        }
+      }
+      inventarioDePiiUtilizavel = true;
+    } catch (e) {
+      achados.push({
+        regra: 'pii/inventario-ilegivel', severidade: 'bloqueia', arquivo: caminhoPii,
+        mensagem: `O inventário de PII sintética não pôde ser lido: ${(e as Error).message}`,
+        // Ilegível tratado como vazio faria toda a massa declarada reprovar de
+        // uma vez — ruído que ninguém lê — ou, pior, passar por lista vazia.
+        comoCorrigir: 'Corrija o YAML. Inventário ilegível reprova em vez de virar lista vazia.',
+      });
+    }
+  }
+
+  // ── varredura ─────────────────────────────────────────────────────────────
+  const varredura = arquivosDe(raiz);
+  const todos = varredura.arquivos.map((a) => ({ abs: a, rel: relative(raiz, a).split(sep).join('/') }));
+  const logs = todos.filter((a) => ehLog(a.rel, extras));
+  const ehLogDe = new Set(logs.map((a) => a.rel));
+  let binariosPulados = 0;
+  let arquivosLidos = 0;
+
+  for (const { abs, rel } of todos) {
     let conteudo: string;
     try {
       conteudo = readFileSync(abs, 'utf8');
     } catch {
+      binariosPulados += 1;
       continue;
     }
+    // Byte nulo é a marca de arquivo binário lido como texto. Contado, não
+    // ignorado: hoje são zero, e no dia em que não forem o número aparece.
+    if (conteudo.includes('\0')) {
+      binariosPulados += 1;
+      continue;
+    }
+    arquivosLidos += 1;
+    const ehOInventario = rel === caminhoPii;
+    const ehLogEste = ehLogDe.has(rel);
+
     conteudo.split('\n').forEach((linha, i) => {
+      // ── PII: repositório inteiro ───────────────────────────────────────────
       for (const p of PADROES_PII) {
-        for (const achado of linha.matchAll(p.re)) {
+        for (const encontrado of linha.matchAll(p.re)) {
+          const chave = p.chave(encontrado[0]);
+          const autorizacao = autorizacoes.get(`${p.tipo}:${chave.toLowerCase()}`);
+
+          if (!autorizacao) {
+            // Sem inventário utilizável, apontar cada ocorrência afogaria o
+            // achado que importa — que é a ausência do inventário, já listada.
+            if (!inventarioDePiiUtilizavel) continue;
+            achados.push({
+              regra: `pii/${p.tipo}`, severidade: 'bloqueia', arquivo: rel, linha: i + 1,
+              mensagem: `${p.nome} em texto claro, ${p.rotulo} não declarado: ${mascarar(encontrado[0])}`
+                + `${ehLogEste ? ' — e isto é um log publicado.' : '.'}`,
+              comoCorrigir: p.comoCorrigir,
+            });
+            continue;
+          }
+
+          // O inventário é caminho implícito do que declara: não há como
+          // declarar um valor sem escrevê-lo. Não é exceção escondida — é a
+          // única forma de a lista existir, e ela está inteira no diff.
+          //
+          // E a ocorrência dentro dele **não conta como uso**: se contasse, toda
+          // declaração se provaria viva por existir, e a regra de declaração
+          // morta seria uma regra que nunca dispara. Um valor está vivo quando
+          // aparece no repositório, não quando aparece na lista que o autoriza.
+          if (ehOInventario) continue;
+
+          autorizacao.vista = true;
+          if (cobre(autorizacao.onde, rel)) continue;
           achados.push({
-            regra: p.regra, severidade: 'bloqueia', arquivo: rel, linha: i + 1,
-            mensagem: `${p.nome} em texto claro no log: ${achado[0]}`,
-            comoCorrigir: p.comoCorrigir,
+            regra: 'pii/fora-do-caminho', severidade: 'bloqueia', arquivo: rel, linha: i + 1,
+            mensagem: `O ${p.rotulo} ${mascarar(encontrado[0])} é declarado como sintético, mas não `
+              + `para este arquivo: ${caminhoPii} autoriza ${autorizacao.onde.join(', ') || '(nenhum caminho)'}.`,
+            comoCorrigir: `Acrescente "${rel}" ao \`onde\` da declaração, ou tire o ${p.rotulo} daqui. `
+              + 'Declaração não é passe livre global: ela vale onde alguém disse que vale.',
           });
         }
       }
+
+      // ── campo fora do catálogo: só em log, e a medição é o motivo ─────────
+      if (!ehLogEste) return;
       for (const m of linha.matchAll(CAMPO_EM_LOG)) {
         const campo = m[1].toLowerCase();
         if (NAO_SAO_CAMPOS.has(campo) || catalogo.has(campo)) continue;
@@ -235,6 +453,20 @@ export function rodarGate(raiz: string): ResultadoDoGate {
             + 'com categoria e base legal, ou pare de escrevê-lo no log.',
         });
       }
+    });
+  }
+
+  // ── declaração morta ──────────────────────────────────────────────────────
+  // Lista que ninguém confere apodrece, e apodrecida ela autoriza o que já não
+  // está lá. Quem retira a massa retira a declaração no mesmo diff.
+  for (const a of autorizacoes.values()) {
+    if (a.vista) continue;
+    achados.push({
+      regra: 'pii/declaracao-morta', severidade: 'bloqueia', arquivo: caminhoPii,
+      mensagem: `O ${a.tipo === 'email' ? 'domínio' : 'valor'} declarado "${mascarar(a.chave)}" não `
+        + 'aparece em lugar nenhum do repositório.',
+      comoCorrigir: 'Remova a declaração. Autorização que não corresponde a nada é autorização '
+        + 'esperando um valor futuro — e o valor futuro entra sem ninguém rever.',
     });
   }
 
@@ -291,21 +523,36 @@ export function rodarGate(raiz: string): ResultadoDoGate {
   return {
     aprovado: achados.every((a) => a.severidade !== 'bloqueia'),
     achados,
-    arquivosVarridos: logs.length,
+    arquivosVarridos: arquivosLidos,
+    logsVarridos: logs.length,
+    binariosPulados,
+    diretoriosIgnorados: [...new Set(varredura.ignorados)].sort(),
   };
 }
 
-/** Relatório para o terminal do CI: arquivo, linha, o que houve e como corrigir. */
+/**
+ * Relatório para o terminal do CI: arquivo, linha, o que houve e como corrigir.
+ *
+ * O cabeçalho diz o denominador antes de dizer o resultado. "Nenhum achado"
+ * sobre um arquivo e "nenhum achado" sobre noventa e cinco são a mesma frase
+ * com valores probatórios opostos, e foi exatamente essa ambiguidade que deixou
+ * o Risco-003 passar despercebido.
+ */
 export function relatorio(r: ResultadoDoGate): string {
+  const ignorados = r.diretoriosIgnorados.length > 0
+    ? `  Fora da varredura: ${r.diretoriosIgnorados.join(', ')}`
+    : '  Fora da varredura: nada.';
   const linhas = [
     '',
     '  Gate de privacidade',
-    `  ${r.arquivosVarridos} arquivo(s) de log varrido(s)`,
+    `  ${r.arquivosVarridos} arquivo(s) varrido(s) · ${r.logsVarridos} log(s) · `
+      + `${r.binariosPulados} binário(s) pulado(s)`,
+    ignorados,
     '',
   ];
   if (r.achados.length === 0) {
-    linhas.push('  Nenhum achado. Nenhum dado pessoal em log, nenhum campo fora do catálogo,');
-    linhas.push('  e os sete princípios com evidência apontada.', '');
+    linhas.push('  Nenhum achado. Nenhum dado pessoal fora do inventário sintético, nenhum campo');
+    linhas.push('  fora do catálogo, e os sete princípios com evidência apontada.', '');
     return linhas.join('\n');
   }
   for (const a of r.achados) {

@@ -4,7 +4,7 @@ import { estadoDe, expiraEm } from './consentimento';
 import type { Consentimento, TextoDeConsentimento } from './consentimento';
 import type { Fornecedor } from './fornecedor';
 import type {
-  AuditLinha, Cenario, Finalidade, Papel, Reclassificacao,
+  AuditLinha, BaseLegal, Cenario, Finalidade, Papel, Reclassificacao,
   OposicaoTitular, RevogacaoTitular, SessaoTitular, VerificacaoTitular,
 } from './types';
 
@@ -15,6 +15,8 @@ export interface EntradaAudit {
   recursoTipo: string;
   recursoId: string;
   finalidade?: Finalidade;
+  /** Risco-004 — a base legal que autorizou o tratamento. Entra no payload do hash. */
+  baseLegal?: BaseLegal;
   justificativa?: string;
   /** T4-01 — o protocolo sob o qual o acesso aconteceu. Entra no payload do hash. */
   protocolo?: string;
@@ -233,16 +235,23 @@ export class BancoMock {
    * aqui. Selar o hash resolve os dois: adulterar o texto continua detectável,
    * e apagá-lo preserva a cadeia.
    *
-   * A mesma regra está no trigger `audit_log_encadeia()` de `db/schema.sql`, e
-   * é provada lá: `db/tests.sql` expurga a PII do trail e confere que a
-   * verificação de integridade continua fechando.
+   * Esta função recebe o selo pronto e **não vê o texto**, de propósito: quando
+   * ela mesma hasheava a justificativa, nada impedia o campo do selo de guardar
+   * uma cópia do texto ao lado — que foi exatamente o que aconteceu, e o que
+   * deixou o expurgo dos 30 dias limpar uma coluna e esquecer a outra. Fronteira
+   * que depende de convenção é fronteira que uma refatoração distraída atravessa.
+   *
+   * A mesma regra está no trigger `audit_log_encadeia()` de `db/schema.sql`, na
+   * mesma ordem de campos, e é provada lá: `db/tests.sql` expurga a PII do trail
+   * e confere que a verificação de integridade continua fechando.
    */
   private calcularHash(l: Omit<AuditLinha, 'hash'>): string {
     return sha256([
       l.hashAnterior ?? 'genesis',
       l.ocorridoEm, l.ator, l.acao, l.recursoTipo, l.recursoId,
-      l.finalidade ?? '-', l.protocolo ?? '-', l.campos.join(','), l.resultado,
-      sha256(l.justificativa ?? ''),
+      l.finalidade ?? '-', l.baseLegal ?? '-', l.protocolo ?? '-',
+      l.campos.join(','), l.resultado,
+      l.justificativaHash,
     ].join('|'));
   }
 
@@ -295,18 +304,16 @@ export class BancoMock {
       recursoTipo: e.recursoTipo,
       recursoId: e.recursoId,
       finalidade: e.finalidade,
+      baseLegal: e.baseLegal,
       justificativa: e.justificativa,
       protocolo: e.protocolo,
       campos: e.campos ?? [],
       resultado: e.resultado ?? 'sucesso',
       hashAnterior: anterior ? anterior.hash : null,
+      // O selo é calculado aqui, uma vez, e sobrevive ao expurgo do texto.
+      justificativaHash: sha256(e.justificativa ?? ''),
     };
-    const linha: AuditLinha = {
-      ...parcial,
-      // O selo é gravado junto e sobrevive ao expurgo do texto.
-      justificativaSelo: e.justificativa ?? '',
-      hash: this.calcularHash(parcial),
-    };
+    const linha: AuditLinha = { ...parcial, hash: this.calcularHash(parcial) };
     this.auditoria.push(linha);
     return linha;
   }
@@ -346,23 +353,50 @@ export class BancoMock {
     if (alvo) alvo.acao = novaAcao;
   }
 
-  auditVerificar(): { blocos: number; integro: boolean; primeiraDivergencia: number | null } {
+  /**
+   * Duas conferências, não uma — e a segunda é o que fecha o Risco-004.
+   *
+   * A primeira é a cadeia: recompõe o payload de cada linha e confere o hash. A
+   * segunda é o **selo contra o texto**: enquanto a justificativa existe, o
+   * sha256 dela tem de bater com o selo gravado. Sem a segunda havia um buraco
+   * exato — quem trocasse só o texto, deixando o selo intacto, passava, porque a
+   * cadeia consome o selo e não o texto. O campo mais aberto do trail era o
+   * único que se podia reescrever sem deixar rastro.
+   *
+   * Depois do expurgo controlado o texto não existe mais, e é `piiExpurgadaEm`
+   * que diz isso. Aí só a cadeia responde — que é precisamente o desenho: o selo
+   * sobrevive ao texto e continua provando o que o texto dizia.
+   */
+  auditVerificar(): {
+    blocos: number; integro: boolean; primeiraDivergencia: number | null; motivo: string | null;
+  } {
     let anterior: string | null = null;
     let divergencia: number | null = null;
+    let motivo: string | null = null;
     for (const l of this.auditoria) {
       const esperado = this.calcularHash({
         id: l.id, ocorridoEm: l.ocorridoEm, ator: l.ator, atorPapel: l.atorPapel,
         acao: l.acao, recursoTipo: l.recursoTipo, recursoId: l.recursoId,
-        finalidade: l.finalidade, protocolo: l.protocolo,
-        // Lido do selo, não recalculado do texto: é exatamente por isso que a
-        // verificação continua íntegra depois de a justificativa ser expurgada.
-        justificativa: l.justificativaSelo ?? l.justificativa,
+        finalidade: l.finalidade, baseLegal: l.baseLegal, protocolo: l.protocolo,
+        // O selo lido da linha, não recalculado do texto: é exatamente por isso
+        // que a verificação continua fechando depois do expurgo da justificativa.
+        justificativaHash: l.justificativaHash,
         campos: l.campos, resultado: l.resultado, hashAnterior: anterior,
       });
-      if (esperado !== l.hash && divergencia === null) divergencia = l.id;
+      const seloConfere = l.piiExpurgadaEm !== undefined
+        || sha256(l.justificativa ?? '') === l.justificativaHash;
+      if ((esperado !== l.hash || !seloConfere) && divergencia === null) {
+        divergencia = l.id;
+        motivo = esperado !== l.hash
+          ? (seloConfere ? 'cadeia' : 'cadeia e selo da justificativa')
+          : 'texto da justificativa não corresponde ao selo';
+      }
       anterior = l.hash;
     }
-    return { blocos: this.auditoria.length, integro: divergencia === null, primeiraDivergencia: divergencia };
+    return {
+      blocos: this.auditoria.length, integro: divergencia === null,
+      primeiraDivergencia: divergencia, motivo,
+    };
   }
 
   // ── semente ──────────────────────────────────────────────────────────────

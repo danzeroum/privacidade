@@ -51,7 +51,7 @@ import {
 import type { Obrigacao } from '../src/mock/calendario';
 import { PRINCIPIOS_PBD, avaliarPbd, vereditoPbd } from '../src/mock/pbd';
 import type { MarcacaoPbd, VereditoPbd } from '../src/mock/pbd';
-import { relatorio, rodarGate } from '../src/lib/gate-privacidade';
+import { mascarar, relatorio, rodarGate } from '../src/lib/gate-privacidade';
 import { hashEncadeado } from '../src/lib/sha256';
 import { CampoPII, Didatico, Explica } from '../src/ui/primitivos';
 import { MemoryRouter } from 'react-router-dom';
@@ -142,7 +142,7 @@ describe('Regra 3 — revelar exige finalidade, justificativa e registro ANTES d
     const antes = banco.auditoria.length;
     const res = chamar('dpo', { metodo: 'POST', caminho: '/v1/pseudonyms/resolve', purpose: 'atendimento', body: corpo });
     expect(res.status).toBe(200);
-    expect((res.body as { valor: string }).valor).toBe('529.982.247-25');
+    expect((res.body as { valor: string }).valor).toBe('274.065.813-77');
 
     const registro = banco.auditoria.at(-1)!;
     expect(banco.auditoria.length).toBe(antes + 1);
@@ -155,7 +155,7 @@ describe('Regra 3 — revelar exige finalidade, justificativa e registro ANTES d
     banco.simularFalhaDeLog = true;
     const res = chamar('dpo', { metodo: 'POST', caminho: '/v1/pseudonyms/resolve', purpose: 'atendimento', body: corpo });
     expect(res.status).toBe(503);
-    expect(JSON.stringify(res.body)).not.toContain('529.982.247-25');
+    expect(JSON.stringify(res.body)).not.toContain('274.065.813-77');
   });
 });
 
@@ -292,20 +292,20 @@ describe('Privacy by default na interface', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /revelar e registrar/i }));
 
-    expect(screen.getByText('529.982.247-25')).toBeInTheDocument();
+    expect(screen.getByText('274.065.813-77')).toBeInTheDocument();
 
     act(() => { vi.advanceTimersByTime(60_000); });
 
-    expect(screen.queryByText('529.982.247-25')).toBeNull();
+    expect(screen.queryByText('274.065.813-77')).toBeNull();
     expect(screen.getByText('•••.•••.•••-••')).toBeInTheDocument();
     vi.useRealTimers();
   });
 
   it('o CPF nunca sai do navegador: a busca viaja como hash', () => {
-    const cpf = '529.982.247-25';
+    const cpf = '274.065.813-77';
     const h = hashCpf(cpf);
-    expect(h).not.toContain('529');
-    expect(h).toBe(sha256('52998224725:lastro-busca-v1'));
+    expect(h).not.toContain('274');
+    expect(h).toBe(sha256('27406581377:lastro-busca-v1'));
 
     // Adaptação de contrato do PR 1 (C-01): a busca passou a exigir finalidade
     // declarada. O que este teste prova — que o documento viaja como hash —
@@ -320,7 +320,7 @@ describe('Privacy by default na interface', () => {
   it('o canal titular↔DPO recusa CPF em texto claro', () => {
     const res = chamar('dpo', {
       metodo: 'POST', caminho: '/v1/requests/s1/mensagens',
-      body: { corpo: 'Confirmando o CPF 529.982.247-25 do titular.' },
+      body: { corpo: 'Confirmando o CPF 274.065.813-77 do titular.' },
     });
     expect(res.status).toBe(422);
   });
@@ -350,7 +350,7 @@ describe('Cenários', () => {
 // PR 1 — Controle de acesso (C-01, C-02, T6-02)
 // ═════════════════════════════════════════════════════════════════════════════
 
-const HASH_EXISTENTE = hashCpf('529.982.247-25');
+const HASH_EXISTENTE = hashCpf('274.065.813-77');
 const HASH_INEXISTENTE = hashCpf('000.000.000-00');
 
 describe('C-01 · Regra 5b — busca por hash não é oráculo de existência', () => {
@@ -587,7 +587,7 @@ describe('C-17 — campo revelável precisa estar no ROPA', () => {
     const res = chamar('dpo', REVELA_CPF);
     expect(res.status).toBe(422);
     expect((res.body as { erro: string }).erro).toContain('catálogo');
-    expect(JSON.stringify(res.body)).not.toContain('529.982.247-25');
+    expect(JSON.stringify(res.body)).not.toContain('274.065.813-77');
   });
 
   it('validar inventário recusa campo sem finalidades declaradas — campo novo não nasce sem política', () => {
@@ -613,7 +613,7 @@ describe('C-03 — a finalidade é confrontada com o catálogo', () => {
     const res = chamar('dpo', { ...REVELA_CPF, purpose: 'seguranca' });
     expect(res.status).toBe(422);
     expect((res.body as { erro: string }).erro).toContain('não consta no catálogo');
-    expect(JSON.stringify(res.body)).not.toContain('529.982.247-25');
+    expect(JSON.stringify(res.body)).not.toContain('274.065.813-77');
   });
 
   it('lista vazia significa não revelável, jamais "qualquer uma"', () => {
@@ -647,11 +647,11 @@ describe('C-04 — justificativa é redigida antes de entrar no log imutável', 
   it('o CPF citado na justificativa não chega ao audit trail', () => {
     const res = chamar('dpo', {
       ...REVELA_CPF,
-      body: { ...REVELA_CPF.body, justificativa: 'Titular confirmou o CPF 529.982.247-25 por telefone hoje' },
+      body: { ...REVELA_CPF.body, justificativa: 'Titular confirmou o CPF 274.065.813-77 por telefone hoje' },
     });
     expect(res.status).toBe(200);
     const registro = banco.auditoria.at(-1)!;
-    expect(registro.justificativa).not.toContain('529.982.247-25');
+    expect(registro.justificativa).not.toContain('274.065.813-77');
     expect(registro.justificativa).toContain('[CPF removido]');
   });
 
@@ -659,10 +659,10 @@ describe('C-04 — justificativa é redigida antes de entrar no log imutável', 
     const risco = banco.cenario.riscos[0];
     const res = chamar('dpo', {
       metodo: 'PATCH', caminho: `/v1/risks/${risco.codigo}`,
-      body: { probabilidade: 2, impacto: 2, justificativa: 'Relato do titular ana.silva@exemplo.com sobre exposição indevida' },
+      body: { probabilidade: 2, impacto: 2, justificativa: 'Relato do titular ana.silva@exemplo.test sobre exposição indevida' },
     });
     expect(res.status).toBe(200);
-    expect(banco.reclassificacoes.at(-1)!.justificativa).not.toContain('ana.silva@exemplo.com');
+    expect(banco.reclassificacoes.at(-1)!.justificativa).not.toContain('ana.silva@exemplo.test');
   });
 });
 
@@ -677,12 +677,12 @@ describe('C-05 — o re-mascaramento é do relógio, não do contador da aba', (
       target: { value: 'Confirmação de identidade para o protocolo 2026-0731' },
     });
     fireEvent.click(screen.getByRole('button', { name: /revelar e registrar/i }));
-    expect(screen.getByText('529.982.247-25')).toBeInTheDocument();
+    expect(screen.getByText('274.065.813-77')).toBeInTheDocument();
 
     // Aba inativa: o relógio anda, os timers não disparam na cadência normal.
     // O valor precisa sumir mesmo assim.
     act(() => { vi.setSystemTime(Date.now() + 61_000); vi.advanceTimersByTime(300); });
-    expect(screen.queryByText('529.982.247-25')).toBeNull();
+    expect(screen.queryByText('274.065.813-77')).toBeNull();
     vi.useRealTimers();
   });
 });
@@ -691,7 +691,7 @@ describe('T4-01 — a revelação acontece sob um protocolo', () => {
   it('sem protocolo selecionado, a revelação é recusada com 422', () => {
     const res = chamar('dpo', { ...REVELA_CPF, body: { ...REVELA_CPF.body, protocolo: undefined } });
     expect(res.status).toBe(422);
-    expect(JSON.stringify(res.body)).not.toContain('529.982.247-25');
+    expect(JSON.stringify(res.body)).not.toContain('274.065.813-77');
   });
 
   it('protocolo de outro titular é recusado — é o defeito de contexto trocado', () => {
@@ -1214,9 +1214,9 @@ describe('C-07 · decidir exige fundamento — inclusive para não comunicar (Ar
     const inc = incidenteDe(banco);
     chamar('dpo', {
       metodo: 'POST', caminho: `/v1/incidentes/${inc.id}/decisao`,
-      body: { decisao: 'comunicar_anpd', fundamento: 'Titular 529.982.247-25 relatou uso indevido do cartão informado.' },
+      body: { decisao: 'comunicar_anpd', fundamento: 'Titular 274.065.813-77 relatou uso indevido do cartão informado.' },
     });
-    expect(banco.auditoria.at(-1)!.justificativa).not.toContain('529.982.247-25');
+    expect(banco.auditoria.at(-1)!.justificativa).not.toContain('274.065.813-77');
     expect(inc.fundamento).toContain('[CPF removido]');
   });
 
@@ -2314,12 +2314,12 @@ describe('PR 7 · a rota de transição — sequência, conteúdo, registro', ()
     ripd.status = 'triagem';
     mover('ripd', ripd.id, {
       para: 'dispensado',
-      justificativa: 'Confirmado com o titular 529.982.247-25 que não há tratamento.',
+      justificativa: 'Confirmado com o titular 274.065.813-77 que não há tratamento.',
       gatilhos: [{ codigo: 'T1', condicao: 'Coleta de identificador direto no diff.' }],
     });
-    expect(banco.auditoria.at(-1)!.justificativa).not.toContain('529.982.247-25');
+    expect(banco.auditoria.at(-1)!.justificativa).not.toContain('274.065.813-77');
     // E a justificativa gravada no artefato também sai redigida.
-    expect(banco.cenario.ripds[0].dispensas![0].justificativa).not.toContain('529.982.247-25');
+    expect(banco.cenario.ripds[0].dispensas![0].justificativa).not.toContain('274.065.813-77');
   });
 });
 
@@ -3593,8 +3593,15 @@ describe('PR 11 · o gate de privacidade — verificação: ele roda e falha cer
 
   const INVENTARIO = ['repositorio: teste', 'campos:', '  - nome: titular_hash', '  - nome: campo'].join('\n');
   const EPICO = ['pbd:', ...PRINCIPIOS_PBD.map((p) => `  - chave: ${p.chave}\n    evidencia: src/app.ts`)].join('\n');
+  // Repositório de teste que não publica PII sintética nenhuma: listas vazias,
+  // e não arquivo ausente. As duas coisas dizem coisas diferentes, e o gate
+  // trata a segunda como reprovação.
+  const SEM_PII = ['cpf: []', 'cnpj: []', 'telefone: []', 'email:', '  dominios: []'].join('\n');
+  /** Declarado em `.privacy/pii-sintetica.yaml` para este arquivo de teste. */
+  const CPF_DE_TESTE = '347.912.884-42';
   const BASE = {
     '.privacy/data-inventory.teste.yaml': INVENTARIO,
+    '.privacy/pii-sintetica.yaml': SEM_PII,
     '.privacy/epico.yml': EPICO,
     'src/app.ts': 'export const x = 1;\n',
   };
@@ -3609,8 +3616,10 @@ describe('PR 11 · o gate de privacidade — verificação: ele roda e falha cer
     const r = rodarGate(repo({ ...BASE, 'logs/app.log': 'ts=2026-01-01 campo=cpf titular_hash=hmac:9f4c\n' }));
     expect(r.achados, JSON.stringify(r.achados)).toEqual([]);
     expect(r.aprovado).toBe(true);
-    // Zero arquivo varrido seria um gate que passa por não ter olhado.
-    expect(r.arquivosVarridos).toBe(1);
+    // Zero arquivo varrido seria um gate que passa por não ter olhado. A
+    // varredura de PII lê o repositório inteiro; a de campo, só o log.
+    expect(r.arquivosVarridos).toBe(5);
+    expect(r.logsVarridos).toBe(1);
   });
 
   it('CPF em log de exemplo reprova citando arquivo e linha', () => {
@@ -3618,25 +3627,31 @@ describe('PR 11 · o gate de privacidade — verificação: ele roda e falha cer
       ...BASE,
       'logs/cobranca.log': [
         'ts=2026-01-01 campo=cpf titular_hash=hmac:9f4c',
-        'ts=2026-01-01 campo=cpf valor=347.912.884-42',
+        `ts=2026-01-01 campo=cpf valor=${CPF_DE_TESTE}`,
       ].join('\n'),
     }));
     expect(r.aprovado).toBe(false);
-    const achado = r.achados.find((a) => a.regra === 'pii-em-log/cpf')!;
-    expect(achado.arquivo).toBe(join('logs', 'cobranca.log'));
+    const achado = r.achados.find((a) => a.regra === 'pii/cpf')!;
+    expect(achado.arquivo).toBe('logs/cobranca.log');
     expect(achado.linha).toBe(2);
-    expect(achado.mensagem).toContain('347.912.884-42');
+    // Mascarado: o relatório vai para o log do CI, que é um sistema de
+    // armazenamento como outro qualquer. O gate não pode ser o próximo lugar
+    // onde o dado aparece em claro — mas a forma e os extremos ficam, para o
+    // achado continuar conferível à mão.
+    expect(achado.mensagem).toContain(mascarar(CPF_DE_TESTE));
+    expect(achado.mensagem).not.toContain(CPF_DE_TESTE);
     expect(achado.comoCorrigir).toContain('redator');
+    expect(relatorio(r)).not.toContain(CPF_DE_TESTE);
   });
 
   it('e-mail e telefone em log também reprovam', () => {
     const r = rodarGate(repo({
       ...BASE,
-      'logs/a.log': 'campo=email valor=marina.s@exemplo.com\ncampo=fone valor=(11) 98765-4321\n',
+      'logs/a.log': 'campo=email valor=marina.s@exemplo.test\ncampo=fone valor=(11) 98765-4321\n',
     }));
     const regras = r.achados.map((a) => a.regra);
-    expect(regras).toContain('pii-em-log/email');
-    expect(regras).toContain('pii-em-log/telefone');
+    expect(regras).toContain('pii/email');
+    expect(regras).toContain('pii/telefone');
   });
 
   it('campo fora do catálogo reprova, e campo declarado passa', () => {
@@ -3708,7 +3723,8 @@ describe('PR 11 · o gate de privacidade — validação: ele barra o que a LGPD
     // passa nele, o controle é decoração.
     const r = rodarGate(resolve('..'));
     expect(r.achados, relatorio(r)).toEqual([]);
-    expect(r.arquivosVarridos, 'nenhum log varrido é gate que passa por não ter olhado').toBeGreaterThan(0);
+    expect(r.arquivosVarridos, 'nenhum arquivo varrido é gate que passa por não ter olhado')
+      .toBeGreaterThan(0);
   });
 
   it('o log de exemplo publicado registra o campo acessado, nunca o valor', () => {
@@ -4782,7 +4798,7 @@ describe('PR 16 · invariante — o nível de verificação é derivado do direi
 });
 
 describe('PR 16 · invariante — o 401 não diz se o cadastro existe', () => {
-  const semCadastro = () => sha256('ninguem-com-esse-email@exemplo.com');
+  const semCadastro = () => sha256('ninguem-com-esse-email@exemplo.test');
 
   it('código inválido responde igual para e-mail cadastrado e não cadastrado', () => {
     const cadastrado = sessaoDoPortal(banco, 'acesso', 0, { codigoErrado: true }).confirmacao;
@@ -4937,14 +4953,14 @@ describe('PR 16 · POST /requests — prazo derivado do direito, gravado antes d
 
     const comCpf = requestPortal<{ protocolo: string }>(banco, {
       metodo: 'POST', caminho: '/v1/requests', sessao: sessaoDoPortal(banco, 'acesso', 1).token,
-      body: { direito: 'acesso', texto: 'Meu CPF é 529.982.247-25, confiram por favor.' },
+      body: { direito: 'acesso', texto: 'Meu CPF é 274.065.813-77, confiram por favor.' },
     });
     expect(comCpf.status).toBe(201);
     const gravada = banco.cenario.solicitacoes.find((s) => s.protocolo === comCpf.body.protocolo)!;
     expect(gravada.detalhe).toContain('[CPF removido]');
-    expect(gravada.detalhe).not.toContain('529.982.247-25');
+    expect(gravada.detalhe).not.toContain('274.065.813-77');
     const linha = banco.auditoria.find((l) => l.protocolo === comCpf.body.protocolo)!;
-    expect(linha.justificativa).not.toContain('529.982.247-25');
+    expect(linha.justificativa).not.toContain('274.065.813-77');
   });
 
   it('falha de log ao abrir derruba a solicitação inteira: 503 e nenhum protocolo criado', () => {
@@ -5494,12 +5510,12 @@ describe('PR 17 · validação — o titular consegue se opor, e o tratamento pa
     const { token } = sessaoDoPortal(banco, 'oposicao');
     const res = requestPortal<any>(banco, {
       metodo: 'POST', caminho: `${CAMINHO_DA_OPOSICAO}?lia=LIA-SCORING-001`, sessao: token,
-      body: { texto: 'Meu CPF é 529.982.247-25 e não autorizo isso.' },
+      body: { texto: 'Meu CPF é 274.065.813-77 e não autorizo isso.' },
     });
     expect(res.status).toBe(201);
     const gravada = banco.cenario.solicitacoes.find((s) => s.protocolo === res.body.protocolo)!;
     expect(gravada.detalhe).toContain('[CPF removido]');
-    expect(banco.auditoria.at(-1)!.justificativa).not.toContain('529.982.247-25');
+    expect(banco.auditoria.at(-1)!.justificativa).not.toContain('274.065.813-77');
   });
 });
 
@@ -5756,7 +5772,11 @@ describe('PR 18 · integração — o executor elimina, prova e não repete', ()
 
     // A prova da regra do selo: o texto sumiu e a cadeia continua fechando.
     expect(banco.auditVerificar().integro).toBe(true);
-    expect(banco.auditoria.every((l) => l.justificativaSelo !== undefined)).toBe(true);
+    // O selo é o **digest**, não uma cópia do texto. Enquanto ele guardava o
+    // texto, este expurgo limpava uma coluna e deixava a PII do operador ao
+    // lado — e as duas asserções acima passavam do mesmo jeito.
+    expect(banco.auditoria.every((l) => /^[0-9a-f]{64}$/.test(l.justificativaHash))).toBe(true);
+    expect(JSON.stringify(banco.auditoria)).not.toContain('Conferência de renda declarada');
     // E reexecutar é no-op.
     expect(banco.expurgarPiiDoTrail(Date.now() + 31 * 24 * 60 * 60 * 1000)).toBe(0);
   });
@@ -6403,5 +6423,408 @@ describe('PR 21 · sistema — a entidade chega às telas e à cascata', () => {
       .replace(/^\s*\*/gm, '').replace(/\s+/g, ' ');
     expect(schema).toContain('ele não vigia');
     expect(schema).toContain('Quem pega o que envelhece é a varredura');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 22 · Riscos 003 e 004 — o guardião passa a se vigiar
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Um CPF que o inventário **não** declara.
+ *
+ * Montado em tempo de execução de propósito. Escrevê-lo literal aqui seria PII
+ * não declarada no repositório, e o gate — corretamente — reprovaria o próprio
+ * arquivo de teste. É a catraca funcionando sobre quem a escreveu, e é a razão
+ * de o valor existir só enquanto o teste roda.
+ */
+const CPF_NAO_DECLARADO = `${['193', '746', '520'].join('.')}-88`;
+
+describe('PR 22 · unidade — o inventário decide, e o dígito verificador não', () => {
+  const raizes: string[] = [];
+  const repo = (arquivos: Record<string, string>): string => {
+    const raiz = mkdtempSync(join(tmpdir(), 'gate4-'));
+    raizes.push(raiz);
+    for (const [rel, conteudo] of Object.entries(arquivos)) {
+      const alvo = join(raiz, rel);
+      mkdirSync(dirname(alvo), { recursive: true });
+      writeFileSync(alvo, conteudo);
+    }
+    return raiz;
+  };
+  afterEach(() => { for (const r of raizes.splice(0)) rmSync(r, { recursive: true, force: true }); });
+
+  const EPICO = ['pbd:', ...PRINCIPIOS_PBD.map((p) => `  - chave: ${p.chave}\n    evidencia: src/app.ts`)].join('\n');
+  const base = (pii: string, extras: Record<string, string> = {}): Record<string, string> => ({
+    '.privacy/data-inventory.teste.yaml': 'repositorio: teste\ncampos:\n  - nome: campo',
+    '.privacy/pii-sintetica.yaml': pii,
+    '.privacy/epico.yml': EPICO,
+    'src/app.ts': 'export const x = 1;\n',
+    ...extras,
+  });
+  const VAZIO = 'cpf: []\ncnpj: []\ntelefone: []\nemail:\n  dominios: []';
+  const declara = (valor: string, onde: string[]): string =>
+    `cpf:\n  - valor: "${valor}"\n    motivo: massa de teste\n    onde: [${onde.join(', ')}]`
+    + '\ncnpj: []\ntelefone: []\nemail:\n  dominios: []';
+
+  it('a máscara preserva a forma e os extremos, e larga o miolo', () => {
+    // Conferível à mão sem ser legível: é o que o relatório do CI precisa.
+    expect(mascarar('274.065.813-77')).toBe('274.•••.•••-77');
+    expect(mascarar('ana@exemplo.test')).toBe('•••@exemplo.test');
+    expect(mascarar('274.065.813-77')).toMatch(/^\d{3}\./);
+  });
+
+  it('CPF válido no dígito verificador reprova igual a um inválido', () => {
+    // O dígito verificador é filtro barato, não decisor. Um gate que liberasse
+    // o inválido seria um validador de dígito com outro nome — e um documento
+    // real entra no repositório justamente por ser válido.
+    const valido = `${['529', '982', '247'].join('.')}-25`;
+    for (const cpf of [valido, CPF_NAO_DECLARADO]) {
+      const r = rodarGate(repo(base(VAZIO, { 'src/massa.ts': `export const c = '${cpf}';\n` })));
+      expect(r.aprovado, cpf).toBe(false);
+      expect(r.achados.some((a) => a.regra === 'pii/cpf'), cpf).toBe(true);
+    }
+  });
+
+  it('valor declarado passa no caminho declarado e reprova fora dele', () => {
+    const pii = declara(CPF_NAO_DECLARADO, ['src/massa.ts']);
+    const dentro = rodarGate(repo(base(pii, { 'src/massa.ts': `const c = '${CPF_NAO_DECLARADO}';\n` })));
+    expect(dentro.achados, relatorio(dentro)).toEqual([]);
+
+    const fora = rodarGate(repo(base(pii, {
+      'src/massa.ts': `const c = '${CPF_NAO_DECLARADO}';\n`,
+      'src/outro.ts': `const d = '${CPF_NAO_DECLARADO}';\n`,
+    })));
+    const achado = fora.achados.find((a) => a.regra === 'pii/fora-do-caminho')!;
+    expect(achado.arquivo).toBe('src/outro.ts');
+    expect(achado.mensagem).toContain('src/massa.ts');
+    // Declaração não é passe livre global: ela vale onde alguém disse que vale.
+    expect(achado.comoCorrigir).toContain('src/outro.ts');
+  });
+
+  it('CPF novo em arquivo JÁ declarado reprova — é a catraca que faltou', () => {
+    // O caso exato do Risco-003. `regras.test.tsx` já tinha 28 CPFs quando o
+    // gate varria um arquivo só; entre a auditoria e este PR o total subiu de 40
+    // para 45, e quem acrescentou os cinco fui eu, sem que nada perguntasse.
+    // Arquivo autorizado para um valor não é arquivo autorizado para qualquer um.
+    const outro = `${['864', '215', '073'].join('.')}-19`;
+    const r = rodarGate(repo(base(declara(CPF_NAO_DECLARADO, ['src/massa.ts']), {
+      'src/massa.ts': `const a = '${CPF_NAO_DECLARADO}';\nconst b = '${outro}';\n`,
+    })));
+    expect(r.aprovado).toBe(false);
+    const achado = r.achados.find((a) => a.regra === 'pii/cpf')!;
+    expect(achado.arquivo).toBe('src/massa.ts');
+    expect(achado.linha).toBe(2);
+    expect(achado.mensagem).toContain(mascarar(outro));
+    // E o valor que ESTAVA declarado não gera achado: a catraca é sobre o novo.
+    expect(r.achados.filter((a) => a.regra === 'pii/cpf')).toHaveLength(1);
+  });
+
+  it('caminho declarado terminado em barra cobre o diretório inteiro', () => {
+    const pii = declara(CPF_NAO_DECLARADO, ['docs/']);
+    const r = rodarGate(repo(base(pii, { 'docs/handoff/tela.md': `${CPF_NAO_DECLARADO}\n` })));
+    expect(r.achados, relatorio(r)).toEqual([]);
+  });
+
+  it('declaração morta reprova: lista que ninguém confere autoriza o que não está lá', () => {
+    const r = rodarGate(repo(base(declara(CPF_NAO_DECLARADO, ['src/massa.ts']))));
+    const achado = r.achados.find((a) => a.regra === 'pii/declaracao-morta')!;
+    expect(achado.arquivo).toBe('.privacy/pii-sintetica.yaml');
+    expect(achado.mensagem).toContain(mascarar(CPF_NAO_DECLARADO));
+    expect(achado.comoCorrigir).toContain('Remova a declaração');
+  });
+
+  it('inventário de PII ausente reprova, e ilegível também — nenhum dos dois vira lista vazia', () => {
+    const semArquivo = base(VAZIO);
+    delete semArquivo['.privacy/pii-sintetica.yaml'];
+    expect(rodarGate(repo(semArquivo)).achados.some((a) => a.regra === 'pii/inventario-ausente')).toBe(true);
+
+    const ilegivel = rodarGate(repo(base('cpf: [\n  - : :\n')));
+    expect(ilegivel.achados.some((a) => a.regra === 'pii/inventario-ilegivel')).toBe(true);
+    expect(ilegivel.aprovado).toBe(false);
+  });
+
+  it('o inventário é caminho implícito do que declara — senão não haveria como declarar', () => {
+    // O valor precisa ser escrito para ser declarado. Não é exceção escondida:
+    // é a única forma de a lista existir, e ela está inteira no diff.
+    const r = rodarGate(repo(base(declara(CPF_NAO_DECLARADO, ['src/massa.ts']),
+      { 'src/massa.ts': `const c = '${CPF_NAO_DECLARADO}';\n` })));
+    expect(r.achados, relatorio(r)).toEqual([]);
+  });
+});
+
+describe('PR 22 · integração — a varredura cobre o repositório, e a de campo não vazou', () => {
+  const raizes: string[] = [];
+  const repo = (arquivos: Record<string, string>): string => {
+    const raiz = mkdtempSync(join(tmpdir(), 'gate4i-'));
+    raizes.push(raiz);
+    for (const [rel, conteudo] of Object.entries(arquivos)) {
+      const alvo = join(raiz, rel);
+      mkdirSync(dirname(alvo), { recursive: true });
+      writeFileSync(alvo, conteudo);
+    }
+    return raiz;
+  };
+  afterEach(() => { for (const r of raizes.splice(0)) rmSync(r, { recursive: true, force: true }); });
+
+  const EPICO = ['pbd:', ...PRINCIPIOS_PBD.map((p) => `  - chave: ${p.chave}\n    evidencia: src/app.ts`)].join('\n');
+  const BASE = {
+    '.privacy/data-inventory.teste.yaml': 'repositorio: teste\ncampos:\n  - nome: campo',
+    '.privacy/pii-sintetica.yaml': 'cpf: []\ncnpj: []\ntelefone: []\nemail:\n  dominios: []',
+    '.privacy/epico.yml': EPICO,
+    'src/app.ts': 'export const x = 1;\n',
+  };
+
+  it('CPF em arquivo que não é log reprova nomeando arquivo e linha, e some quando sai', () => {
+    // A catraca nos dois sentidos. Sem a segunda metade, o teste passaria mesmo
+    // que o gate reprovasse tudo.
+    const com = rodarGate(repo({
+      ...BASE,
+      'db/tests.sql': `-- fixture\nSELECT '${CPF_NAO_DECLARADO}';\n`,
+    }));
+    expect(com.aprovado).toBe(false);
+    const achado = com.achados.find((a) => a.regra === 'pii/cpf')!;
+    expect(achado.arquivo).toBe('db/tests.sql');
+    expect(achado.linha).toBe(2);
+
+    const sem = rodarGate(repo({ ...BASE, 'db/tests.sql': "-- fixture\nSELECT 1;\n" }));
+    expect(sem.achados, relatorio(sem)).toEqual([]);
+  });
+
+  it('a varredura alcança SQL, HTML, Markdown e YAML — não só TypeScript', () => {
+    const r = rodarGate(repo({
+      ...BASE,
+      'db/seed.sql': `INSERT INTO t VALUES ('${CPF_NAO_DECLARADO}');\n`,
+      'prototipo/index.html': `<td>${CPF_NAO_DECLARADO}</td>\n`,
+      'docs/nota.md': `O CPF ${CPF_NAO_DECLARADO} aparece aqui.\n`,
+      'config/massa.yaml': `cpf: "${CPF_NAO_DECLARADO}"\n`,
+    }));
+    const arquivos = r.achados.filter((a) => a.regra === 'pii/cpf').map((a) => a.arquivo);
+    expect(new Set(arquivos)).toEqual(new Set([
+      'db/seed.sql', 'prototipo/index.html', 'docs/nota.md', 'config/massa.yaml',
+    ]));
+  });
+
+  it('a regra de campo fora do catálogo NÃO dispara em src/*.ts', () => {
+    // A separação de escopo do PR 4, provada em vez de prometida. Aplicada ao
+    // repositório inteiro, esta regra produziria 24.290 achados sobre 2.772
+    // identificadores — e um gate com vinte e quatro mil vermelhos é um gate
+    // desligado pela equipe em duas semanas.
+    const r = rodarGate(repo({
+      ...BASE,
+      'src/modelo.ts': 'export interface T { renda: number; cpf: string; endereco: string }\n',
+      'logs/a.log': 'campo=cpf renda=1200\n',
+    }));
+    const fora = r.achados.filter((a) => a.regra === 'catalogo/campo-nao-declarado');
+    // "renda" aparece nos dois arquivos; só a ocorrência no log é achado.
+    expect(fora.map((a) => a.arquivo)).toEqual(['logs/a.log']);
+    expect(fora.some((a) => a.mensagem.includes('"renda"'))).toBe(true);
+  });
+
+  it('diretório ignorado e binário pulado aparecem no relatório', () => {
+    const raiz = repo({ ...BASE, 'node_modules/lixo/x.ts': `const c = '${CPF_NAO_DECLARADO}';\n` });
+    writeFileSync(join(raiz, 'src', 'icone.bin'), Buffer.from([0x00, 0x01, 0x02, 0x00]));
+    const r = rodarGate(raiz);
+
+    // Nada é pulado em silêncio: o denominador entra no relatório junto do resultado.
+    expect(r.diretoriosIgnorados).toContain('node_modules');
+    expect(r.binariosPulados).toBe(1);
+    expect(relatorio(r)).toContain('1 binário(s) pulado(s)');
+    expect(relatorio(r)).toContain('node_modules');
+    // E o que está dentro do ignorado não é varrido — nem para o bem.
+    expect(r.achados.some((a) => a.arquivo?.includes('node_modules'))).toBe(false);
+  });
+});
+
+describe('PR 22 · unidade — a cadeia cobre a base legal, e o selo cobre o texto', () => {
+  let banco: BancoMock;
+  beforeEach(() => { banco = new BancoMock('banco'); });
+
+  const append = (extra: Partial<Parameters<BancoMock['auditAppend']>[0]> = {}) => banco.auditAppend({
+    ator: 'dpo', atorPapel: 'dpo', acao: 'RIPD_APROVADO', recursoTipo: 'ripd', recursoId: 'RIPD-1',
+    ...extra,
+  });
+
+  it('o selo é o sha256 da justificativa, e o texto não entra no payload', () => {
+    const l = append({ justificativa: 'Texto que sustenta o acesso em auditoria hoje.' });
+    expect(l.justificativaHash).toBe(sha256('Texto que sustenta o acesso em auditoria hoje.'));
+    expect(l.justificativaHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(l.hash).not.toContain('Texto que sustenta');
+  });
+
+  it('duas linhas idênticas com bases legais diferentes têm hashes diferentes', () => {
+    const a = new BancoMock('banco');
+    const b = new BancoMock('banco');
+    const l1 = a.auditAppend({
+      ator: 'dpo', atorPapel: 'dpo', acao: 'X', recursoTipo: 'y', recursoId: 'z',
+      baseLegal: 'consentimento',
+    });
+    const l2 = b.auditAppend({
+      ator: 'dpo', atorPapel: 'dpo', acao: 'X', recursoTipo: 'y', recursoId: 'z',
+      baseLegal: 'legitimo_interesse',
+    });
+    // `ocorridoEm` também está no payload, então o que se compara é a diferença
+    // de payload: mesma linha, base legal trocada, selo idêntico.
+    expect(l1.justificativaHash).toBe(l2.justificativaHash);
+    expect(l1.hash).not.toBe(l2.hash);
+  });
+
+  it('trocar a base legal de um registro quebra a verificação, e repor conserta', () => {
+    append({ baseLegal: 'consentimento' });
+    const alvo = banco.auditoria.at(-1)!;
+    expect(banco.auditVerificar().integro).toBe(true);
+
+    alvo.baseLegal = 'legitimo_interesse';
+    const v = banco.auditVerificar();
+    expect(v.integro).toBe(false);
+    expect(v.primeiraDivergencia).toBe(alvo.id);
+    expect(v.motivo).toBe('cadeia');
+
+    // Repor o valor faz a verificação voltar a fechar: a detecção é do campo,
+    // não de ruído que estava vermelho de qualquer jeito.
+    alvo.baseLegal = 'consentimento';
+    expect(banco.auditVerificar().integro).toBe(true);
+  });
+
+  it('reescrever a justificativa sem tocar no selo é detectado — e a cadeia sozinha não veria', () => {
+    append({ justificativa: 'Justificativa original com mais de vinte caracteres.' });
+    const alvo = banco.auditoria.at(-1)!;
+    const hashAntes = alvo.hash;
+
+    alvo.justificativa = 'Justificativa reescrita por quem tinha acesso ao banco.';
+    const v = banco.auditVerificar();
+    expect(v.integro).toBe(false);
+    expect(v.motivo).toBe('texto da justificativa não corresponde ao selo');
+    // A prova de que a segunda conferência faz trabalho: o hash da linha não
+    // mudou, porque a cadeia consome o selo e não o texto.
+    expect(alvo.hash).toBe(hashAntes);
+  });
+});
+
+describe('PR 22 · sistema — o expurgo dos 30 dias continua preservando a cadeia', () => {
+  it('o texto some, a PII do operador some junto, e a verificação continua fechando', () => {
+    const banco = new BancoMock('banco');
+    banco.auditAppend({
+      ator: 'dpo', atorPapel: 'dpo', acao: 'CAMPO_REVELADO', recursoTipo: 'campo', recursoId: 'cpf',
+      finalidade: 'atendimento', baseLegal: 'obrigacao_legal', campos: ['cpf'],
+      justificativa: 'Confirmação de identidade para o protocolo 2026-0731 do titular.',
+    });
+    expect(banco.auditVerificar().integro).toBe(true);
+
+    const n = banco.expurgarPiiDoTrail(Date.now() + 31 * 24 * 60 * 60 * 1000);
+    expect(n).toBeGreaterThan(0);
+
+    // Regressão do PR 2, protegida explicitamente: o selo sobrevive ao texto.
+    const v = banco.auditVerificar();
+    expect(v.integro, v.motivo ?? '').toBe(true);
+    expect(banco.auditoria.every((l) => /^[0-9a-f]{64}$/.test(l.justificativaHash))).toBe(true);
+    // E o texto não sobrou em campo nenhum — que era o buraco do selo antigo.
+    expect(JSON.stringify(banco.auditoria)).not.toContain('Confirmação de identidade');
+
+    // A base legal continua selada depois do expurgo: adulterá-la ainda acusa.
+    const alvo = banco.auditoria.find((l) => l.baseLegal === 'obrigacao_legal')!;
+    alvo.baseLegal = 'consentimento';
+    expect(banco.auditVerificar().integro).toBe(false);
+  });
+
+  it('a revelação de campo grava a base legal do catálogo, não a que o operador alegar', () => {
+    const campo = banco.cenario.campos.find((c) => c.id === 'b-cpf')!;
+    const res = chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/pseudonyms/resolve', purpose: 'atendimento',
+      body: {
+        titularId: 't1', campo: 'cpf', protocolo: '2026-0731',
+        justificativa: 'Confirmação de identidade para o atendimento do protocolo 2026-0731.',
+      },
+    });
+    expect(res.status).toBe(200);
+    const linha = banco.auditoria.at(-1)!;
+    expect(linha.acao).toBe('CAMPO_REVELADO');
+    expect(linha.baseLegal).toBe(campo.baseLegal);
+    expect(banco.auditVerificar().integro).toBe(true);
+  });
+});
+
+describe('PR 22 · aceitação — o gate olha o repositório inteiro, e a catraca prova', () => {
+  it('a varredura lê o repositório todo, e cair para um arquivo reprova este teste', () => {
+    const r = rodarGate(resolve('..'));
+    // A catraca do Risco-003. O gate varria UM arquivo — o log de exemplo — e
+    // aprovava com 45 CPFs formatados em 7 arquivos. Se este número voltar a
+    // encolher, é este teste que morre, e com o motivo escrito.
+    expect(r.arquivosVarridos, 'Risco-003: o gate voltou a varrer quase nada')
+      .toBeGreaterThan(50);
+    expect(r.logsVarridos, 'e a varredura de log continua existindo').toBeGreaterThan(0);
+    expect(r.arquivosVarridos).toBeGreaterThan(r.logsVarridos);
+    expect(r.achados, relatorio(r)).toEqual([]);
+  });
+
+  it('o relatório informa o denominador antes do resultado', () => {
+    const texto = relatorio(rodarGate(resolve('..')));
+    // "Nenhum achado" sobre um arquivo e sobre noventa e cinco são a mesma
+    // frase com valores probatórios opostos.
+    expect(texto).toMatch(/\d+ arquivo\(s\) varrido\(s\)/);
+    expect(texto).toContain('log(s)');
+    expect(texto).toContain('binário(s) pulado(s)');
+    expect(texto).toContain('Fora da varredura:');
+  });
+
+  it('nenhum e-mail em domínio registrável e nenhum CPF válido no dígito verificador', () => {
+    const digito = (cpf: string): boolean => {
+      const n = cpf.replace(/\D/g, '').split('').map(Number);
+      if (new Set(n).size === 1) return false;
+      const dv = (len: number) => {
+        const s = n.slice(0, len).reduce((acc, d, i) => acc + d * (len + 1 - i), 0);
+        return (s * 10) % 11 === 10 ? 0 : (s * 10) % 11;
+      };
+      return dv(9) === n[9] && dv(10) === n[10];
+    };
+
+    const inventario = parseYaml(readFileSync('../.privacy/pii-sintetica.yaml', 'utf8')) as {
+      cpf: { valor: string }[];
+      email: { dominios: { dominio: string }[] };
+    };
+
+    // Um documento estruturalmente válido pode pertencer a alguém, e "é o
+    // exemplo de todo mundo" não é uma garantia técnica.
+    for (const c of inventario.cpf) {
+      expect(digito(c.valor), `${c.valor} passa no dígito verificador`).toBe(false);
+    }
+    // RFC 2606: só .test, .example e .invalid não podem ser registrados.
+    for (const d of inventario.email.dominios) {
+      expect(d.dominio, `${d.dominio} é um domínio registrável`)
+        .toMatch(/\.(test|example|invalid)$/);
+    }
+  });
+
+  it('a ordem do payload é a mesma no mock e no schema — as duas mudam juntas', () => {
+    // Uma verificação que monta o payload em ordem diferente da gravação acusa
+    // o trail inteiro de adulterado e vira ruído que a equipe aprende a ignorar.
+    const schema = readFileSync('../db/schema.sql', 'utf8');
+    const mock = readFileSync('src/mock/db.ts', 'utf8');
+
+    const posicaoNoSchema = (campo: string) => schema.indexOf(`NEW.${campo}`, schema.indexOf('v_payload :='));
+    expect(posicaoNoSchema('finalidade')).toBeLessThan(posicaoNoSchema('base_legal'));
+    expect(posicaoNoSchema('base_legal')).toBeLessThan(posicaoNoSchema('campos'));
+
+    const payload = mock.slice(mock.indexOf('private calcularHash'), mock.indexOf('Expurga a PII'));
+    expect(payload.indexOf('l.finalidade')).toBeLessThan(payload.indexOf('l.baseLegal'));
+    expect(payload.indexOf('l.baseLegal')).toBeLessThan(payload.indexOf('l.campos'));
+    // E o texto da justificativa não é alcançável de dentro do cálculo.
+    expect(payload).toContain('l.justificativaHash');
+    expect(payload).not.toContain('l.justificativa ');
+
+    // As duas pontas do SQL selam a base legal: gravar e verificar.
+    expect(schema.match(/coalesce\(NEW\.base_legal::text, '-'\)/)).not.toBeNull();
+    expect(schema.match(/coalesce\(r\.base_legal::text, '-'\)/)).not.toBeNull();
+  });
+
+  it('db/tests.sql prova a detecção nos dois campos, e prova que repor conserta', () => {
+    const sql = readFileSync('../db/tests.sql', 'utf8');
+    expect(sql).toContain('trocar a base legal do trail quebra a verificação');
+    expect(sql).toContain('reescrever a justificativa sem tocar no selo é detectado');
+    // A asserção que separa "detectou" de "estava vermelho de qualquer jeito".
+    expect(sql).toContain('repor a base legal original faz a verificação voltar a fechar');
+    expect(sql).toContain('a cadeia sozinha não acusaria');
+    // E a regressão do PR 2 continua no arquivo.
+    expect(sql).toContain('cadeia íntegra DEPOIS do expurgo de PII');
   });
 });

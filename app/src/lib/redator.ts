@@ -3,7 +3,7 @@
  *
  * O audit trail é imutável: o que entra nele fica. Justificativa de revelação,
  * fundamento de reclassificação, motivo de revisão — tudo isso é campo aberto
- * onde alguém digita "confirmando o CPF 529.982.247-25 da titular" com a melhor
+ * onde alguém digita "confirmando o CPF 274.065.813-77 da titular" com a melhor
  * das intenções, e o documento passa a viver para sempre num registro que
  * ninguém pode editar. Redigir depois não é opção; a redação acontece **antes
  * do append**, não na exibição.

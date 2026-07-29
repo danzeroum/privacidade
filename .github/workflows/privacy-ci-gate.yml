@@ -1,8 +1,21 @@
 # Gate de privacidade (PR 11) — o que o C-18 prometeu para depois.
 #
 # O gate mínimo (`ci.yml`) prova que compila e que as nove regras passam. Este
-# prova outra coisa: que **este repositório** não publica dado pessoal, não trata
-# campo fora do catálogo declarado e não marca princípio de PbD sem evidência.
+# prova outra coisa: que **este repositório** não publica dado pessoal fora do
+# inventário sintético declarado, não trata campo fora do catálogo declarado e
+# não marca princípio de PbD sem evidência.
+#
+# O escopo é o repositório inteiro (PR 4, Risco-003), e não mais só os caminhos
+# de log: a varredura de PII lê todo arquivo de texto e o relatório imprime
+# quantos leu, quantos eram log, quantos binários pulou e quais diretórios ficou
+# de fora. Enquanto o número era 1, "nenhum achado" era uma frase verdadeira
+# sobre um recorte que ninguém tinha percebido — que é a forma mais confortável
+# de um controle falhar. O denominador entra no relatório por isso.
+#
+# A varredura de **campo fora do catálogo** continua restrita a log, e é medição
+# e não preguiça: aplicada ao repositório inteiro ela produz 24.290 achados sobre
+# 2.772 identificadores, porque `campo:` em TypeScript é declaração de variável e
+# não registro escrito.
 #
 # A regra que separa este arquivo de um linter de texto: ele barra por
 # **evidência**. Não procura a palavra "privacidade" no PR, não conta linhas de

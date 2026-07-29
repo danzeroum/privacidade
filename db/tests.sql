@@ -105,7 +105,7 @@ $$, 'revelação de campo sem finalidade (Art. 37)');
 -- Mensagem entre titular e DPO não carrega CPF em claro.
 SELECT assert_falha($$
   INSERT INTO solicitacao_mensagem (solicitacao_id, remetente, corpo)
-  SELECT id,'dpo','Confirmando o CPF 529.982.247-25 do titular.'
+  SELECT id,'dpo','Confirmando o CPF 274.065.813-77 do titular.'
   FROM solicitacao_titular WHERE protocolo = '2026-0731'
 $$, 'CPF em claro no canal titular↔DPO');
 
@@ -143,7 +143,7 @@ $$, 'segunda chave ativa para a mesma finalidade');
 -- ---------------------------------------------------------------------
 SELECT assert_falha($$
   INSERT INTO gate_finding (gate_run_id, regra, severidade, mensagem_bruta, mensagem_humana, como_corrigir, padrao_casado)
-  VALUES ('99999999-9999-4999-8999-000000000001','pii_em_log','alta','x','y','z','52998224725')
+  VALUES ('99999999-9999-4999-8999-000000000001','pii_em_log','alta','x','y','z','27406581377')
 $$, 'CPF vazando na evidência do gate');
 
 -- ---------------------------------------------------------------------
@@ -156,6 +156,106 @@ SELECT assert_igual(
 SELECT assert_igual(
   (SELECT count(*)::bigint FROM audit_log WHERE hash_anterior IS NULL), 1::bigint,
   'apenas o bloco gênese sem predecessor');
+
+-- ---------------------------------------------------------------------
+-- Risco-004 — a cadeia cobre a BASE LEGAL, e o selo cobre o TEXTO
+-- ---------------------------------------------------------------------
+--
+-- Dois buracos diferentes, com detecções diferentes, e é por isso que os testes
+-- abaixo repõem o valor original em vez de deixarem o trail quebrado:
+--
+--   · `base_legal` estava gravada e **fora do payload**. Trocar `consentimento`
+--     por `legitimo_interesse` na linha que registrou o acesso reescrevia a
+--     justificação jurídica do tratamento sem quebrar nada — quem consumisse a
+--     verificação via verde.
+--
+--   · a justificativa entra na cadeia como sha256 (é o que permite expurgá-la
+--     sem quebrar a prova), e por isso a cadeia sozinha **não** percebe o texto
+--     trocado: ela consome o selo. Quem percebe é a conferência do selo contra
+--     o texto, e o teste abaixo prova as duas coisas separadamente.
+--
+-- Repor o valor e ver a verificação voltar a fechar é o que separa "detectou"
+-- de "estava vermelho de qualquer jeito".
+
+CREATE TEMP TABLE _alvo_da_cadeia AS
+SELECT id, base_legal, justificativa
+  FROM audit_log
+ WHERE tenant_id = '11111111-1111-4111-8111-111111111111'
+   AND base_legal IS NOT NULL AND justificativa IS NOT NULL
+ ORDER BY id LIMIT 1;
+
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM _alvo_da_cadeia) <> 1 THEN
+    RAISE EXCEPTION 'FALHA: nenhuma linha do trail tem base legal e justificativa — o teste não provaria nada.';
+  END IF;
+END $$;
+
+-- ── a base legal ─────────────────────────────────────────────────────────────
+ALTER TABLE audit_log DISABLE TRIGGER audit_log_imutavel;
+UPDATE audit_log
+   SET base_legal = CASE WHEN base_legal = 'legitimo_interesse'
+                         THEN 'consentimento'::base_legal ELSE 'legitimo_interesse'::base_legal END
+ WHERE id = (SELECT id FROM _alvo_da_cadeia);
+ALTER TABLE audit_log ENABLE TRIGGER audit_log_imutavel;
+
+SELECT assert_igual(
+  (SELECT bool_and(integro) FROM verificar_integridade_audit('11111111-1111-4111-8111-111111111111')),
+  false, 'trocar a base legal do trail quebra a verificação');
+
+SELECT assert_igual(
+  (SELECT min(linha_id) FROM verificar_integridade_audit('11111111-1111-4111-8111-111111111111')
+    WHERE NOT integro),
+  (SELECT id FROM _alvo_da_cadeia), 'a divergência começa exatamente na linha adulterada');
+
+SELECT assert_igual(
+  (SELECT motivo FROM verificar_integridade_audit('11111111-1111-4111-8111-111111111111')
+    WHERE linha_id = (SELECT id FROM _alvo_da_cadeia)),
+  'cadeia'::text, 'e o motivo apontado é a cadeia, não o selo');
+
+ALTER TABLE audit_log DISABLE TRIGGER audit_log_imutavel;
+UPDATE audit_log SET base_legal = (SELECT base_legal FROM _alvo_da_cadeia)
+ WHERE id = (SELECT id FROM _alvo_da_cadeia);
+ALTER TABLE audit_log ENABLE TRIGGER audit_log_imutavel;
+
+SELECT assert_igual(
+  (SELECT bool_and(integro) FROM verificar_integridade_audit('11111111-1111-4111-8111-111111111111')),
+  true, 'repor a base legal original faz a verificação voltar a fechar');
+
+-- ── o texto da justificativa ────────────────────────────────────────────────
+ALTER TABLE audit_log DISABLE TRIGGER audit_log_imutavel;
+UPDATE audit_log SET justificativa = justificativa || ' — reescrito por quem tinha acesso ao banco'
+ WHERE id = (SELECT id FROM _alvo_da_cadeia);
+ALTER TABLE audit_log ENABLE TRIGGER audit_log_imutavel;
+
+SELECT assert_igual(
+  (SELECT integro FROM verificar_integridade_audit('11111111-1111-4111-8111-111111111111')
+    WHERE linha_id = (SELECT id FROM _alvo_da_cadeia)),
+  false, 'reescrever a justificativa sem tocar no selo é detectado');
+
+-- A prova de que a segunda conferência faz trabalho: o hash da linha continua
+-- batendo, porque a cadeia consome o selo e não o texto. Sem esta asserção, o
+-- teste acima passaria mesmo que a detecção viesse de outro lugar.
+SELECT assert_igual(
+  (SELECT esperado = encontrado FROM verificar_integridade_audit('11111111-1111-4111-8111-111111111111')
+    WHERE linha_id = (SELECT id FROM _alvo_da_cadeia)),
+  true, 'a cadeia sozinha não acusaria: o hash da linha ainda fecha');
+
+SELECT assert_igual(
+  (SELECT motivo FROM verificar_integridade_audit('11111111-1111-4111-8111-111111111111')
+    WHERE linha_id = (SELECT id FROM _alvo_da_cadeia)),
+  'texto da justificativa não corresponde ao selo'::text, 'e o motivo nomeia o selo');
+
+ALTER TABLE audit_log DISABLE TRIGGER audit_log_imutavel;
+UPDATE audit_log SET justificativa = (SELECT justificativa FROM _alvo_da_cadeia)
+ WHERE id = (SELECT id FROM _alvo_da_cadeia);
+ALTER TABLE audit_log ENABLE TRIGGER audit_log_imutavel;
+
+SELECT assert_igual(
+  (SELECT bool_and(integro) FROM verificar_integridade_audit('11111111-1111-4111-8111-111111111111')),
+  true, 'repor o texto original faz a verificação voltar a fechar');
+
+DROP TABLE _alvo_da_cadeia;
 
 -- ---------------------------------------------------------------------
 -- Art. 37 c/c Art. 16 — o trail tem prazo, e a cadeia sobrevive ao expurgo
