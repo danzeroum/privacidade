@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'path';
 import { tmpdir } from 'os';
 import { render, screen, fireEvent, act, cleanup, within } from '@testing-library/react';
 import { BancoMock } from '../src/mock/db';
+import { CENARIOS } from '../src/mock/scenarios';
 import { request } from '../src/mock/api';
 import { ACOES, pode } from '../src/mock/permissoes';
 import type { Acao } from '../src/mock/permissoes';
@@ -28,6 +29,7 @@ import type { Obrigacao } from '../src/mock/calendario';
 import { PRINCIPIOS_PBD, avaliarPbd, vereditoPbd } from '../src/mock/pbd';
 import type { MarcacaoPbd, VereditoPbd } from '../src/mock/pbd';
 import { relatorio, rodarGate } from '../src/lib/gate-privacidade';
+import { hashEncadeado } from '../src/lib/sha256';
 import { CampoPII, Didatico, Explica } from '../src/ui/primitivos';
 import { MemoryRouter } from 'react-router-dom';
 import T2 from '../src/screens/T2';
@@ -42,6 +44,7 @@ import T7 from '../src/screens/T7';
 import T8 from '../src/screens/T8';
 import T4 from '../src/screens/T4';
 import T6 from '../src/screens/T6';
+import T11, { DESVIOS, trilhaDoAchado } from '../src/screens/T11';
 import { useSessao, limparBancosDaSessao } from '../src/store/sessao';
 import { sha256, hashCpf } from '../src/lib/sha256';
 import type { DecisaoRegistrada, EstadoIncidente, Papel } from '../src/mock/types';
@@ -2165,17 +2168,25 @@ describe('PR 7 · a rota de transição — sequência, conteúdo, registro', ()
   it('aceitação — achado: executado → encerrado é 409; reaberto eleva a criticidade', () => {
     const achado = banco.cenario.achados[0];
     achado.status = 'executado';
+    achado.executadoPor = '@eng-rafael';
 
     const pulando = mover('achado', achado.id, { para: 'encerrado' });
     expect(pulando.status).toBe(409);
     expect(pulando.regra).toContain('verificação independente');
     expect(achado.status).toBe('executado');
 
-    expect(mover('achado', achado.id, { para: 'verificado', verificadoPor: '@auditoria' }).status).toBe(200);
+    // PR 15 — verificar passou a exigir independência aferida contra o
+    // artefato, veredito e evidência. A contraprova de que a exigência é real
+    // vem no bloco do PR 15; aqui basta o caminho completo.
+    expect(mover('achado', achado.id, {
+      para: 'verificado', verificadoPor: '@auditoria', eficaciaAtingida: true, evidencia: 'conferencia.csv',
+    }).status).toBe(200);
 
     const criticidadeAntes = achado.criticidade;
     expect(criticidadeAntes).toBe('alta');
-    expect(mover('achado', achado.id, { para: 'reaberto' }).status).toBe(200);
+    expect(mover('achado', achado.id, {
+      para: 'reaberto', motivo: 'A conferência cobriu um ambiente só e o outro segue sem o controle.',
+    }).status).toBe(200);
     expect(achado.criticidade).toBe('critica');
     expect(achado.reincidencias).toBe(1);
   });
@@ -4204,5 +4215,344 @@ describe('PR 14 · validação — o que o documento enuncia é o que a LGPD exi
     });
     expect(res.status).toBe(503);
     expect(b.cenario.riscos[0].status).toBe('em_tratamento');
+  });
+});
+
+describe('PR 15 · o ciclo do achado — verificação separada de validação', () => {
+  let banco: BancoMock;
+  const mover = (id: string, body: Record<string, unknown>, papel: Papel = 'dpo') => request(banco, {
+    papel, ator: 'teste', metodo: 'POST', caminho: `/v1/estados/achado/${id}`, body,
+  });
+
+  beforeEach(() => {
+    limparBancosDaSessao();
+    banco = new BancoMock('banco');
+  });
+
+  /**
+   * O achado deste bloco é o eixo do PR: mesmo estado de partida, mesma
+   * sequência legal, e dois desfechos diferentes por causa do **conteúdo**.
+   */
+  it('executado → encerrado é 409 e verificado → encerrado com eficácia negada é 422', () => {
+    const a = banco.cenario.achados.find((x) => x.codigo === 'ACH-2026-014')!;
+    expect(a.status).toBe('executado');
+
+    // Sequência errada: a máquina recusa antes de olhar qualquer conteúdo.
+    const pulo = mover(a.codigo, { para: 'encerrado' });
+    expect(pulo.status).toBe(409);
+    expect(pulo.regra).toContain('verificação independente');
+
+    // Sequência certa, conteúdo insuficiente: a rota deixa passar a ordem e
+    // recusa a conclusão. Trocar este 422 por 409 mandaria a pessoa refazer o
+    // caminho quando o caminho estava certo.
+    const negado = banco.cenario.achados.find((x) => x.codigo === 'ACH-2026-002')!;
+    expect(negado.status).toBe('verificado');
+    expect(negado.eficaciaAtingida).toBe(false);
+    const recusa = mover(negado.codigo, { para: 'encerrado' });
+    expect(recusa.status).toBe(422);
+    expect(recusa.body).toMatchObject({ erro: expect.stringContaining('não foi atingido') });
+    expect(negado.status).toBe('verificado');
+
+    // E o mesmo estado, com o veredito oposto, encerra.
+    const atingido = banco.cenario.achados.find((x) => x.codigo === 'ACH-2026-003')!;
+    expect(mover(atingido.codigo, { para: 'encerrado' }).status).toBe(200);
+    expect(atingido.status).toBe('encerrado');
+  });
+
+  it('quem executou não verifica — e a rota afere isso contra o artefato', () => {
+    const a = banco.cenario.achados.find((x) => x.codigo === 'ACH-2026-014')!;
+    expect(a.executadoPor).toBe('@eng-rafael');
+
+    const mesmoNome = mover(a.codigo, {
+      para: 'verificado', verificadoPor: '@eng-rafael', eficaciaAtingida: true, evidencia: 'conferido.log',
+    });
+    expect(mesmoNome.status).toBe(422);
+    expect(mesmoNome.body).toMatchObject({ erro: expect.stringContaining('independente') });
+    expect(a.status).toBe('executado');
+
+    // A independência é aferida contra o **artefato**, não contra o corpo: quem
+    // pediu a transição não consegue mudar o executor no mesmo formulário.
+    const mentindo = mover(a.codigo, {
+      para: 'verificado', executadoPor: '@outra-pessoa',
+      verificadoPor: '@eng-rafael', eficaciaAtingida: true, evidencia: 'conferido.log',
+    });
+    expect(mentindo.status).toBe(422);
+    expect(a.status).toBe('executado');
+
+    expect(mover(a.codigo, {
+      para: 'verificado', verificadoPor: '@dpo-marcela', eficaciaAtingida: true, evidencia: 'conferido.log',
+    }).status).toBe(200);
+    expect(a.verificadoPor).toBe('@dpo-marcela');
+  });
+
+  it('verificar exige concluir contra o critério — não basta ter olhado', () => {
+    const a = banco.cenario.achados.find((x) => x.codigo === 'ACH-2026-014')!;
+    const semVeredito = mover(a.codigo, {
+      para: 'verificado', verificadoPor: '@dpo-marcela', evidencia: 'conferido.log',
+    });
+    expect(semVeredito.status).toBe(422);
+    expect(semVeredito.body).toMatchObject({ erro: expect.stringContaining('sim ou não') });
+
+    // "sim" em texto não é veredito: booleano ausente cai na mesma recusa, e
+    // não em `Boolean('nao') === true`, que é o defeito silencioso da coerção.
+    expect(mover(a.codigo, {
+      para: 'verificado', verificadoPor: '@dpo-marcela', eficaciaAtingida: 'nao', evidencia: 'x.log',
+    }).status).toBe(422);
+    expect(a.status).toBe('executado');
+  });
+
+  it('o critério de eficácia é exigido no plano, antes de existir resultado', () => {
+    const a = banco.cenario.achados.find((x) => x.codigo === 'ACH-2026-007')!;
+    expect(mover(a.codigo, {
+      para: 'causa_raiz', causaRaiz: 'O redator não era aplicado na rota de cobrança e o log saía cru.',
+    }).status).toBe(200);
+
+    const semCriterio = mover(a.codigo, {
+      para: 'plano', plano: 'Passar toda escrita de log pelo redator e barrar no gate de CI.',
+    });
+    expect(semCriterio.status).toBe(422);
+    expect(semCriterio.body).toMatchObject({ erro: expect.stringContaining('critério de eficácia') });
+    expect(a.status).toBe('causa_raiz');
+    expect(a.plano).toBeUndefined();
+
+    expect(mover(a.codigo, {
+      para: 'plano', plano: 'Passar toda escrita de log pelo redator e barrar no gate de CI.',
+      criterioDeEficacia: 'Trinta dias de log sem nenhuma ocorrência de CPF, conferidos pelo gate.',
+    }).status).toBe(200);
+    expect(a.criterioDeEficacia).toContain('Trinta dias');
+  });
+
+  it('executar exige executor declarado e evidência — relato não fecha achado', () => {
+    const a = banco.cenario.achados.find((x) => x.codigo === 'ACH-2026-011')!;
+    expect(a.status).toBe('plano');
+
+    expect(mover(a.codigo, { para: 'executado', evidencia: 'expurgo.log' }).status).toBe(422);
+    const semProva = mover(a.codigo, { para: 'executado', executadoPor: '@eng-rafael' });
+    expect(semProva.status).toBe(422);
+    expect(semProva.body).toMatchObject({ erro: expect.stringContaining('evidência') });
+    expect(a.status).toBe('plano');
+
+    expect(mover(a.codigo, {
+      para: 'executado', executadoPor: '@eng-rafael', evidencia: 'expurgo-180d.log',
+    }).status).toBe(200);
+  });
+
+  it('reabrir exige motivo, eleva criticidade e não herda a análise que falhou', () => {
+    const a = banco.cenario.achados.find((x) => x.codigo === 'ACH-2026-002')!;
+    expect(mover(a.codigo, { para: 'reaberto', motivo: 'curto' }).status).toBe(422);
+    expect(a.status).toBe('verificado');
+
+    const antes = { criticidade: a.criticidade, reincidencias: a.reincidencias };
+    expect(mover(a.codigo, {
+      para: 'reaberto',
+      motivo: 'O checkout web seguiu sem versão registrada e é por onde entra a maior parte dos aceites.',
+    }).status).toBe(200);
+
+    expect(a.status).toBe('reaberto');
+    expect(a.reincidencias).toBe(antes.reincidencias + 1);
+    expect(a.criticidade).toBe('critica');
+    expect(antes.criticidade).toBe('critica');
+
+    // A análise anterior **não** volta preenchida: reincidência que recomeça do
+    // plano antigo refaz exatamente o que já falhou uma vez.
+    expect(a.causaRaiz).toBeUndefined();
+    expect(a.plano).toBeUndefined();
+    expect(a.criterioDeEficacia).toBeUndefined();
+    expect(a.eficaciaAtingida).toBeUndefined();
+    expect(a.verificadoPor).toBeUndefined();
+    // As evidências ficam: elas são prova do que houve, não rascunho.
+    expect(a.evidencias.length).toBe(2);
+    expect(a.motivoDaReabertura).toContain('checkout web');
+
+    // E a causa raiz nova é cobrada com mensagem própria da reincidência.
+    const generico = mover(a.codigo, { para: 'causa_raiz', causaRaiz: 'idem' });
+    expect(generico.status).toBe(422);
+    expect(generico.body).toMatchObject({ erro: expect.stringContaining('Reincidência') });
+  });
+
+  it('a evidência entra no trail antes de ser anexada — falha de log não deixa anexo órfão', () => {
+    const a = banco.cenario.achados.find((x) => x.codigo === 'ACH-2026-011')!;
+    banco.simularFalhaDeLog = true;
+    const res = mover(a.codigo, {
+      para: 'executado', executadoPor: '@eng-rafael', evidencia: 'expurgo-180d.log',
+    });
+    expect(res.status).toBe(503);
+    expect(a.status).toBe('plano');
+    expect(a.evidencias).toHaveLength(0);
+    expect(a.executadoPor).toBeUndefined();
+
+    banco.simularFalhaDeLog = false;
+    expect(mover(a.codigo, {
+      para: 'executado', executadoPor: '@eng-rafael', evidencia: 'expurgo-180d.log',
+    }).status).toBe(200);
+
+    const prova = a.evidencias.at(-1)!;
+    const linha = banco.auditoria.filter((l) => l.recursoId === a.codigo).at(-1)!;
+    expect(linha.campos).toContain(`evidencia:${prova.hash}`);
+    expect(linha.campos).toContain('plano→executado');
+  });
+
+  it('a cadeia de custódia encadeia, e a semente confere pela mesma função', () => {
+    const a = banco.cenario.achados.find((x) => x.codigo === 'ACH-2026-002')!;
+    expect(a.evidencias).toHaveLength(2);
+    expect(a.evidencias[0].hashAnterior).toBeNull();
+    expect(a.evidencias[1].hashAnterior).toBe(a.evidencias[0].hash);
+    // Etapas distintas: prova de execução não é prova de eficácia.
+    expect(a.evidencias.map((e) => e.etapa)).toEqual(['executado', 'verificado']);
+
+    // A massa de demonstração é conferida pela regra do produto, e não por
+    // números digitados ao lado dela.
+    for (const c of Object.values(CENARIOS)) {
+      for (const achado of c.achados) {
+        let anterior: string | null = null;
+        for (const e of achado.evidencias) {
+          expect(e.hashAnterior, `${c.id}/${achado.codigo}`).toBe(anterior);
+          expect(e.hash, `${c.id}/${achado.codigo}/${e.arquivo}`)
+            .toBe(hashEncadeado(anterior, e.arquivo, e.etapa));
+          anterior = e.hash;
+        }
+      }
+    }
+  });
+
+  it('a evidência só entra nas duas etapas que produzem prova', () => {
+    const a = banco.cenario.achados.find((x) => x.codigo === 'ACH-2026-007')!;
+    expect(mover(a.codigo, {
+      para: 'causa_raiz',
+      causaRaiz: 'O redator não era aplicado na rota de cobrança e o log saía cru.',
+      evidencia: 'tentativa-de-anexo.pdf',
+    }).status).toBe(200);
+    // Cadeia que aceita anexo em qualquer passo é depósito, não cadeia.
+    expect(a.evidencias).toHaveLength(0);
+  });
+});
+
+describe('PR 15 · T11 na tela — a fila chega em algum lugar que opera', () => {
+  const montar = (papel: Papel, ajustar: (b: BancoMock) => void = () => {}) => {
+    limparBancosDaSessao();
+    const b = new BancoMock('banco');
+    ajustar(b);
+    useSessao.setState({ papel, banco: b, versao: 0, avisos: [], recusas: {} });
+    return b;
+  };
+
+  it('a tela de destino opera a ação da regra — e não só existe', () => {
+    /**
+     * O PR 9 já conferia que a tela existe em `TELAS`, e por isso o defeito
+     * passou: o achado apontava para a T6, que existe, mostra trail e expurgo e
+     * **não tem nenhum controle de `gerenciar_achado`**. Item de fila que chega
+     * numa tela sem o ato é fila que não fecha nada.
+     *
+     * A conferência é sobre a fonte da tela: a ação da regra tem de aparecer
+     * nela, que é onde `Permitido` a consome.
+     */
+    for (const r of REGRAS) {
+      const tela = TELAS.find((t) => t.rota === r.tela)!;
+      const fonte = readFileSync(`src/screens/${tela.id}.tsx`, 'utf8');
+      expect(fonte, `${r.tela} (${tela.nome}) não opera "${r.acao}", pedida por ${r.artefato} ${r.estado}`)
+        .toContain(r.acao);
+    }
+    expect(REGRAS.filter((r) => r.artefato === 'achado').map((r) => r.tela))
+      .toEqual(Array(6).fill('/t11'));
+  });
+
+  it('a faixa de passos é derivada da máquina, e nenhum estado fica de fora', () => {
+    const trilha = trilhaDoAchado();
+    expect(trilha).toEqual(['aberto', 'causa_raiz', 'plano', 'executado', 'verificado', 'encerrado']);
+    // Cada passo da trilha é aresta legal — a faixa não desenha caminho que a
+    // rota recusaria.
+    trilha.slice(1).forEach((e, i) => {
+      expect(proximosDe('achado', trilha[i]), `${trilha[i]}→${e}`).toContain(e);
+    });
+    // E a trilha mais os desvios cobrem a máquina inteira: estado novo em
+    // `estados.ts` que ninguém pôs na tela vira falha, não omissão.
+    expect([...trilha, ...DESVIOS].sort()).toEqual([...estadosDe('achado')].sort());
+    expect(DESVIOS).toEqual(['reaberto']);
+  });
+
+  it('a tela não avança estado por conta própria — só existe a rota genérica', () => {
+    const fonte = readFileSync('src/screens/T11.tsx', 'utf8');
+    const caminhos = [...fonte.matchAll(/caminho: `([^`]+)`/g)].map((m) => m[1]);
+    expect(caminhos).toEqual(['/v1/estados/achado/${achado.codigo}']);
+    // Nenhuma atribuição de estado na tela: quem move o artefato é a rota.
+    expect(fonte).not.toMatch(/\.status\s*=[^=]/);
+    expect(fonte).not.toMatch(/MAQUINAS|transicaoPermitida/);
+  });
+
+  it('sem gerenciar_achado a tela é leitura — ausência, não controle desligado', () => {
+    for (const papel of ['produto', 'seguranca', 'auditor'] as Papel[]) {
+      cleanup();
+      montar(papel);
+      render(<MemoryRouter><T11 /></MemoryRouter>);
+      for (const rotulo of [/Registrar causa raiz/, /Propor plano/, /Registrar execução/,
+        /Registrar verificação/, /Encerrar achado/, /Reabrir achado/]) {
+        expect(screen.queryByRole('button', { name: rotulo }), `${papel}: ${rotulo}`)
+          .not.toBeInTheDocument();
+      }
+      // E não é `disabled` escondendo permissão: não há controle desligado na
+      // região do ciclo.
+      const cartao = screen.getByText('Avançar o ciclo').closest('section') as HTMLElement;
+      expect(cartao.querySelectorAll('button, input, textarea, select')).toHaveLength(0);
+      // A leitura permanece: o auditor perde o ato, não a informação.
+      expect(within(cartao).getByText(/lê o ciclo/)).toBeInTheDocument();
+    }
+    cleanup();
+
+    montar('engenharia');
+    render(<MemoryRouter><T11 /></MemoryRouter>);
+    expect(screen.getByRole('button', { name: /Registrar causa raiz/ })).toBeInTheDocument();
+  });
+
+  it('em executado não existe "encerrar", e a tela diz que é 409 e por quê', () => {
+    montar('dpo', (b) => { b.cenario.achados = [b.cenario.achados.find((a) => a.status === 'executado')!]; });
+    render(<MemoryRouter><T11 /></MemoryRouter>);
+
+    expect(screen.queryByRole('button', { name: /Encerrar achado/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Registrar verificação/ })).toBeInTheDocument();
+    expect(screen.getByText(/executado → encerrado/)).toBeInTheDocument();
+    expect(screen.getByText(/409/)).toBeInTheDocument();
+  });
+
+  it('em verificado, o veredito decide se "encerrar" existe — e o texto explica a diferença', () => {
+    montar('dpo', (b) => { b.cenario.achados = [b.cenario.achados.find((a) => a.codigo === 'ACH-2026-002')!]; });
+    render(<MemoryRouter><T11 /></MemoryRouter>);
+    expect(screen.queryByRole('button', { name: /Encerrar achado/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Reabrir achado/ })).toBeInTheDocument();
+    expect(screen.getByText(/422/)).toBeInTheDocument();
+    cleanup();
+
+    montar('dpo', (b) => { b.cenario.achados = [b.cenario.achados.find((a) => a.codigo === 'ACH-2026-003')!]; });
+    render(<MemoryRouter><T11 /></MemoryRouter>);
+    expect(screen.getByRole('button', { name: /Encerrar achado/ })).toBeInTheDocument();
+  });
+
+  it('o clique passa pela rota: log caindo, a tela não muda o estado', () => {
+    const b = montar('engenharia', (x) => {
+      x.cenario.achados = [x.cenario.achados.find((a) => a.status === 'aberto')!];
+    });
+    render(<MemoryRouter><T11 /></MemoryRouter>);
+
+    const causa = screen.getByLabelText(/Causa raiz/);
+    fireEvent.change(causa, { target: { value: 'O redator não era aplicado na rota de cobrança e o log saía cru.' } });
+    b.simularFalhaDeLog = true;
+    act(() => { fireEvent.click(screen.getByRole('button', { name: /Registrar causa raiz/ })); });
+
+    expect(screen.getByRole('alert').textContent).toMatch(/registr/i);
+    expect(b.cenario.achados[0].status).toBe('aberto');
+    expect(screen.getByRole('button', { name: /Registrar causa raiz/ })).toBeInTheDocument();
+
+    b.simularFalhaDeLog = false;
+    act(() => { fireEvent.click(screen.getByRole('button', { name: /Registrar causa raiz/ })); });
+    expect(b.cenario.achados[0].status).toBe('causa_raiz');
+    expect(screen.getByRole('button', { name: /Propor plano/ })).toBeInTheDocument();
+  });
+
+  it('a cadeia de custódia mostra o encadeamento e marca o que está no trail', () => {
+    montar('auditor', (b) => { b.cenario.achados = [b.cenario.achados.find((a) => a.codigo === 'ACH-2026-002')!]; });
+    render(<MemoryRouter><T11 /></MemoryRouter>);
+
+    expect(screen.getByText('consent-versao-migracao.sql')).toBeInTheDocument();
+    expect(screen.getByText('primeira da cadeia')).toBeInTheDocument();
+    expect(screen.getByText(/503/)).toBeInTheDocument();
   });
 });
