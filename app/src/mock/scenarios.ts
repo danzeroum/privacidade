@@ -1,4 +1,4 @@
-import { sha256, hashCpf } from '../lib/sha256';
+import { sha256, hashCpf, hashEncadeado } from '../lib/sha256';
 import { aplicar } from './decisoes';
 import type { Obrigacao, Trilha, TipoObrigacao } from './calendario';
 import type { Epico, Papel, Ripd } from './types';
@@ -259,9 +259,68 @@ const pareceresPadrao = (): Parecer[] => [
   { id: 'p1', codigo: 'PT-2026-018', ripdId: 'r1', status: 'rascunho', autor: '@eng-maria', devolucoes: 0 },
 ];
 
+/**
+ * PR 15 — a cadeia de custódia da semente é construída pela **mesma** função
+ * que a rota usa. Digitar hashes aqui produziria uma massa que não confere pela
+ * regra do produto: a T11 mostraria "cadeia íntegra" sobre números inventados.
+ */
+const custodia = (
+  passos: { arquivo: string; por: string; etapa: Achado['status']; quando: string }[],
+): Achado['evidencias'] => {
+  const cadeia: Achado['evidencias'] = [];
+  for (const p of passos) {
+    const hashAnterior = cadeia.at(-1)?.hash ?? null;
+    cadeia.push({ ...p, hashAnterior, hash: hashEncadeado(hashAnterior, p.arquivo, p.etapa) });
+  }
+  return cadeia;
+};
+
+/**
+ * Cinco achados, um por posição do ciclo — porque uma tela que opera estados
+ * com um único artefato semeado só é demonstrável depois de alguém a operar
+ * inteira. E os dois `verificado` existem para a diferença que a T11 explica:
+ * mesmo estado, veredito oposto, encerramento permitido num e recusado no outro.
+ */
 const achadosPadrao = (): Achado[] => [
   { id: 'a1', codigo: 'ACH-2026-007', descricao: 'Log de aplicação com CPF em texto claro',
-    origem: 'auditoria interna · trimestre 2', status: 'aberto', criticidade: 'alta', reincidencias: 0 },
+    origem: 'auditoria interna · trimestre 2', status: 'aberto', criticidade: 'alta',
+    reincidencias: 0, evidencias: [] },
+  { id: 'a2', codigo: 'ACH-2026-011', descricao: 'Retenção de base de marketing sem prazo declarado',
+    origem: 'auditoria interna · trimestre 2', status: 'plano', criticidade: 'media', reincidencias: 0,
+    causaRaiz: 'O pipeline de exportação nasceu fora do inventário e ninguém declarou TTL: o dado fica porque nada o remove.',
+    plano: 'Declarar o dataset no inventário com retenção de 180 dias e ligar o expurgo agendado ao mesmo TTL.',
+    criterioDeEficacia: 'Duas execuções consecutivas do expurgo removendo registros acima de 180 dias, com hash pré e pós conferido.',
+    evidencias: [] },
+  { id: 'a3', codigo: 'ACH-2026-014', descricao: 'Chave de criptografia sem rotação há 14 meses',
+    origem: 'auditoria externa · relatório anual', status: 'executado', criticidade: 'alta', reincidencias: 0,
+    causaRaiz: 'A rotação era procedimento manual sem dono declarado, e o alerta de prazo apontava para uma lista que ninguém lê.',
+    plano: 'Automatizar a rotação com janela de canary e alarmar o vencimento na fila de quem opera a chave.',
+    criterioDeEficacia: 'Uma rotação completa executada pelo agendamento, sem intervenção manual, com o canary aprovado.',
+    executadoPor: '@eng-rafael',
+    evidencias: custodia([
+      { arquivo: 'rotacao-2026-06.log', por: '@eng-rafael', etapa: 'executado', quando: '2026-06-18T14:02:00Z' },
+    ]) },
+  { id: 'a4', codigo: 'ACH-2026-002', descricao: 'Consentimento coletado sem versão de texto registrada',
+    origem: 'auditoria interna · trimestre 1', status: 'verificado', criticidade: 'critica', reincidencias: 1,
+    causaRaiz: 'O formulário grava o aceite e descarta a versão do texto exibido, então revogação e prova ficam sem lastro.',
+    plano: 'Persistir versão e hash do texto no ato do aceite e expor os dois na trilha do titular.',
+    criterioDeEficacia: 'Amostra de 100 consentimentos novos, todos com versão e hash conferindo com o texto publicado.',
+    executadoPor: '@eng-maria', verificadoPor: '@dpo-marcela', eficaciaAtingida: false,
+    motivoDaReabertura: 'A primeira execução cobriu o app e deixou o checkout web sem versão registrada, que é onde entra a maior parte.',
+    evidencias: custodia([
+      { arquivo: 'consent-versao-migracao.sql', por: '@eng-maria', etapa: 'executado', quando: '2026-05-04T11:20:00Z' },
+      { arquivo: 'amostra-100-consentimentos.csv', por: '@dpo-marcela', etapa: 'verificado', quando: '2026-05-21T09:40:00Z' },
+    ]) },
+  { id: 'a5', codigo: 'ACH-2026-003', descricao: 'Acesso a dado pessoal sem finalidade declarada na rota de suporte',
+    origem: 'auditoria interna · trimestre 1', status: 'verificado', criticidade: 'media', reincidencias: 0,
+    causaRaiz: 'A rota de suporte lia o cadastro completo sem exigir finalidade, e o trail registrava o acesso sem dizer para quê.',
+    plano: 'Exigir finalidade e justificativa na revelação, com o registro gravado antes da resposta.',
+    criterioDeEficacia: 'Nenhum acesso a campo pessoal no trail dos últimos 30 dias sem finalidade compatível declarada.',
+    executadoPor: '@eng-rafael', verificadoPor: '@auditor-externo', eficaciaAtingida: true,
+    evidencias: custodia([
+      { arquivo: 'suporte-finalidade.patch', por: '@eng-rafael', etapa: 'executado', quando: '2026-04-09T16:15:00Z' },
+      { arquivo: 'trail-30d-sem-finalidade.csv', por: '@auditor-externo', etapa: 'verificado', quando: '2026-04-30T10:05:00Z' },
+    ]) },
 ];
 
 const solicitacoesPadrao = (titularIds: string[], sistemas: string[]): Solicitacao[] => {

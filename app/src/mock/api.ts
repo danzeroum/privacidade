@@ -14,7 +14,7 @@ import {
   assinaturaDoFeed, cargaDoAno, diasAte, naAntecedencia, paraIcs,
 } from './calendario';
 import { redigir } from '../lib/redator';
-import { sha256 } from '../lib/sha256';
+import { hashEncadeado, sha256 } from '../lib/sha256';
 import { BASES_PARA_SENSIVEL } from './types';
 import type {
   BaseLegal, Campo, Categoria, DecisaoIncidente, DesfechoSolicitacao, EstadoIncidente,
@@ -955,11 +955,32 @@ function buscarTitular<T>(banco: BancoMock, req: Req): Res<T> {
  * A validação de conteúdo mora aqui e não em `estados.ts` de propósito: a
  * tabela não sabe o que é justificativa, dono ou gatilho, e não deve saber.
  */
-type Alvo = { artefato: Artefato; id: string; estado: string; aplicar: () => void };
+type Alvo = {
+  artefato: Artefato;
+  id: string;
+  estado: string;
+  /**
+   * PR 15 — os fatos que o **artefato** já carrega, lidos para a validação.
+   *
+   * Sem isto, a única coisa que a rota consegue conferir é o que quem pediu a
+   * transição digitou — e uma exigência conferida contra o próprio corpo do
+   * pedido não é exigência. É a decisão do PR 8 outra vez: entrada de regra se
+   * lê do artefato.
+   */
+  fatos?: Record<string, unknown>;
+  /**
+   * A prova que entra no registro **antes** da resposta, quando a transição
+   * carrega evidência. O hash é calculado aqui e gravado no trail por
+   * `transitar`; só depois `aplicar` o anexa ao artefato.
+   */
+  prova?: { arquivo: string; hash: string };
+  aplicar: () => void;
+};
 
 /** O que cada transição exige além de ser legal. Vazio = só a sequência. */
 function exigenciasDe(
   artefato: Artefato, de: string, para: string, body: Record<string, any>,
+  fatos: Record<string, any> = {},
 ): string | null {
   const texto = (chave: string) => String(body[chave] ?? '').trim();
 
@@ -996,8 +1017,61 @@ function exigenciasDe(
   if (artefato === 'solicitacao' && para === 'recusada_com_fundamento' && texto('fundamento').length < 20) {
     return 'Recusar um direito exige fundamento legal de ao menos 20 caracteres (Art. 18, §4º).';
   }
-  if (artefato === 'achado' && para === 'verificado' && !texto('verificadoPor')) {
-    return 'A verificação de eficácia é independente: declare quem verificou.';
+  /**
+   * PR 15 — o ciclo do achado, exigência por exigência.
+   *
+   * A separação que este bloco existe para manter: **sequência** é a máquina de
+   * estados (`executado → encerrado` é 409 e nem chega aqui); **conteúdo** é o
+   * que estas linhas conferem. A confusão entre as duas é o que produz o
+   * defeito de encerrar um achado cuja verificação concluiu que não resolveu —
+   * a ordem estava certa, a conclusão é que não sustentava o encerramento.
+   */
+  if (artefato === 'achado' && para === 'causa_raiz') {
+    if (texto('causaRaiz').length < 20) {
+      return de === 'reaberto'
+        ? 'Reincidência exige causa raiz **nova**, de ao menos 20 caracteres: reabrir com a análise antiga refaz o plano que já falhou uma vez.'
+        : 'A causa raiz exige ao menos 20 caracteres — plano apoiado em sintoma corrige a ocorrência e deixa a causa de pé.';
+    }
+  }
+  if (artefato === 'achado' && para === 'plano') {
+    if (texto('plano').length < 20) {
+      return 'O plano exige ao menos 20 caracteres — "corrigir o log" não diz a ninguém o que será feito.';
+    }
+    if (texto('criterioDeEficacia').length < 20) {
+      return 'O plano exige critério de eficácia verificável, declarado antes de executar: sem ele, quem verifica não tem contra o que conferir e "verificado" vira opinião.';
+    }
+  }
+  if (artefato === 'achado' && para === 'executado') {
+    if (!texto('executadoPor')) {
+      return 'Declare quem executou — sem executor declarado não há de quem a verificação seja independente.';
+    }
+    if (!texto('evidencia')) {
+      return 'Executar exige evidência anexada: execução sem prova é relato, e relato não fecha achado de auditoria.';
+    }
+  }
+  if (artefato === 'achado' && para === 'verificado') {
+    if (!texto('verificadoPor')) {
+      return 'A verificação de eficácia é independente: declare quem verificou.';
+    }
+    if (texto('verificadoPor') === String(fatos.executadoPor ?? '')) {
+      return `${texto('verificadoPor')} executou este plano. Verificar o próprio trabalho não é verificação independente — a rota recusa o mesmo nome dos dois lados.`;
+    }
+    if (typeof body.eficaciaAtingida !== 'boolean') {
+      return 'A verificação conclui contra o critério declarado no plano: o critério foi atingido, sim ou não. Verificar sem concluir deixa o encerramento sem base.';
+    }
+    if (!texto('evidencia')) {
+      return 'A verificação exige evidência própria — a do executor prova que algo foi feito, não que o critério foi atingido.';
+    }
+  }
+  if (artefato === 'achado' && para === 'encerrado') {
+    if (fatos.eficaciaAtingida !== true) {
+      return 'A verificação concluiu que o critério de eficácia não foi atingido. O caminho daqui é reabrir, não encerrar: encerrar agora registraria como resolvido o que a própria verificação disse que não resolveu.';
+    }
+  }
+  if (artefato === 'achado' && para === 'reaberto') {
+    if (texto('motivo').length < 20) {
+      return 'Reabrir exige motivo de ao menos 20 caracteres — a reabertura eleva a criticidade e conta reincidência, e quem receber o achado depois precisa saber por quê.';
+    }
   }
   if (artefato === 'parecer' && para === 'devolvido' && texto('motivo').length < 20) {
     return 'Devolver o parecer exige motivo de ao menos 20 caracteres — devolução sem motivo é ida e volta sem aprendizado.';
@@ -1019,7 +1093,7 @@ export function transitar<T>(
   if (fora) return fora;
 
   // 2 · conteúdo
-  const faltando = exigenciasDe(alvo.artefato, alvo.estado, para, body);
+  const faltando = exigenciasDe(alvo.artefato, alvo.estado, para, body, alvo.fatos ?? {});
   if (faltando) {
     return erro(422, faltando,
       `A transição ${alvo.estado} → ${para} é legal; o que falta é o conteúdo que a sustenta.`) as Res<T>;
@@ -1033,7 +1107,13 @@ export function transitar<T>(
       justificativa: body.justificativa || body.fundamento || body.motivo
         ? redigir(String(body.justificativa ?? body.fundamento ?? body.motivo)).texto
         : undefined,
-      campos: [`${alvo.estado}→${para}`],
+      /**
+       * PR 15 — a prova entra **aqui**, no mesmo bloco da transição, e não
+       * depois. Se `auditAppend` falhar, o 503 abaixo devolve um achado sem
+       * evidência anexada e sem estado novo: a alternativa seria um artefato
+       * carregando um anexo que o trail não conhece.
+       */
+      campos: [`${alvo.estado}→${para}`, ...(alvo.prova ? [`evidencia:${alvo.prova.hash}`] : [])],
     });
   } catch (e) {
     const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a transição.';
@@ -1101,8 +1181,30 @@ function alvoDaTransicao(banco: BancoMock, artefato: Artefato, id: string, body:
     }
     case 'achado': {
       const x = c.achados.find((a) => a.id === id || a.codigo === id);
-      return x ? { artefato, id: x.codigo, estado: x.status, aplicar: () => {
-        const para = String(body.para);
+      if (!x) return null;
+      const para = String(body.para ?? '');
+      const anterior = x.evidencias.at(-1)?.hash ?? null;
+      const arquivo = String(body.evidencia ?? '').trim();
+      // A cadeia de custódia só existe nas duas etapas que produzem prova.
+      // Anexar em qualquer transição transformaria a cadeia num depósito.
+      const prova = arquivo && (para === 'executado' || para === 'verificado')
+        ? { arquivo, hash: hashEncadeado(anterior, arquivo, para) }
+        : undefined;
+      return { artefato, id: x.codigo, estado: x.status, prova, fatos: {
+        executadoPor: x.executadoPor,
+        eficaciaAtingida: x.eficaciaAtingida,
+        criterioDeEficacia: x.criterioDeEficacia,
+      }, aplicar: () => {
+        if (para === 'causa_raiz') x.causaRaiz = redigir(String(body.causaRaiz)).texto;
+        if (para === 'plano') {
+          x.plano = redigir(String(body.plano)).texto;
+          x.criterioDeEficacia = redigir(String(body.criterioDeEficacia)).texto;
+        }
+        if (para === 'executado') x.executadoPor = String(body.executadoPor);
+        if (para === 'verificado') {
+          x.verificadoPor = String(body.verificadoPor);
+          x.eficaciaAtingida = Boolean(body.eficaciaAtingida);
+        }
         if (para === 'reaberto') {
           // O MAPA é explícito: reaberto entra com criticidade elevada e conta
           // como reincidência. Achado que volta não volta igual.
@@ -1110,10 +1212,29 @@ function alvoDaTransicao(banco: BancoMock, artefato: Artefato, id: string, body:
           x.criticidade = x.criticidade === 'critica' ? 'critica'
             : x.criticidade === 'alta' ? 'critica'
               : x.criticidade === 'media' ? 'alta' : 'media';
+          x.motivoDaReabertura = redigir(String(body.motivo)).texto;
+          /**
+           * A reabertura **não herda** a análise anterior. Se herdasse, a fila
+           * mandaria reapurar a causa e a tela mostraria a causa antiga já
+           * preenchida — que é o convite a apertar "avançar" sobre o raciocínio
+           * que acabou de falhar. As evidências ficam: são prova do que houve.
+           */
+          x.causaRaiz = undefined;
+          x.plano = undefined;
+          x.criterioDeEficacia = undefined;
+          x.executadoPor = undefined;
+          x.verificadoPor = undefined;
+          x.eficaciaAtingida = undefined;
         }
-        if (para === 'verificado') x.verificadoPor = String(body.verificadoPor);
+        if (prova) {
+          x.evidencias = [...x.evidencias, {
+            arquivo: prova.arquivo, hash: prova.hash, hashAnterior: anterior,
+            por: String(body.executadoPor ?? body.verificadoPor ?? '—'),
+            quando: new Date().toISOString(), etapa: para as typeof x.status,
+          }];
+        }
         x.status = para as typeof x.status;
-      } } : null;
+      } };
     }
     case 'incidente': {
       const x = c.incidentes.find((i) => i.id === id);

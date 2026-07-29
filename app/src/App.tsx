@@ -10,6 +10,7 @@ import T0 from './screens/T0';
 import ComoFunciona from './screens/ComoFunciona';
 import T1 from './screens/T1';
 import T10 from './screens/T10';
+import T11 from './screens/T11';
 import T2 from './screens/T2';
 import T3 from './screens/T3';
 import T4 from './screens/T4';
@@ -35,6 +36,10 @@ export const TELAS = [
   { rota: '/t7', id: 'T7', nome: 'Chaves e criptografia', grupo: 'Operação e prova' },
   { rota: '/t8', id: 'T8', nome: 'Editor de LIA', grupo: 'Operação e prova' },
   { rota: '/t9', id: 'T9', nome: 'Incidentes', grupo: 'Operação e prova' },
+  // PR 15 — o ciclo do achado ganhou tela própria. Antes a fila mandava para a
+  // T6, que mostra o trail e o expurgo e não opera achado nenhum: item de fila
+  // apontando para tela que não tem o controle é fila que não fecha nada.
+  { rota: '/t11', id: 'T11', nome: 'Achados e planos', grupo: 'Operação e prova' },
 ];
 
 export default function App() {
@@ -221,6 +226,7 @@ export function Casca() {
               <Route path="/t8" element={<T8 />} />
               <Route path="/t9" element={<T9 />} />
               <Route path="/t10" element={<T10 />} />
+              <Route path="/t11" element={<T11 />} />
               <Route path="/como-funciona" element={<ComoFunciona />} />
               <Route path="*" element={<Navigate to="/t0" replace />} />
             </Routes>

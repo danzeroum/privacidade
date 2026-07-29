@@ -99,7 +99,12 @@ enunciado vira lacuna apontada, não silêncio.
 | `ripd` | `triagem → dispensado` | justificativa de ao menos 20 caracteres **e** ao menos um gatilho de reabertura do catálogo da triagem, com a condição que o faria disparar neste sistema | Dispensa sem registro é omissão, não decisão. E gatilho em prosa não dispara nada: o código do catálogo é o que permite a esteira reabrir o RIPD sozinha. |
 | `risco` | `em_tratamento → aceito` | dono da aceitação, prazo de reavaliação e gatilho de reabertura | Risco aceito sem dono volta como surpresa, e sem prazo vira permanente. |
 | `solicitacao` | `em_analise → recusada_com_fundamento` | fundamento legal de ao menos 20 caracteres | Art. 18, §4º: a negativa é fundamentada. Recusa sem fundamento não é atendimento, é silêncio com carimbo. |
-| `achado` | `executado → verificado` | quem verificou | A verificação de eficácia é independente de quem executou — executar não é comprovar que resolveu. |
+| `achado` | `→ causa_raiz` (de `aberto` ou de uma reabertura) | causa raiz de ao menos 20 caracteres, e **nova** quando vem de reabertura | Plano apoiado em sintoma corrige a ocorrência e deixa a causa de pé — que é como o mesmo achado volta com outro código seis meses depois. |
+| `achado` | `causa_raiz → plano` | plano e critério de eficácia, ambos de ao menos 20 caracteres | O critério é declarado antes de executar. Declarado depois, ele é escrito por quem já sabe o resultado e passa a descrever o que aconteceu. |
+| `achado` | `plano → executado` | quem executou e evidência anexada | Execução sem prova é relato. E o nome do executor é o fato contra o qual a independência da verificação é aferida no passo seguinte. |
+| `achado` | `executado → verificado` | quem verificou, **diferente de quem executou**, o veredito contra o critério e evidência própria | A verificação de eficácia é independente de quem executou — executar não é comprovar que resolveu. E verificar sem concluir contra o critério deixa o encerramento sem base. |
+| `achado` | `verificado → encerrado` | que a verificação tenha concluído que o critério **foi atingido** | Aqui a sequência está certa e o conteúdo é que falta: encerrar depois de uma verificação negativa registraria como resolvido o que a própria verificação disse que não resolveu. O caminho é reabrir. |
+| `achado` | `verificado → reaberto` | motivo de ao menos 20 caracteres | A reabertura eleva a criticidade e conta reincidência; quem receber o achado depois precisa saber por quê, e a análise anterior não é herdada. |
 
 Duas exigências transversais, que não são de nenhuma transição em particular:
 
