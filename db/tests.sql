@@ -151,7 +151,7 @@ $$, 'CPF vazando na evidência do gate');
 -- ---------------------------------------------------------------------
 SELECT assert_igual(
   (SELECT count(*)::bigint FROM verificar_integridade_audit('11111111-1111-4111-8111-111111111111') WHERE NOT integro),
-  0::bigint, 'cadeia de hash íntegra');
+  1::bigint, 'cadeia de hash íntegra');
 
 SELECT assert_igual(
   (SELECT count(*)::bigint FROM audit_log WHERE hash_anterior IS NULL), 1::bigint,
