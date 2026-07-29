@@ -39,6 +39,11 @@
       <button type="button" style="{{ item.estilo }}" onClick="{{ item.ir }}"><span style="{{ item.estiloId }}">{{ item.id }}</span> {{ item.nome }}</button>
     </sc-for>
 
+    <div style="font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;color:#6E8184;padding:16px 10px 6px">Referência</div>
+    <sc-for list="{{ navReferencia }}" as="item" hint-placeholder-count="1">
+      <button type="button" style="{{ item.estilo }}" onClick="{{ item.ir }}"><span style="{{ item.estiloId }}">{{ item.id }}</span> {{ item.nome }}</button>
+    </sc-for>
+
     <div style="margin-top:auto;padding:14px 10px 0;border-top:1px solid #D2DCDD;font-size:12.5px;color:#6E8184;display:flex;flex-direction:column;gap:6px">
       <span>{{ telasOcultas }}</span>
       <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px">{{ cenario }} · dados de demonstração</span>
@@ -784,23 +789,10 @@
         </div>
       </sc-if>
 
-      <sc-if value="{{ confirmandoCenario }}">
-        <div style="position:fixed;inset:0;background:rgba(4,12,13,.55);display:grid;place-items:center;z-index:110;padding:16px">
-          <div role="dialog" aria-modal="true" style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;max-width:460px;width:100%;box-shadow:0 18px 40px -18px rgba(14,23,25,.5)">
-            <h3 style="margin:0;padding:16px 20px 0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:18px">Trocar de cenário descarta registros</h3>
-            <div style="padding:14px 20px;font-size:13.5px;color:#495A5D">{{ textoConfirmacao }}</div>
-            <div style="padding:13px 20px;border-top:1px solid #D2DCDD;display:flex;justify-content:flex-end;gap:8px;background:#F2F6F6;border-radius:0 0 8px 8px">
-              <button type="button" onClick="{{ cancelarTroca }}" style="border:1px solid #D2DCDD;background:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Ficar neste cenário</button>
-              <button type="button" onClick="{{ confirmarTroca }}" style="border:1px solid #9E1F26;background:#9E1F26;color:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Trocar e descartar</button>
-            </div>
-          </div>
-        </div>
-      </sc-if>
-
       <sc-if value="{{ eT5 }}">
         <div>
           <h1 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:30px;line-height:1.15">Riscos e RACI</h1>
-          <p style="margin:8px 0 0;color:#495A5D;max-width:68ch;font-size:14.5px;text-wrap:pretty">Seis riscos, um dono cada. Reclassificar muda a prioridade do programa — por isso exige justificativa registrada, e agora pode ser feito por teclado.</p>
+          <p style="margin:8px 0 0;color:#495A5D;max-width:68ch;font-size:14.5px;text-wrap:pretty">Dez riscos, um dono cada. Reclassificar muda a prioridade do programa — por isso exige justificativa registrada, e agora pode ser feito por teclado.</p>
           <sc-if value="{{ anotar }}">
             <p style="margin:14px 0 0;font-size:12.5px;color:#6E8184;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">correções aplicadas · T5-01 · T5-02 · T5-03 · C-12</p>
           </sc-if>
@@ -880,7 +872,7 @@
                     <div style="font-size:13px;color:#495A5D">{{ rc.just }}</div>
                   </div>
                 </sc-for>
-                <p style="margin:10px 0 0;font-size:12.5px;color:#6E8184">Trocar de cenário recria o banco da demonstração: a plataforma avisa antes de descartar estes registros.</p>
+                <p style="margin:10px 0 0;font-size:12.5px;color:#6E8184">Cada cenário guarda o próprio banco e o próprio histórico: trocar no topo e voltar preserva estes registros. Nada aqui é descartável — nem com confirmação.</p>
               </div>
 
               <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
@@ -1178,6 +1170,253 @@
         </div>
       </sc-if>
 
+      <sc-if value="{{ eT11 }}">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;padding:2px 7px;border-radius:3px;background:#F2F6F6;border:1px solid #D2DCDD;color:#495A5D">PR-05 · auditoria</span>
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;padding:2px 7px;border-radius:3px;background:#F2F6F6;border:1px solid #D2DCDD;color:#495A5D">tela nova</span>
+          </div>
+          <h1 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:30px;line-height:1.15">Achados e planos de ação</h1>
+          <p style="margin:8px 0 0;color:#495A5D;max-width:70ch;font-size:14.5px;text-wrap:pretty">Todo achado — de auditoria, do gate de privacidade ou de um incidente — corre um ciclo com causa raiz, plano com critério de eficácia, evidência e verificação independente. Encerrar antes de verificar é recusado.</p>
+          <sc-if value="{{ anotar }}">
+            <p style="margin:14px 0 0;font-size:12.5px;color:#6E8184;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">tela nova · artefato achado (PR-05) — o único dos oito sem tela própria; a fila (T0) já apontava para cá</p>
+          </sc-if>
+
+          <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;margin-top:20px">
+            <h3 style="margin:0 0 12px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Achados em aberto</h3>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:680px">
+                <thead><tr>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Código</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Origem</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Criticidade</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Estado</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Reincidência</th>
+                </tr></thead>
+                <tbody>
+                  <sc-for list="{{ achados }}" as="a" hint-placeholder-count="3">
+                    <tr style="{{ a.estiloLinha }}" onClick="{{ a.selecionar }}">
+                      <td style="padding:10px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px">{{ a.id }}</td>
+                      <td style="padding:10px;font-size:13px">{{ a.origem }}</td>
+                      <td style="padding:10px"><span style="{{ a.critEstilo }}">{{ a.crit }}</span></td>
+                      <td style="padding:10px;font-size:13px">{{ a.estado }}</td>
+                      <td style="padding:10px;font-size:13px;color:#6E8184">{{ a.reincRot }}</td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+            <p style="margin:12px 0 0;font-size:12.5px;color:#6E8184">Selecionar define o achado de trabalho. Engenharia e DPO operam via <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px">gerenciar_achado</span> — quando a ação virou própria, a segurança deixou de ver o achado que não conduz.</p>
+          </div>
+
+          <div style="margin-top:14px;padding:14px 16px;border-radius:8px;border:1px solid #0B5F6640;background:#DCEAEA;display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <span style="font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#495A5D">Achado</span>
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:15px;font-weight:600">{{ achadoSel.id }}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <span style="font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#495A5D">Origem</span>
+              <span style="font-size:15px">{{ achadoSel.origem }}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:280px">
+              <span style="font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#495A5D">Estado no ciclo</span>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <sc-for list="{{ passosAchado }}" as="p" hint-placeholder-count="6">
+                  <span style="{{ p.estilo }}">{{ p.rot }}</span>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-top:14px;align-items:start">
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h3 style="margin:0 0 4px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Diagnóstico</h3>
+              <p style="margin:0 0 12px;font-size:13.5px;font-weight:600">{{ achadoSel.titulo }}</p>
+              <dl style="display:grid;grid-template-columns:minmax(120px,140px) minmax(0,1fr);gap:9px;margin:0;font-size:13px">
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Controle afetado</dt>
+                <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD">{{ achadoSel.controle }}</dd>
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0">Causa raiz</dt>
+                <dd style="margin:0;padding:5px 0">{{ achadoSel.causaRaiz }}</dd>
+              </dl>
+              <sc-if value="{{ achadoReaberto }}">
+                <p style="margin:12px 0 0;padding:10px 13px;background:#F5DEDF;border:1px solid #9E1F2652;border-radius:6px;font-size:12.5px">Reaberto: a verificação anterior não comprovou o controle. Reincidência eleva a criticidade e leva o encerramento ao comitê.</p>
+              </sc-if>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px">
+              <h3 style="margin:0 0 10px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Plano de ação</h3>
+              <dl style="display:grid;grid-template-columns:minmax(130px,150px) minmax(0,1fr);gap:9px;margin:0;font-size:13px">
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Ação</dt>
+                <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD">{{ achadoSel.plano }}</dd>
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Critério de eficácia</dt>
+                <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD">{{ achadoSel.criterio }}</dd>
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0;border-bottom:1px solid #D2DCDD">Dono</dt>
+                <dd style="margin:0;padding:5px 0;border-bottom:1px solid #D2DCDD;font-family:ui-monospace,Menlo,monospace;font-size:12.5px">{{ achadoSel.dono }}</dd>
+                <dt style="color:#6E8184;font-size:12.5px;padding:5px 0">Prazo</dt>
+                <dd style="margin:0;padding:5px 0">{{ achadoSel.prazo }}</dd>
+              </dl>
+            </div>
+          </div>
+
+          <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;margin-top:14px">
+            <h3 style="margin:0 0 12px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Evidências — cadeia de custódia</h3>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:520px">
+                <thead><tr>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Quando</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Evidência</th>
+                  <th style="text-align:left;font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;color:#6E8184;padding:8px 10px;border-bottom:1px solid #D2DCDD">Hash</th>
+                </tr></thead>
+                <tbody>
+                  <sc-for list="{{ achadoSel.evidencias }}" as="e" hint-placeholder-count="2">
+                    <tr>
+                      <td style="padding:9px 10px;border-bottom:1px solid #D2DCDD;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">{{ e.q }}</td>
+                      <td style="padding:9px 10px;border-bottom:1px solid #D2DCDD;font-size:13px">{{ e.t }}</td>
+                      <td style="padding:9px 10px;border-bottom:1px solid #D2DCDD;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#6E8184">{{ e.h }}</td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+            <p style="margin:12px 0 0;font-size:12.5px;color:#6E8184">Cada evidência entra no audit trail com hash encadeado; a verificação independente da auditoria confere o par antes de o achado poder ser encerrado.</p>
+          </div>
+
+          <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:16px 18px;margin-top:14px">
+            <h3 style="margin:0 0 10px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:16px">Próxima ação</h3>
+            <sc-if value="{{ achadoTravadoEncerrar }}">
+              <p style="margin:0 0 12px;padding:11px 13px;background:#F3E7CE;border:1px solid #8E5C0852;border-radius:6px;font-size:13px"><b>executado → encerrado é recusado (409).</b> Falta a verificação independente da auditoria: encerrar é ato de quem verifica, não de quem executou — a mesma separação entre sequência (409) e conteúdo (422) do resto do sistema.</p>
+            </sc-if>
+            <sc-if value="{{ podeAchado }}">
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button type="button" onClick="{{ avancarAchado }}" style="border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Registrar avanço com evidência</button>
+                <sc-if value="{{ achadoPodeEncerrar }}">
+                  <button type="button" onClick="{{ encerrarAchado }}" style="border:1px solid #2F6E45;background:#FFFFFF;color:#2F6E45;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit;font-size:13px">Encerrar após verificação</button>
+                </sc-if>
+              </div>
+            </sc-if>
+            <sc-if value="{{ naoPodeAchado }}">
+              <p style="margin:0;padding:11px 13px;background:#F2F6F6;border:1px solid #D2DCDD;border-radius:6px;font-size:13px;color:#495A5D">Conduzir achado é ação de engenharia e do DPO. Para o seu papel a tela é leitura — nenhum controle de avanço é renderizado.</p>
+            </sc-if>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ eT12 }}">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;padding:2px 7px;border-radius:3px;background:#F2F6F6;border:1px solid #D2DCDD;color:#495A5D">referência</span>
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;padding:2px 7px;border-radius:3px;background:#F2F6F6;border:1px solid #D2DCDD;color:#495A5D">somente leitura</span>
+          </div>
+          <h1 style="margin:0;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:30px;line-height:1.15">Como funciona</h1>
+          <p style="margin:8px 0 0;color:#495A5D;max-width:74ch;font-size:14.5px;text-wrap:pretty">O mapa do programa em uma página: os cinco processos, os oito artefatos que eles movem e as três decisões que definem alçada e rito. É explicação, não operação — nenhum controle age aqui e nenhum dado de titular aparece. A especificação executável mora no código, conferida contra os <span style="font-family:ui-monospace,Menlo,monospace;font-size:13px">.bpmn</span>/<span style="font-family:ui-monospace,Menlo,monospace;font-size:13px">.dmn</span> versionados.</p>
+          <sc-if value="{{ anotar }}">
+            <p style="margin:14px 0 0;font-size:12.5px;color:#6E8184;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">tela nova · o explicador de processo (§5 do MAPA) — fora do fluxo operacional, sem renderizador de BPMN embutido</p>
+          </sc-if>
+
+          <h2 style="margin:28px 0 4px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:20px">Os cinco processos, e onde vivem</h2>
+          <p style="margin:0 0 14px;font-size:13px;color:#6E8184">Não há uma tela por processo: cada um é operado onde o artefato dele já é trabalhado.</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:14px 16px;border-top:3px solid #0B5F66">
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">PR-01</div>
+              <div style="font-size:14.5px;font-weight:600;margin:2px 0 6px">Parecer técnico</div>
+              <div style="font-size:13px;color:#495A5D">artefato <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">parecer</span> · opera em T2, T3</div>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:14px 16px;border-top:3px solid #0B5F66">
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">PR-02</div>
+              <div style="font-size:14.5px;font-weight:600;margin:2px 0 6px">RIPD e análise algorítmica</div>
+              <div style="font-size:13px;color:#495A5D">artefato <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">ripd</span> · opera em T3 e no gate de CI</div>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:14px 16px;border-top:3px solid #0B5F66">
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">PR-03</div>
+              <div style="font-size:14.5px;font-weight:600;margin:2px 0 6px">PbD no ciclo de desenvolvimento</div>
+              <div style="font-size:13px;color:#495A5D">artefato <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">mudança</span> · gate de privacidade, T1, T2</div>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:14px 16px;border-top:3px solid #0B5F66">
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">PR-04</div>
+              <div style="font-size:14.5px;font-weight:600;margin:2px 0 6px">Ciclo de governança</div>
+              <div style="font-size:13px;color:#495A5D"><span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">risco · política · indicador</span> · T1, T5, T8, T10</div>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:14px 16px;border-top:3px solid #0B5F66">
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#6E8184">PR-05</div>
+              <div style="font-size:14.5px;font-weight:600;margin:2px 0 6px">Auditoria, planos e evidências</div>
+              <div style="font-size:13px;color:#495A5D"><span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">achado · incidente</span> · T11, T6, T9</div>
+            </div>
+          </div>
+
+          <h2 style="margin:32px 0 4px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:20px">Os oito artefatos e seus estados</h2>
+          <p style="margin:0 0 14px;font-size:13px;color:#6E8184">A transição fora da sequência é recusada com <b>409</b>; legal na sequência mas sem o conteúdo que a lei exige, com <b>422</b>. Gravar antes de mover: falha de log é <b>503</b> e o estado não muda.</p>
+          <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:8px 18px">
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:12px 0;border-bottom:1px solid #ECF0F0">
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:13px;min-width:112px;font-weight:600">parecer</span>
+              <span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">rascunho</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">emitido</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">homologado</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #2F6E4552;background:#DDEBE0;color:#2F6E45">vigente</span><span style="color:#6E8184">/</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #8E5C0852;background:#F3E7CE;color:#8E5C08">devolvido</span>
+            </div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:12px 0;border-bottom:1px solid #ECF0F0">
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:13px;min-width:112px;font-weight:600">ripd</span>
+              <span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">triagem</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">dispensado</span><span style="color:#6E8184">/</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">elaboração</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">parecer jurídico</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">deliberado</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #2F6E4552;background:#DDEBE0;color:#2F6E45">vigente</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">em revisão</span>
+            </div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:12px 0;border-bottom:1px solid #ECF0F0">
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:13px;min-width:112px;font-weight:600">lia</span>
+              <span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">rascunho</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">balanceamento</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">assinada</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #2F6E4552;background:#DDEBE0;color:#2F6E45">vigente</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #9E1F2652;background:#F5DEDF;color:#9E1F26">vencida</span>
+            </div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:12px 0;border-bottom:1px solid #ECF0F0">
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:13px;min-width:112px;font-weight:600">risco</span>
+              <span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">identificado</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">avaliado</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">em tratamento</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #2F6E4552;background:#DDEBE0;color:#2F6E45">mitigado</span><span style="color:#6E8184">/</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #8E5C0852;background:#F3E7CE;color:#8E5C08">aceito</span>
+            </div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:12px 0;border-bottom:1px solid #ECF0F0">
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:13px;min-width:112px;font-weight:600">solicitação</span>
+              <span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">recebida</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">em análise</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #2F6E4552;background:#DDEBE0;color:#2F6E45">concluída</span><span style="color:#6E8184">/</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #8E5C0852;background:#F3E7CE;color:#8E5C08">recusada com fundamento</span>
+            </div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:12px 0;border-bottom:1px solid #ECF0F0">
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:13px;min-width:112px;font-weight:600">achado</span>
+              <span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">aberto</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">causa raiz</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">plano</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">executado</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">verificado</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #2F6E4552;background:#DDEBE0;color:#2F6E45">encerrado</span><span style="color:#6E8184">/</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #9E1F2652;background:#F5DEDF;color:#9E1F26">reaberto</span>
+            </div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:12px 0;border-bottom:1px solid #ECF0F0">
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:13px;min-width:112px;font-weight:600">incidente</span>
+              <span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">aberto</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">contido</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">decidido</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #2F6E4552;background:#DDEBE0;color:#2F6E45">comunicado</span><span style="color:#6E8184">/</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #8E5C0852;background:#F3E7CE;color:#8E5C08">não comunicado</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">encerrado</span>
+            </div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:12px 0">
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:13px;min-width:112px;font-weight:600">chave</span>
+              <span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">nova</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">recriptografando</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">canary</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #2F6E4552;background:#DDEBE0;color:#2F6E45">ativa</span><span style="color:#6E8184">→</span><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid #D2DCDD;background:#F2F6F6;color:#495A5D">revogada</span>
+            </div>
+          </div>
+
+          <h2 style="margin:32px 0 4px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:20px">As três decisões que definem alçada e rito</h2>
+          <p style="margin:0 0 14px;font-size:13px;color:#6E8184">Dados versionados, não regra na tela: a versão aplicada fica gravada em cada decisão. Entrada indefinida cai sempre no cenário mais restritivo, nunca no permissivo.</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:14px 16px">
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#0B5F66;font-weight:600">D1 · complexidade e alçada</div>
+              <div style="font-size:13px;color:#495A5D;margin-top:6px"><b>entra:</b> categoria do dado, volume de titulares, decisão automatizada, transferência internacional</div>
+              <div style="font-size:13px;color:#495A5D;margin-top:4px"><b>sai:</b> complexidade e quem aprova (engenharia, DPO ou comitê)</div>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:14px 16px">
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#0B5F66;font-weight:600">D2 · nível de risco</div>
+              <div style="font-size:13px;color:#495A5D;margin-top:6px"><b>entra:</b> probabilidade × impacto ao titular</div>
+              <div style="font-size:13px;color:#495A5D;margin-top:4px"><b>sai:</b> nível, tratamento e aprovação — é a mesma grade da matriz da T5, uma fonte só</div>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #D2DCDD;border-radius:8px;padding:14px 16px">
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#0B5F66;font-weight:600">D3 · exige RIPD</div>
+              <div style="font-size:13px;color:#495A5D;margin-top:6px"><b>entra:</b> gatilhos (sensível, larga escala, decisão automatizada, vigilância…)</div>
+              <div style="font-size:13px;color:#495A5D;margin-top:4px"><b>sai:</b> obrigatório, ou dispensado com justificativa e gatilho de reabertura; análise algorítmica sim/não</div>
+            </div>
+          </div>
+
+          <h2 style="margin:32px 0 4px;font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:20px">A doutrina que não muda</h2>
+          <p style="margin:0 0 14px;font-size:13px;color:#6E8184">As decisões que sustentam o programa e sobrevivem a qualquer redesenho.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 32px">
+            <p style="margin:0;font-size:13.5px;color:#3E3B34"><span style="color:#2F6E45;font-weight:600">✓</span> A regra mora na API, não na tela.</p>
+            <p style="margin:0;font-size:13.5px;color:#3E3B34"><span style="color:#2F6E45;font-weight:600">✓</span> Mascarado é o padrão, inclusive para o DPO.</p>
+            <p style="margin:0;font-size:13.5px;color:#3E3B34"><span style="color:#2F6E45;font-weight:600">✓</span> Ausência em vez de desabilitado: o que o papel não opera não é renderizado.</p>
+            <p style="margin:0;font-size:13.5px;color:#3E3B34"><span style="color:#2F6E45;font-weight:600">✓</span> Gravar antes de responder; falha de log é 503 e nada sai.</p>
+            <p style="margin:0;font-size:13.5px;color:#3E3B34"><span style="color:#2F6E45;font-weight:600">✓</span> Dado sensível sem caminho de revelação, em tela alguma.</p>
+            <p style="margin:0;font-size:13.5px;color:#3E3B34"><span style="color:#2F6E45;font-weight:600">✓</span> 404 no lugar de 403 fora de escopo; sem contagem total para papel não confiável.</p>
+            <p style="margin:0;font-size:13.5px;color:#3E3B34"><span style="color:#2F6E45;font-weight:600">✓</span> Erro que ensina: a recusa cita o artigo, no ponto do erro.</p>
+            <p style="margin:0;font-size:13.5px;color:#3E3B34"><span style="color:#2F6E45;font-weight:600">✓</span> Vocabulário controlado espelhando o schema.</p>
+            <p style="margin:0;font-size:13.5px;color:#3E3B34"><span style="color:#2F6E45;font-weight:600">✓</span> Item de fila é derivado; obrigação de calendário é dado autorado.</p>
+          </div>
+
+          <p style="margin:24px 0 0;padding:12px 14px;background:#F2F6F6;border:1px solid #D2DCDD;border-radius:6px;font-size:12.5px;color:#6E8184">Esta página é conferida contra o código: se um estado ou uma decisão mudar no <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px">.ts</span> sem o <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px">.bpmn</span>/<span style="font-family:ui-monospace,Menlo,monospace;font-size:12px">.dmn</span> correspondente, a catraca de conformidade quebra o build. O que você lê aqui é o que o sistema executa.</p>
+        </div>
+      </sc-if>
+
     </main>
   </div>
 </div>
@@ -1196,6 +1435,8 @@ class Component extends DCLogic {
     { id: 't7', nome: 'Chaves e criptografia', grupo: 'Operação e prova' },
     { id: 't8', nome: 'Editor de LIA', grupo: 'Operação e prova' },
     { id: 't9', nome: 'Incidentes', grupo: 'Operação e prova' },
+    { id: 't11', nome: 'Achados e planos', grupo: 'Operação e prova' },
+    { id: 't12', nome: 'Como funciona', grupo: 'Referência' },
   ];
   papeis = [
     { id: 'engenharia', rotulo: 'Engenharia' },
@@ -1205,8 +1446,8 @@ class Component extends DCLogic {
     { id: 'auditor', rotulo: 'Auditor externo' },
   ];
   acoes = {
-    engenharia: ['escrever', 'gerar_ripd', 'ver_gate_detalhe', 'ver_pipeline', 'ver_log_kms', 'rodar_expurgo', 'ver_portal', 'ver_total', 'abrir_incidente'],
-    dpo: ['escrever', 'revelar_pii', 'aprovar_ripd', 'assinar_lia', 'gerenciar_risco', 'ver_portal', 'ver_total', 'rodar_expurgo', 'buscar_titular', 'concluir_solicitacao', 'revisar_decisao', 'exportar_auditoria', 'comunicar_incidente'],
+    engenharia: ['escrever', 'gerar_ripd', 'ver_gate_detalhe', 'ver_pipeline', 'ver_log_kms', 'rodar_expurgo', 'ver_portal', 'ver_total', 'abrir_incidente', 'gerenciar_achado'],
+    dpo: ['escrever', 'revelar_pii', 'aprovar_ripd', 'assinar_lia', 'gerenciar_risco', 'ver_portal', 'ver_total', 'rodar_expurgo', 'buscar_titular', 'concluir_solicitacao', 'revisar_decisao', 'exportar_auditoria', 'comunicar_incidente', 'gerenciar_achado'],
     produto: ['ver_portal'],
     seguranca: ['escrever', 'ver_pipeline', 'ver_log_kms', 'ver_gate_detalhe', 'ver_total', 'rodar_expurgo', 'abrir_incidente'],
     auditor: [],
@@ -1222,6 +1463,33 @@ class Component extends DCLogic {
     { cod: 'R02', desc: 'Retenção indeterminada em tabela de eventos', p: 3, i: 2, dano: 'perda_de_controle', esforco: 0.5, dono: '@dados-caio', dominio: 'Dados', status: 'mitigado' },
   ];
   cor = { material: '#9E1F26', discriminacao: '#6C3A8C', moral: '#8E5C08', perda_de_controle: '#8E5C08' };
+
+  achados = [
+    { id: 'A-2026-011', origem: 'Auditoria interna', crit: 'alta', estado: 'plano', reincidencia: 1,
+      titulo: 'Expurgo trimestral sem evidência de execução',
+      controle: 'RET-04 · expurgo automático de eventos com mais de 18 meses',
+      causaRaiz: 'O job de expurgo executava, mas o par de contagem pré/pós não era arquivado. Sem o par, o controle roda e não é auditável — foi por isso que a auditoria reabriu o achado.',
+      plano: 'Arquivar contagem pré e pós e o hash do lote no audit trail a cada execução, e exibir no cartão de integridade da T6.',
+      criterio: 'Duas execuções seguidas com par pré/pós verificável e cadeia íntegra.',
+      dono: '@eng-joao · valida @dpo-marcela', prazo: '9 dias úteis',
+      evidencias: [ { q: '12/07', t: 'Plano de ação aprovado pelo DPO', h: 'a41c…9e2' }, { q: 'pendente', t: 'Par pré/pós da 1ª execução', h: '—' } ] },
+    { id: 'A-2026-009', origem: 'Gate de privacidade', crit: 'moderada', estado: 'executado', reincidencia: 0,
+      titulo: 'Campo tratado fora do inventário no antifraude',
+      controle: 'Todo campo pessoal tratado consta do ROPA (regra do gate de privacidade)',
+      causaRaiz: 'device_fingerprint entrou no antifraude sem passar pelo catálogo; o gate barrou o PR e abriu o achado automaticamente.',
+      plano: 'Catalogar o campo com finalidade, base legal e retenção, ou remover o tratamento.',
+      criterio: 'Gate de privacidade verde sobre o serviço, com o campo declarado ou ausente.',
+      dono: '@eng-maria · valida @dpo-marcela', prazo: '4 dias úteis',
+      evidencias: [ { q: '20/07', t: 'Campo catalogado em antifraude/features', h: 'bb90…7c1' }, { q: '21/07', t: 'PR reverde no gate', h: '5fd8…22a' } ] },
+    { id: 'A-2026-004', origem: 'Auditoria externa', crit: 'baixa', estado: 'verificado', reincidencia: 0,
+      titulo: 'Rótulo de coluna divergente entre catálogo e tela',
+      controle: 'Vocabulário controlado espelha o schema',
+      causaRaiz: 'A T2 exibia “score” enquanto o catálogo registra “score_serasa” — ruído de leitura, sem efeito sobre dado.',
+      plano: 'Derivar o rótulo do catálogo; corrigido no PR do redesenho.',
+      criterio: 'Rótulo da tela igual ao nome catalogado, conferido em tela.',
+      dono: '@eng-joao · valida auditoria', prazo: 'concluído',
+      evidencias: [ { q: '18/07', t: 'Rótulo derivado do catálogo', h: 'c710…04d' }, { q: '26/07', t: 'Verificação independente da auditoria', h: '9a02…f31' } ] },
+  ];
 
   camposTitular = [
     { chave: 'cpf', rotulo: 'CPF', mascara: '•••.•••.•••-42', sens: false, base: 'execucao_contrato', finalidades: ['atendimento', 'cobranca'], valor: '347.912.884-42' },
@@ -1246,13 +1514,13 @@ class Component extends DCLogic {
 
   fila = [
     {
-      id: 'PR #4821', tipo: 'Merge bloqueado', papeis: ['engenharia', 'dpo', 'produto'],
+      id: 'PR #4821', tipo: 'Merge bloqueado', papeis: ['engenharia', 'dpo'],
       titulo: 'RIPD-2026-014 com recomendação P0 em aberto',
       consequencia: 'O merge do PR #4821 está travado há 2 dias — nada de core-credito sobe até o RIPD fechar.',
       prazo: 'go-live em 04/08 · 5 dias', urgencia: '30d',
       rito: 'D1 · alta complexidade: campo sensível + decisão automatizada → aprovação do DPO e do comitê',
       estado: ['triagem', 'parecer', 'aprovação', 'vigente'], estadoAtual: 1,
-      acoes: { engenharia: 'Concluir a P0 “redigir CPF no logger de cobrança”', dpo: 'Aprovar depois que a P0 fechar', produto: 'Acompanhar — a data de go-live depende disso' },
+      acoes: { engenharia: 'Concluir a P0 “redigir CPF no logger de cobrança”', dpo: 'Aprovar depois que a P0 fechar' },
       proximo: 'depois de você: DPO aprova e o status check volta a verde', tela: 't3',
     },
     {
@@ -1276,13 +1544,13 @@ class Component extends DCLogic {
       proximo: 'a conclusão para o cronômetro e alimenta o indicador de prazo', tela: 't4',
     },
     {
-      id: 'LIA-2025-07', tipo: 'Base legal', papeis: ['dpo', 'produto'],
+      id: 'LIA-2025-07', tipo: 'Base legal', papeis: ['dpo'],
       titulo: 'LIA vencida há 18 dias — score_risco sem base legal',
       consequencia: 'O gate de CI bloqueia qualquer PR que toque o campo. Dois repositórios parados.',
       prazo: 'vencida há 18 dias', urgencia: 'vencido',
       rito: 'D3 · legítimo interesse → LIA vigente obrigatória, com balanceamento justificado por eixo',
       estado: ['rascunho', 'balanceamento', 'assinada', 'vigente', 'vencida'], estadoAtual: 4,
-      acoes: { dpo: 'Abrir a renovação e reassinar', produto: 'Decidir: reduzir escopo ou trocar a base legal' },
+      acoes: { dpo: 'Abrir a renovação e reassinar' },
       proximo: 'assinatura devolve a base legal e libera o gate', tela: 't8',
     },
     {
@@ -1303,7 +1571,7 @@ class Component extends DCLogic {
       rito: 'D2 · moderado: falha de execução, não de desenho → plano com critério de eficácia',
       estado: ['aberto', 'causa raiz', 'plano', 'executado', 'verificado', 'encerrado'], estadoAtual: 3,
       acoes: { engenharia: 'Reexecutar o expurgo e anexar o par pré/pós', dpo: 'Revalidar o critério de eficácia' },
-      proximo: 'auditoria testa de forma independente antes de encerrar', tela: 't6',
+      proximo: 'auditoria testa de forma independente antes de encerrar', tela: 't11',
     },
   ];
   calendario = [
@@ -1359,6 +1627,7 @@ class Component extends DCLogic {
     verificacao: null, filtroLog: '', exportado: null,
     decisaoRevisao: '', justRevisao: '', revisaoRegistrada: null,
     comunicar: '', justIncidente: '', incidenteRegistrado: null,
+    achadoSel: 'A-2026-011',
     aviso: null,
   };
 
@@ -1499,8 +1768,36 @@ class Component extends DCLogic {
         };
       })(),
       eT1: s.tela === 't1', eT2: s.tela === 't2', eT3: s.tela === 't3', eT4: s.tela === 't4',
-      eT5: s.tela === 't5', eT6: s.tela === 't6', eT7: s.tela === 't7', eT8: s.tela === 't8', eT9: s.tela === 't9',
+      eT5: s.tela === 't5', eT6: s.tela === 't6', eT7: s.tela === 't7', eT8: s.tela === 't8', eT9: s.tela === 't9', eT12: s.tela === 't12',
       anotar: this.props.mostrarAnotacoes ?? true,
+      ...(() => {
+        const ORDEM_ACHADO = ['aberto', 'causa raiz', 'plano', 'executado', 'verificado', 'encerrado'];
+        const ach = this.achados.map((a) => ({
+          ...a,
+          reincRot: a.reincidencia === 0 ? '—' : a.reincidencia + 'ª reabertura',
+          selecionar: () => this.setState({ achadoSel: a.id }),
+          estiloLinha: 'cursor:pointer;border-bottom:1px solid #D2DCDD;' + (s.achadoSel === a.id ? 'background:#DCEAEA' : 'background:transparent'),
+          critEstilo: 'display:inline-flex;padding:2px 8px;border-radius:999px;font-size:12.5px;font-weight:600;border:1px solid ' + (a.crit === 'alta' ? '#9E1F2652;background:#F5DEDF;color:#9E1F26' : a.crit === 'moderada' ? '#8E5C0852;background:#F3E7CE;color:#8E5C08' : '#2F6E4552;background:#DDEBE0;color:#2F6E45'),
+          idx: ORDEM_ACHADO.indexOf(a.estado),
+        }));
+        const selA = ach.find((a) => a.id === s.achadoSel) || ach[0];
+        return {
+          eT11: s.tela === 't11',
+          podeAchado: this.pode('gerenciar_achado'),
+          naoPodeAchado: !this.pode('gerenciar_achado'),
+          achados: ach,
+          achadoSel: selA,
+          passosAchado: ORDEM_ACHADO.map((p, i) => ({
+            rot: p,
+            estilo: 'display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12.5px;border:1px solid ' + (i === selA.idx ? '#0B5F66;background:#DCEAEA;color:#0E1719;font-weight:600' : i < selA.idx ? '#2F6E4552;background:#DDEBE0;color:#2F6E45' : '#D2DCDD;background:#F2F6F6;color:#6E8184'),
+          })),
+          achadoTravadoEncerrar: selA.estado === 'executado',
+          achadoPodeEncerrar: selA.estado === 'verificado',
+          achadoReaberto: selA.reincidencia > 0,
+          avancarAchado: () => this.setState({ aviso: 'Avanço de ' + selA.id + ' registrado no trail com a evidência anexada.' }),
+          encerrarAchado: () => this.setState({ aviso: selA.id + ' encerrado após verificação independente da auditoria.' }),
+        };
+      })(),
       ...(() => {
         const meus = this.fila.filter((f) => f.papeis.includes(papel));
         const tomUrg = { vencido: '#9E1F26', agora: '#8E5C08', '30d': '#495A5D' };
@@ -1529,7 +1826,7 @@ class Component extends DCLogic {
       })(),
       apresentacao: s.apresentacao,
       alternarApresentacao: () => this.setState({ apresentacao: !s.apresentacao }),
-      navEsteira: nav('Esteira de entrega'), navOperacao: nav('Operação e prova'),
+      navEsteira: nav('Esteira de entrega'), navOperacao: nav('Operação e prova'), navReferencia: nav('Referência'),
       papeisSeg: this.papeis.map((p) => ({
         ...p,
         trocar: () => this.setState({ papel: p.id, tela: (this.bloqueadas[p.id] || []).includes(s.tela) ? 't1' : s.tela }),
@@ -1569,15 +1866,8 @@ class Component extends DCLogic {
       setCenario: (e) => {
         const v = e.target.value;
         if (v === s.cenario) return;
-        if (s.reclass.length > 0) this.setState({ confirmandoCenario: v });
-        else this.setState({ cenario: v });
+        this.setState({ cenario: v, aviso: 'Cenário trocado. O histórico de ' + s.cenario + ' continua guardado — cada cenário tem o próprio banco.' });
       },
-      confirmandoCenario: s.confirmandoCenario,
-      textoConfirmacao: s.confirmandoCenario
-        ? 'Trocar para ' + s.confirmandoCenario + ' recria o banco desta demonstração e descarta ' + s.reclass.length + ' reclassificação' + (s.reclass.length > 1 ? 'ões' : '') + ' registrada' + (s.reclass.length > 1 ? 's' : '') + ' nesta sessão.'
-        : '',
-      confirmarTroca: () => this.setState({ cenario: s.confirmandoCenario, confirmandoCenario: null, reclass: [], aviso: 'Cenário trocado. Os registros da demonstração anterior foram descartados.' }),
-      cancelarTroca: () => this.setState({ confirmandoCenario: null }),
 
       solicitacoes: sol, foco,
       podeConcluir: this.pode('concluir_solicitacao') && !foco.concluido,
