@@ -23,6 +23,10 @@ export type {
 } from './decisoes';
 import type { DecisaoRegistrada } from './decisoes';
 
+/** PR 11 — os sete princípios moram em `mock/pbd.ts`, lidos pela tela e pelo gate. */
+export type { PrincipioPbd, MarcacaoPbd, SituacaoPbd, AvaliacaoPbd, VereditoPbd } from './pbd';
+import type { MarcacaoPbd } from './pbd';
+
 /** PR 10 — as obrigações do ano moram em `mock/calendario.ts`. */
 export type { Obrigacao, Prorrogacao, Trilha, TipoObrigacao } from './calendario';
 import type { Obrigacao } from './calendario';
@@ -128,6 +132,46 @@ export interface RipdTrigger {
   evidencias: string[];
 }
 
+/**
+ * PR 11 — o gatilho de reabertura, e por que ele é **código**, não prosa.
+ *
+ * "Qualquer coleta de identificador direto reabre a triagem" é uma frase que
+ * nenhuma esteira consegue disparar: ela depende de alguém ler, lembrar e
+ * decidir. O gatilho aponta para um código do catálogo `GATILHOS` (PR 8) — o
+ * mesmo vocabulário que a triagem do CI já usa —, e é isso que permite a
+ * dispensa ser reaberta **sem intervenção manual** quando o gatilho dispara.
+ *
+ * A condição em prosa continua, ao lado: é ela que explica a quem lê o que o
+ * código significa neste sistema.
+ */
+export interface GatilhoDeReabertura {
+  codigo: string;
+  condicao: string;
+}
+
+export interface DisparoDeGatilho {
+  codigo: string;
+  evidencia: string;
+  quando: string;
+  /** Disparo que não reabre continua registrado: o fato aconteceu. */
+  reabriu: boolean;
+}
+
+/**
+ * Dispensa de RIPD — **decisão registrada**, nunca ausência de RIPD.
+ *
+ * Lista append-only no artefato, como as decisões do PR 8: dispensar de novo
+ * grava um registro novo, e o anterior continua dizendo por que se dispensou em
+ * março e o que se comprometeu a vigiar.
+ */
+export interface DispensaDeRipd {
+  justificativa: string;
+  gatilhos: GatilhoDeReabertura[];
+  por: string;
+  quando: string;
+  disparos: DisparoDeGatilho[];
+}
+
 export interface Recomendacao {
   prioridade: 'P0' | 'P1' | 'P2';
   descricao: string;
@@ -164,6 +208,25 @@ export interface Ripd {
    * prova que este PR existe para produzir. A vigente é a última da tabela.
    */
   decisoes?: DecisaoRegistrada[];
+  /** PR 11 — as dispensas, append-only. A vigente é a última. */
+  dispensas?: DispensaDeRipd[];
+}
+
+/**
+ * PR 11 — o épico, com o checklist de PbD como campo dele.
+ *
+ * O checklist não é documento anexo: é campo do épico, e o gate de CI o lê do
+ * `.privacy/epico.yml` do repositório com a **mesma** regra que esta tela usa
+ * (`mock/pbd.ts`). Duas implementações divergiriam, e a que vale seria a que
+ * ninguém está olhando.
+ */
+export interface Epico {
+  id: string;
+  codigo: string;
+  titulo: string;
+  repositorio: string;
+  prNumero: number;
+  pbd: MarcacaoPbd[];
 }
 
 export interface LinddunItem {
@@ -488,4 +551,6 @@ export interface Cenario {
    * que ninguém trata (MAPA §4).
    */
   obrigacoes: Obrigacao[];
+  /** PR 11 — os épicos em andamento, com o checklist de PbD. */
+  epicos: Epico[];
 }

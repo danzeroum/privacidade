@@ -1,0 +1,11 @@
+# Exemplo do que o audit trail escreve. Publicado de propósito: é o formato que
+# a T6 exibe e que o auditor externo exporta, e serve de caso de teste para o
+# próprio gate de privacidade deste repositório.
+#
+# Nenhuma linha aqui carrega documento, nome, e-mail ou telefone. O que aparece
+# é o hash do titular, o campo acessado — não o valor —, a finalidade e a
+# justificativa já redigida.
+ts=2026-07-28T14:02:11Z action=CAMPO_REVELADO ator=marcela.dias papel=dpo purpose=atendimento titular_hash=hmac:9f4c…a71b campo=cpf recurso=solicitacao/2026-0731 justificativa="Atendimento ao protocolo 2026-0731, direito de acesso" cadeia=b1c0…7e42 result=sucesso
+ts=2026-07-28T14:02:11Z action=PSEUDONIMO_RESOLVIDO ator=marcela.dias papel=dpo purpose=atendimento titular_hash=hmac:9f4c…a71b campo=nome recurso=solicitacao/2026-0731 justificativa="Atendimento ao protocolo 2026-0731, direito de acesso" cadeia=4a19…c8b3 result=sucesso
+ts=2026-07-28T14:03:40Z action=CAMPO_REVELADO ator=lucas.dias papel=produto purpose=atendimento titular_hash=hmac:3b81…cc02 campo=renda recurso=solicitacao/2026-0730 justificativa="Tentativa sem permissao de revelar" cadeia=9d77…10ff result=negado
+ts=2026-07-28T14:05:02Z action=INTEGRIDADE_VERIFICADA ator=auditoria.externa papel=auditor recurso=audit_log/cadeia cadeia=e3a2…44b1 result=sucesso

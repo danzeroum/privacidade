@@ -6,6 +6,8 @@ import type { Artefato, EstadoDe } from './estados';
 import {
   CATEGORIAS, TABELAS, TABELAS_IDS, aplicar, gatilhoCritico, rotuloDoGatilho, ultimaDecisao, vigenteDe,
 } from './decisoes';
+import { GATILHOS } from './decisoes';
+import { vereditoPbd } from './pbd';
 import type { DecisaoRegistrada, TabelaId, Valor } from './decisoes';
 import { contadoresDe, derivarFila, minhaFila } from './fila';
 import {
@@ -16,7 +18,7 @@ import { sha256 } from '../lib/sha256';
 import { BASES_PARA_SENSIVEL } from './types';
 import type {
   BaseLegal, Campo, Categoria, DecisaoIncidente, DesfechoSolicitacao, EstadoIncidente,
-  Finalidade, Incidente, Mecanismo, Papel, ResultadoRevisao, TipoArmazenado,
+  Finalidade, GatilhoDeReabertura, Incidente, Mecanismo, Papel, ResultadoRevisao, TipoArmazenado,
 } from './types';
 
 export interface Req {
@@ -366,6 +368,75 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         return ok({ status: ripd.status, prNumero: ripd.prNumero, checkRun: 'success' }) as Res<T>;
       }
 
+      /**
+       * PR 11 — o gatilho dispara e o RIPD volta sozinho para elaboração.
+       *
+       * "Sem intervenção manual" é o ponto: quem chama isto é a triagem do CI,
+       * que já fala o vocabulário do catálogo. A reabertura passa pelo mesmo
+       * `transitar` de qualquer transição — mesma máquina, mesmo registro antes
+       * de aplicar —, e não por um atalho que mexe no status direto.
+       */
+      if (acao === 'gatilho') {
+        const codigo = String(body.codigo ?? '');
+        if (!GATILHOS[codigo]) {
+          return erro(422, `"${codigo}" não é gatilho do catálogo.`,
+            `Os declarados são: ${Object.keys(GATILHOS).join(', ')}.`) as Res<T>;
+        }
+        const evidencia = String(body.evidencia ?? '').trim();
+        if (evidencia.length < 10) {
+          return erro(422, 'Disparar um gatilho exige evidência.',
+            'Gatilho sem evidência é boato: o que reabre um RIPD precisa ser conferível no diff.') as Res<T>;
+        }
+        const dispensa = (ripd.dispensas ?? []).at(-1);
+        if (ripd.status !== 'dispensado' || !dispensa) {
+          return erro(409, `${ripd.codigo} não está dispensado.`,
+            'Gatilho de reabertura é o que fica pendurado numa dispensa; fora dela não há o que reabrir.') as Res<T>;
+        }
+
+        /**
+         * Reabre se o gatilho foi declarado **ou** se é crítico.
+         *
+         * A segunda metade é a que fecha a porta: um gatilho crítico que a
+         * dispensa não previu quebra a premissa dela — a de que nada crítico
+         * havia. Exigir declaração prévia faria a omissão proteger a dispensa.
+         */
+        const declarado = dispensa.gatilhos.some((g) => g.codigo === codigo);
+        const reabre = declarado || gatilhoCritico(codigo);
+
+        try {
+          banco.auditAppend({
+            ator, atorPapel: papel, acao: 'GATILHO_DISPARADO',
+            recursoTipo: 'ripd', recursoId: ripd.codigo,
+            justificativa: redigir(evidencia).texto,
+            campos: [codigo, declarado ? 'declarado' : 'nao_declarado', reabre ? 'reabre' : 'nao_reabre'],
+          });
+        } catch (e) {
+          const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar o disparo.';
+          return erro(503, msg, 'Sem registro não há disparo: a dispensa continua como estava.') as Res<T>;
+        }
+
+        dispensa.disparos.push({
+          codigo, evidencia: redigir(evidencia).texto, quando: new Date().toISOString(), reabriu: reabre,
+        });
+        if (!reabre) {
+          return ok({
+            codigo, reabriu: false, status: ripd.status,
+            motivo: `${codigo} (${rotuloDoGatilho(codigo)}) não é crítico e não estava entre os declarados: `
+              + 'fica registrado como evidência e a dispensa segue de pé.',
+          }) as Res<T>;
+        }
+
+        const alvo = alvoDaTransicao(banco, 'ripd', ripd.id, { para: 'elaboracao' });
+        const res = transitar<{ para: string }>(banco, { ...req, body: { para: 'elaboracao' } }, alvo!, 'elaboracao');
+        if (res.status !== 200) return res as Res<T>;
+        return ok({
+          codigo, reabriu: true, status: ripd.status,
+          motivo: declarado
+            ? `${codigo} (${rotuloDoGatilho(codigo)}) estava declarado na dispensa.`
+            : `${codigo} (${rotuloDoGatilho(codigo)}) é gatilho crítico: a dispensa não o previu, e é justamente por isso que reabre.`,
+        }) as Res<T>;
+      }
+
       if (acao === 'render') {
         if (!pode(papel, 'gerar_ripd')) {
           return erro(403, 'Somente engenharia gera o RIPD.md.') as Res<T>;
@@ -593,6 +664,18 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
      * precisa enxergar o que está provisionado. O recorte "só as minhas" é da
      * tela, não da rota — quem audita precisa ver o ano todo.
      */
+    /**
+     * PR 11 — os épicos com o checklist de PbD.
+     *
+     * O veredito vem junto e é calculado por `mock/pbd.ts` — a **mesma** função
+     * que o gate de CI usa sobre o `.privacy/epico.yml`. A tela não reimplementa
+     * a regra: se reimplementasse, a que vale seria a que ninguém está olhando.
+     */
+    case 'GET epicos':
+      return ok(banco.cenario.epicos.map((e) => ({
+        ...e, veredito: vereditoPbd(e.pbd),
+      }))) as Res<T>;
+
     case 'GET calendario': {
       if (partes[1] === 'assinatura') {
         // A URL do feed **do próprio papel**, e de mais nenhum: a assinatura é a
@@ -884,8 +967,25 @@ function exigenciasDe(
     if (texto('justificativa').length < 20) {
       return 'Dispensar o RIPD exige justificativa de ao menos 20 caracteres — dispensa sem registro é omissão, não decisão.';
     }
-    if (!texto('gatilhoDeReabertura')) {
-      return 'Dispensa exige gatilho de reabertura declarado: sem ele, a dispensa vale para sempre e ninguém revisita.';
+    /**
+     * PR 11 — o gatilho passou de prosa a **código do catálogo**.
+     *
+     * Antes bastava uma frase, que era validada e descartada: nada ficava no
+     * artefato e nada podia disparar. Uma dispensa com gatilho que ninguém
+     * consegue acionar é dispensa permanente com outro nome.
+     */
+    const gatilhos = Array.isArray(body.gatilhos) ? body.gatilhos : [];
+    if (gatilhos.length === 0) {
+      return 'Dispensa exige ao menos um gatilho de reabertura: sem ele, a dispensa vale para sempre e ninguém revisita.';
+    }
+    for (const g of gatilhos) {
+      const codigo = String(g?.codigo ?? '');
+      if (!GATILHOS[codigo]) {
+        return `"${codigo}" não é gatilho do catálogo. Os declarados são: ${Object.keys(GATILHOS).join(', ')}.`;
+      }
+      if (String(g?.condicao ?? '').trim().length < 10) {
+        return `O gatilho ${codigo} precisa dizer o que, neste sistema, o faria disparar.`;
+      }
     }
   }
   if (artefato === 'risco' && para === 'aceito') {
@@ -961,7 +1061,23 @@ function alvoDaTransicao(banco: BancoMock, artefato: Artefato, id: string, body:
     }
     case 'ripd': {
       const x = c.ripds.find((r) => r.id === id || r.codigo === id);
-      return x ? { artefato, id: x.codigo, estado: x.status, aplicar: () => { x.status = String(body.para) as typeof x.status; } } : null;
+      return x ? { artefato, id: x.codigo, estado: x.status, aplicar: () => {
+        const para = String(body.para);
+        if (para === 'dispensado') {
+          // A dispensa fica no artefato, append-only. Validada e descartada,
+          // como era antes, ela não sustentaria a reabertura nem a auditoria.
+          x.dispensas = [...(x.dispensas ?? []), {
+            justificativa: redigir(String(body.justificativa)).texto,
+            gatilhos: (body.gatilhos as GatilhoDeReabertura[]).map((g) => ({
+              codigo: String(g.codigo), condicao: String(g.condicao),
+            })),
+            por: String(body.por ?? '—'),
+            quando: new Date().toISOString(),
+            disparos: [],
+          }];
+        }
+        x.status = para as typeof x.status;
+      } } : null;
     }
     case 'lia': {
       const x = c.lias.find((l) => l.id === id || l.codigo === id);

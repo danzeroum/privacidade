@@ -1,0 +1,60 @@
+# Gate de privacidade (PR 11) — o que o C-18 prometeu para depois.
+#
+# O gate mínimo (`ci.yml`) prova que compila e que as nove regras passam. Este
+# prova outra coisa: que **este repositório** não publica dado pessoal, não trata
+# campo fora do catálogo declarado e não marca princípio de PbD sem evidência.
+#
+# A regra que separa este arquivo de um linter de texto: ele barra por
+# **evidência**. Não procura a palavra "privacidade" no PR, não conta linhas de
+# documentação e não confia em marcação. Toda reprovação cita arquivo e linha, e
+# pode ser conferida à mão por quem lê o diff — se não pudesse, seria opinião.
+#
+# Falha fechada: repositório sem `.privacy/` reprova em vez de passar por
+# omissão, e inventário ilegível reprova em vez de virar lista vazia.
+#
+# Como no `ci.yml`, nenhuma etapa aqui tolera falha, e a palavra que faria isso
+# não aparece no arquivo — de propósito, para que uma varredura simples confirme
+# a ausência. E, como lá, enquanto o job não estiver marcado como *required
+# status check* na proteção da `main`, ele informa o vermelho sem impedir o
+# merge: a marcação é configuração do repositório, não commit.
+#
+# A regra roda em `app/src/lib/gate-privacidade.ts` e é exercitada por teste
+# (`app/tests/regras.test.tsx`). Gate cuja lógica só existe dentro do YAML é
+# gate que ninguém consegue rodar em casa nem provar que reprova o que deveria.
+name: Gate de privacidade
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: privacidade-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  privacidade:
+    name: PII, catálogo e PbD
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+        working-directory: app
+
+      # A raiz varrida é o repositório inteiro, não `app/`: o gate olha o que o
+      # repositório publica, e o protótipo é só uma parte dele.
+      - name: Varredura de privacidade
+        run: npm run gate:privacidade
+        working-directory: app

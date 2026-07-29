@@ -100,6 +100,14 @@ export const POLITICAS: PoliticaRota[] = [
     nota: 'Mover artefato entre estados. A sequência é da tabela de mock/estados.ts; o conteúdo exigido, da rota.',
   },
 
+  // ── Épico e PbD (PR 11) ───────────────────────────────────────────────────
+  {
+    metodo: 'GET', caminho: /^epicos(\/.*)?$/,
+    tipo: 'leitura', foraDeEscopo: '403',
+    nota: 'Checklist dos sete princípios, com o veredito calculado pela mesma regra que o gate de CI usa. '
+      + 'Leitura ampla: quem audita precisa ver o que foi marcado sem evidência.',
+  },
+
   // ── Calendário do ano (PR 10 · T10) ───────────────────────────────────────
   {
     metodo: 'GET', caminho: /^calendario(\/assinatura)?$/,
@@ -198,6 +206,12 @@ export const POLITICAS: PoliticaRota[] = [
   { metodo: 'POST', caminho: /^catalog\/validar$/, tipo: 'escrita', foraDeEscopo: '403', nota: 'Validação de inventário.' },
   { metodo: 'GET', caminho: /^gates(\/.*)?$/, tipo: 'leitura', foraDeEscopo: '403', nota: 'Execuções dos gates.' },
   { metodo: 'POST', caminho: /^ripds\/[^/]+\/(aprovar|render)$/, tipo: 'escrita', foraDeEscopo: '403', nota: 'Aprovação e geração do RIPD.' },
+  {
+    metodo: 'POST', caminho: /^ripds\/[^/]+\/gatilho$/,
+    tipo: 'escrita', foraDeEscopo: '403', acao: 'gerar_ripd',
+    nota: 'Dispara um gatilho de reabertura declarado numa dispensa. Quem chama é a triagem do CI, '
+      + 'que fala o vocabulário do catálogo — por isso a permissão é a de engenharia.',
+  },
   { metodo: 'POST', caminho: /^lias\/[^/]+\/(campos|assinar)$/, tipo: 'escrita', foraDeEscopo: '403', nota: 'Vínculo e assinatura da LIA.' },
   { metodo: 'GET', caminho: /^risks(\/.*)?$/, tipo: 'leitura', foraDeEscopo: '403', nota: 'Matriz de risco.' },
   { metodo: 'PATCH', caminho: /^risks\/[^/]+$/, tipo: 'escrita', foraDeEscopo: '403', acao: 'gerenciar_risco', nota: 'Reclassificação de risco.' },
