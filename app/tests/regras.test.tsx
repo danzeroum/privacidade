@@ -4557,3 +4557,53 @@ describe('PR 15 · T11 na tela — a fila chega em algum lugar que opera', () =>
     expect(screen.getByText(/503/)).toBeInTheDocument();
   });
 });
+
+describe('PR 15 · validação — o §1 do MAPA descreve telas que existem?', () => {
+  /**
+   * A varredura do #17 é **verificação**: confere que o documento não reenuncia
+   * o que o código já diz. Ela não olha para o §1, e por isso o §1 podia
+   * envelhecer sozinho — foi assim que "estado do achado" ficou na coluna "o
+   * que falta" depois de o achado ganhar máquina.
+   *
+   * Este teste é a outra metade: **validação**. A tabela nomeia telas; as telas
+   * têm de existir, e com o mesmo número e o mesmo nome.
+   */
+  const mapa = readFileSync(join('..', 'docs', 'design_handoff_lastro_correcoes', 'MAPA-PROCESSOS.md'), 'utf8');
+  const secao1 = mapa.slice(mapa.indexOf('## 1 ·'), mapa.indexOf('## 2 ·'));
+  const linhasDeTela = secao1.split('\n').filter((l: string) => /\*\*T\d+ · /.test(l));
+
+  it('toda tela nomeada na tabela existe, com o número e o nome do código', () => {
+    expect(linhasDeTela.length, 'nenhuma linha de tela extraída').toBeGreaterThanOrEqual(4);
+    for (const linha of linhasDeTela) {
+      const [, id, nome] = linha.match(/\*\*(T\d+) · ([^*(]+)/)!;
+      const tela = TELAS.find((t) => t.id === id);
+      if (id === 'T12') {
+        // A exceção é declarada na própria linha, e o teste cobra as duas
+        // pontas: fora de `TELAS` no código, e dito na tabela.
+        expect(tela, 'T12 entrou em TELAS — a linha do §1 diz que ela fica fora').toBeUndefined();
+        expect(linha).toContain('fora');
+        continue;
+      }
+      expect(tela, `o §1 nomeia ${id} e o código não tem essa tela`).toBeDefined();
+      expect(tela!.nome, `${id}: nome divergente`).toBe(nome.trim().replace(/ de ação$/, ''));
+    }
+  });
+
+  it('a contagem em prosa é a do trilho, não um número escrito à mão', () => {
+    // Onze virou doze quando a T11 entrou. Sem isto, a frase envelhece calada —
+    // e é a primeira coisa que alguém lê para saber o tamanho do produto.
+    const porExtenso: Record<number, string> = {
+      10: 'dez', 11: 'onze', 12: 'doze', 13: 'treze', 14: 'catorze',
+    };
+    expect(secao1, `o trilho tem ${TELAS.length} telas`)
+      .toContain(`cinco fluxos com **${porExtenso[TELAS.length]}** no trilho`);
+  });
+
+  it('a coluna "o que falta" do PR-05 fechou, porque o achado ganhou tela', () => {
+    const pr05 = secao1.split('\n').find((l: string) => l.includes('**PR-05**'))!;
+    expect(pr05).toContain('T11');
+    // A pendência que sobrava era esta, e ela é este PR.
+    expect(pr05).not.toContain('estado do achado');
+    expect(pr05.split('|').at(-2)!.trim()).toBe('—');
+  });
+});
