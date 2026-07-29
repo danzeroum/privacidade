@@ -710,7 +710,7 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         return erro(403, 'Assinatura de feed inválida.',
           'A URL do ICS é a credencial: cada papel assina a própria, e o segredo não sai da plataforma.') as Res<T>;
       }
-      const minhas = banco.cenario.obrigacoes.filter((o) => pode(alvo as Papel, o.acao));
+      const minhas = banco.cenario.obrigacoes.filter((o) => o.responsavel === alvo);
       return ok(paraIcs(minhas, alvo, 'https://lastro.exemplo/')) as Res<T>;
     }
 
@@ -1155,9 +1155,11 @@ function prorrogarObrigacao<T>(banco: BancoMock, req: Req, codigo: string): Res<
   const o = banco.cenario.obrigacoes.find((x) => x.codigo === codigo);
   if (!o) return erro(404, 'Não encontrado.') as Res<T>;
 
-  if (!pode(req.papel, o.acao)) {
-    return erro(403, 'Prorrogar é de quem responde pela obrigação.',
-      'Na interface o controle não é renderizado para quem não responde por ela.') as Res<T>;
+  if (req.papel !== o.responsavel) {
+    // Titularidade declarada: quem prorroga é quem responde, e não quem tem uma
+    // permissão larga o bastante para alcançar.
+    return erro(403, `Prorrogar ${o.codigo} é de ${o.responsavel}, que responde por ela.`,
+      'Na interface o controle não é renderizado para quem não responde pela obrigação.') as Res<T>;
   }
 
   const justificativa = String(body.justificativa ?? '').trim();

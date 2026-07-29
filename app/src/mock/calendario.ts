@@ -1,4 +1,4 @@
-import type { Acao } from './permissoes';
+import type { Papel } from './types';
 
 /**
  * T10 · Calendário do ano — as obrigações provisionadas.
@@ -73,8 +73,23 @@ export interface Obrigacao {
   seFalhar: string;
   /** Dias-pessoa que ela consome do mês. É daqui que sai a barra. */
   cargaDias: number;
-  /** A permissão de quem responde por ela — e, por consequência, de quem é o item. */
-  acao: Acao;
+  /**
+   * De quem é a obrigação. **Declarado**, não derivado — e a diferença é do
+   * modelo, não de conveniência.
+   *
+   * Item de artefato deriva o dono da `Acao`: o estado diz o que precisa ser
+   * feito, e a tabela de permissões diz quem pode fazer. Ninguém escolhe.
+   *
+   * Obrigação é dado **autorado**: alguém sentou em 1º de janeiro e disse que o
+   * diagnóstico AS-IS é da engenharia e o tabletop é da segurança. Derivar isso
+   * de permissão exigiria uma `Acao` por recorte de papel — e não existe ação
+   * que só a segurança tenha, então o tabletop cairia em `escrever` e apareceria
+   * para três papéis. Foi o que aconteceu até aqui.
+   *
+   * O item herda esta declaração. O que ele **não** ganha é um campo de dono
+   * próprio: quem responde por isso é `Titularidade`, em `fila.ts`.
+   */
+  responsavel: Papel;
   tela: string;
   /** Cumprida deixa de provisionar trabalho futuro e sai da fila. */
   cumpridaEm?: string;

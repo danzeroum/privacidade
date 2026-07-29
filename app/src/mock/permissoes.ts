@@ -24,7 +24,6 @@ export type Acao =
   | 'ver_log_kms'
   | 'gerenciar_risco'
   | 'gerenciar_achado'
-  | 'conduzir_ciclo'
   | 'rodar_expurgo'
   | 'ver_portal_titular'
   | 'ver_total_itens'
@@ -62,18 +61,21 @@ export type Acao =
  * permissão larga escolhendo o dono por omissão. Quem apura causa raiz e executa
  * o plano é engenharia; quem valida o critério de eficácia é o DPO.
  *
- * `conduzir_ciclo` é do DPO, e nasceu do calendário: treze das obrigações do ano
- * são condução do programa — indicadores trimestrais, roadmap, orçamento,
- * políticas, fechamento — e a tabela não tinha ação para isso. Sem ela essas
- * obrigações cairiam em `escrever` e entrariam na fila de engenharia e de
- * segurança, que é o defeito que o `gerenciar_achado` acabou de corrigir.
+ * `conduzir_ciclo` existiu entre o PR 10 e o PR 13 e **saiu**: ela nasceu porque
+ * obrigação de calendário precisava de uma `Acao` para ter dono, e obrigação
+ * deixou de derivar dono de permissão — ela o **declara**. Permissão que não
+ * habilita nada é pior que ausência: sugere um recorte que o sistema não faz.
+ *
+ * A regra que ficou no lugar dela: item de artefato deriva o dono da `Acao`;
+ * obrigação é dado autorado e declara `responsavel`. As duas convivem atrás de
+ * `Titularidade`, em `mock/fila.ts`.
  */
 const MAPA: Record<Papel, Acao[]> = {
   engenharia: ['gerar_ripd', 'ver_gate_detalhe', 'ver_pipeline_rotacao', 'ver_log_kms',
     'rodar_expurgo', 'ver_portal_titular', 'ver_total_itens', 'verificar_integridade',
     'abrir_incidente', 'gerenciar_achado', 'escrever'],
   dpo: ['revelar_pii', 'buscar_titular', 'concluir_solicitacao', 'revisar_decisao',
-    'aprovar_ripd', 'assinar_lia', 'gerenciar_risco', 'gerenciar_achado', 'conduzir_ciclo',
+    'aprovar_ripd', 'assinar_lia', 'gerenciar_risco', 'gerenciar_achado',
     'ver_portal_titular', 'ver_total_itens', 'rodar_expurgo',
     'verificar_integridade', 'exportar_auditoria',
     'comunicar_incidente', 'revogar_consentimento', 'escrever'],
@@ -83,6 +85,15 @@ const MAPA: Record<Papel, Acao[]> = {
     'abrir_incidente', 'escrever'],
   auditor: ['verificar_integridade', 'exportar_auditoria'],
 };
+
+/**
+ * Todas as ações declaradas, em runtime.
+ *
+ * Existe para o invariante que cobra que cada uma seja exercida em algum lugar:
+ * permissão sem usuário sugere um recorte que o sistema não faz, e foi assim que
+ * `conduzir_ciclo` ficou órfã entre o PR 10 e o PR 13.
+ */
+export const ACOES: Acao[] = [...new Set(Object.values(MAPA).flat())].sort();
 
 export const pode = (papel: Papel, acao: Acao): boolean => MAPA[papel].includes(acao);
 

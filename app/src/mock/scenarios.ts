@@ -1,8 +1,8 @@
 import { sha256, hashCpf } from '../lib/sha256';
 import { aplicar } from './decisoes';
 import type { Obrigacao, Trilha, TipoObrigacao } from './calendario';
-import type { Epico, Ripd } from './types';
-import type { Acao } from './permissoes';
+import type { Epico, Papel, Ripd } from './types';
+
 import type { Decisao, DecisaoRegistrada, TabelaId, Valor } from './decisoes';
 import type {
   Achado, Campo, Cenario, Incidente, LinddunItem, Parecer, Maturidade, Risco, Solicitacao, Titular,
@@ -101,62 +101,62 @@ const ANO = new Date().getFullYear();
 const obr = (
   n: number, mes: number, dia: number, trilha: Trilha, tipo: TipoObrigacao,
   curto: string, titulo: string, antecedenciaDias: number, cargaDias: number,
-  acao: Acao, tela: string, preparar: string, seFalhar: string,
+  responsavel: Papel, tela: string, preparar: string, seFalhar: string,
 ): Obrigacao => {
   const vence = `${ANO}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
   const passou = new Date(`${vence}T12:00:00Z`).getTime() < Date.now();
   return {
     codigo: `OBR-${ANO}-${String(n).padStart(2, '0')}`,
     titulo, curto, trilha, tipo, vence, antecedenciaDias, preparar, seFalhar,
-    cargaDias, acao, tela,
+    cargaDias, responsavel, tela,
     ...(passou ? { cumpridaEm: vence } : {}),
   };
 };
 
 const agendaPadrao = (): Obrigacao[] => [
-  obr(1, 0, 20, 'ciclo', 'compromisso', 'Indicadores Q4', 'Revisão trimestral de indicadores (Q4 anterior)', 5, 5, 'conduzir_ciclo', '/t1',
+  obr(1, 0, 20, 'ciclo', 'compromisso', 'Indicadores Q4', 'Revisão trimestral de indicadores (Q4 anterior)', 5, 5, 'dpo', '/t1',
     'Material do comitê fechado 5 dias antes', 'o comitê decide sem número novo — a decisão vira opinião'),
-  obr(2, 1, 18, 'vencimento', 'prazo', 'Reavaliar R2', 'Reavaliação de R2 · decisão automatizada', 15, 3, 'gerenciar_risco', '/t5',
+  obr(2, 1, 18, 'vencimento', 'prazo', 'Reavaliar R2', 'Reavaliação de R2 · decisão automatizada', 15, 3, 'dpo', '/t5',
     'Aviso ao dono do risco 15 dias antes', 'risco aceito segue vigente sem revisão — reincidência em auditoria'),
-  obr(3, 2, 10, 'legal', 'prazo', 'Consentimento v3', 'Revalidar consentimento v3 · biometria facial', 60, 6, 'assinar_lia', '/t2',
+  obr(3, 2, 10, 'legal', 'prazo', 'Consentimento v3', 'Revalidar consentimento v3 · biometria facial', 60, 6, 'dpo', '/t2',
     'Campanha de revalidação aberta 60 dias antes', 'o campo perde base legal e o gate bloqueia dois repositórios'),
-  obr(4, 2, 24, 'capacitacao', 'compromisso', 'Trilha técnica', 'Treinamento das squads — minimização, log e retenção', 30, 8, 'escrever', '/t1',
+  obr(4, 2, 24, 'capacitacao', 'compromisso', 'Trilha técnica', 'Treinamento das squads — minimização, log e retenção', 30, 8, 'engenharia', '/t1',
     'Turmas abertas 30 dias antes', 'achados de gate voltam a subir; é o indicador que mede'),
-  obr(5, 3, 20, 'ciclo', 'compromisso', 'Indicadores Q1', 'Revisão trimestral de indicadores (Q1)', 5, 5, 'conduzir_ciclo', '/t1',
+  obr(5, 3, 20, 'ciclo', 'compromisso', 'Indicadores Q1', 'Revisão trimestral de indicadores (Q1)', 5, 5, 'dpo', '/t1',
     'Material do comitê fechado 5 dias antes', 'perde-se a chance de corrigir o roadmap no meio do ciclo'),
-  obr(6, 3, 28, 'vencimento', 'prazo', 'RIPD do ano anterior', 'Revisão anual do RIPD do ciclo anterior', 30, 6, 'gerar_ripd', '/t3',
+  obr(6, 3, 28, 'vencimento', 'prazo', 'RIPD do ano anterior', 'Revisão anual do RIPD do ciclo anterior', 30, 6, 'engenharia', '/t3',
     'Revisão abre 30 dias antes', 'RIPD desatualizado não sustenta o tratamento em fiscalização'),
-  obr(7, 4, 15, 'vencimento', 'prazo', 'Rotação de chave', 'Rotação anual da chave de PII de cobrança', 20, 5, 'ver_pipeline_rotacao', '/t7',
+  obr(7, 4, 15, 'vencimento', 'prazo', 'Rotação de chave', 'Rotação anual da chave de PII de cobrança', 20, 5, 'engenharia', '/t7',
     'Janela de canary agendada 20 dias antes', 'chave vencida não quebra nada: para de proteger em silêncio'),
-  obr(8, 4, 26, 'auditoria', 'compromisso', 'Tabletop', 'Teste do plano de resposta a incidente (tabletop)', 10, 4, 'escrever', '/t9',
+  obr(8, 4, 26, 'auditoria', 'compromisso', 'Tabletop', 'Teste do plano de resposta a incidente (tabletop)', 10, 4, 'seguranca', '/t9',
     'Cenário escrito 10 dias antes', 'o plano só é testado no dia do incidente real'),
-  obr(9, 5, 12, 'legal', 'prazo', 'LIA vence', 'Vencimento da LIA vinculada ao legítimo interesse', 60, 6, 'assinar_lia', '/t8',
+  obr(9, 5, 12, 'legal', 'prazo', 'LIA vence', 'Vencimento da LIA vinculada ao legítimo interesse', 60, 6, 'dpo', '/t8',
     'Renovação aberta 60 dias antes', 'campos vinculados perdem base legal e o gate bloqueia'),
-  obr(10, 5, 25, 'auditoria', 'compromisso', 'Auditoria interna', 'Auditoria interna semestral do programa', 15, 10, 'conduzir_ciclo', '/t6',
+  obr(10, 5, 25, 'auditoria', 'compromisso', 'Auditoria interna', 'Auditoria interna semestral do programa', 15, 10, 'dpo', '/t6',
     'Pacote de evidências pronto 15 dias antes', 'achado velho reaparece como reincidência'),
-  obr(11, 6, 17, 'ciclo', 'compromisso', 'Indicadores Q2', 'Revisão trimestral de indicadores (Q2)', 5, 5, 'conduzir_ciclo', '/t1',
+  obr(11, 6, 17, 'ciclo', 'compromisso', 'Indicadores Q2', 'Revisão trimestral de indicadores (Q2)', 5, 5, 'dpo', '/t1',
     'Material do comitê fechado 5 dias antes', 'sem leitura de meio de ano o ciclo fecha no escuro'),
-  obr(12, 6, 31, 'ciclo', 'compromisso', 'Diagnóstico AS-IS', 'Diagnóstico AS-IS do ciclo (20 dias úteis)', 15, 20, 'conduzir_ciclo', '/t1',
+  obr(12, 6, 31, 'ciclo', 'compromisso', 'Diagnóstico AS-IS', 'Diagnóstico AS-IS do ciclo (20 dias úteis)', 15, 20, 'engenharia', '/t1',
     'Entrevistas agendadas 15 dias antes', 'o roadmap do ano seguinte nasce sem linha de base'),
-  obr(13, 7, 14, 'ciclo', 'compromisso', 'Matriz e roadmap', 'Matriz de riscos consolidada e roadmap ao comitê', 5, 12, 'conduzir_ciclo', '/t5',
+  obr(13, 7, 14, 'ciclo', 'compromisso', 'Matriz e roadmap', 'Matriz de riscos consolidada e roadmap ao comitê', 5, 12, 'dpo', '/t5',
     'Pauta distribuída 5 dias antes', 'riscos altos entram no ano sem dono nem orçamento'),
-  obr(14, 7, 27, 'ciclo', 'compromisso', 'Políticas', 'Revisão de políticas, procedimentos e templates', 20, 8, 'conduzir_ciclo', '/t1',
+  obr(14, 7, 27, 'ciclo', 'compromisso', 'Políticas', 'Revisão de políticas, procedimentos e templates', 20, 8, 'dpo', '/t1',
     'Minuta ao jurídico 20 dias antes', 'template que ninguém consegue preencher continua em vigor'),
-  obr(15, 8, 16, 'vencimento', 'prazo', 'Rotação biometria', 'Rotação da chave de biometria', 20, 5, 'ver_pipeline_rotacao', '/t7',
+  obr(15, 8, 16, 'vencimento', 'prazo', 'Rotação biometria', 'Rotação da chave de biometria', 20, 5, 'seguranca', '/t7',
     'Janela de canary agendada 20 dias antes', 'a chave da biometria é a que sustenta o cripto-shredding'),
-  obr(16, 8, 29, 'capacitacao', 'compromisso', 'Alta direção', 'Sessão de privacidade com a alta direção', 30, 4, 'conduzir_ciclo', '/t1',
+  obr(16, 8, 29, 'capacitacao', 'compromisso', 'Alta direção', 'Sessão de privacidade com a alta direção', 30, 4, 'dpo', '/t1',
     'Convite enviado 30 dias antes', 'o aceite de risco continua sendo assinado sem contexto'),
-  obr(17, 9, 19, 'ciclo', 'compromisso', 'Indicadores Q3', 'Revisão trimestral de indicadores (Q3)', 5, 5, 'conduzir_ciclo', '/t1',
+  obr(17, 9, 19, 'ciclo', 'compromisso', 'Indicadores Q3', 'Revisão trimestral de indicadores (Q3)', 5, 5, 'dpo', '/t1',
     'Material do comitê fechado 5 dias antes', 'desvio do trimestre chega junto com o fechamento'),
-  obr(18, 9, 30, 'ciclo', 'compromisso', 'Orçamento', 'Aprovação de roadmap e orçamento do próximo ciclo', 15, 10, 'conduzir_ciclo', '/t1',
+  obr(18, 9, 30, 'ciclo', 'compromisso', 'Orçamento', 'Aprovação de roadmap e orçamento do próximo ciclo', 15, 10, 'dpo', '/t1',
     'Proposta entregue 15 dias antes', 'o programa começa o ano seguinte sem pessoas nem ferramenta'),
-  obr(19, 10, 13, 'vencimento', 'prazo', 'RIPD do ciclo', 'Revisão anual do RIPD do ciclo corrente', 30, 6, 'gerar_ripd', '/t3',
+  obr(19, 10, 13, 'vencimento', 'prazo', 'RIPD do ciclo', 'Revisão anual do RIPD do ciclo corrente', 30, 6, 'engenharia', '/t3',
     'Revisão abre 30 dias antes', 'o RIPD do modelo envelhece com o modelo mudando'),
-  obr(20, 10, 24, 'auditoria', 'compromisso', 'Auditoria externa', 'Janela de auditoria externa', 20, 15, 'conduzir_ciclo', '/t6',
+  obr(20, 10, 24, 'auditoria', 'compromisso', 'Auditoria externa', 'Janela de auditoria externa', 20, 15, 'dpo', '/t6',
     'Dossiê pronto 20 dias antes', 'evidência montada às pressas não sustenta o encerramento'),
-  obr(21, 11, 11, 'legal', 'prazo', 'Expurgo anual', 'Expurgo anual verificado + relatório com hash', 10, 8, 'rodar_expurgo', '/t6',
+  obr(21, 11, 11, 'legal', 'prazo', 'Expurgo anual', 'Expurgo anual verificado + relatório com hash', 10, 8, 'engenharia', '/t6',
     'Simulação do expurgo 10 dias antes', 'dado que devia ter sido eliminado entra no ano seguinte'),
-  obr(22, 11, 19, 'ciclo', 'compromisso', 'Fechamento', 'Fechamento de indicadores e maturidade do ciclo', 10, 8, 'conduzir_ciclo', '/t1',
+  obr(22, 11, 19, 'ciclo', 'compromisso', 'Fechamento', 'Fechamento de indicadores e maturidade do ciclo', 10, 8, 'dpo', '/t1',
     'Consolidação iniciada 10 dias antes', 'sem fechamento não há comparação entre ciclos'),
 ];
 

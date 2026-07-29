@@ -285,13 +285,42 @@ export const REGRAS: RegraDaFila[] = [
  */
 export type Origem = Artefato | 'obrigacao';
 
+/**
+ * De quem é o item — **declarado × derivado**.
+ *
+ * As duas naturezas de trabalho respondem à mesma pergunta por caminhos
+ * diferentes, e achatar as duas num campo só custaria uma das duas verdades:
+ *
+ * - **derivada** — artefato. O estado diz o que precisa ser feito e a tabela de
+ *   permissões diz quem pode fazer. Ninguém escolhe, e é por isso que a fila de
+ *   artefato nunca ganha um campo de dono escrito à mão: ele divergiria de
+ *   `permissoes.ts`, como o rótulo do gatilho divergia do catálogo antes do PR 8.
+ *
+ * - **declarada** — obrigação. É dado autorado: alguém disse, no calendário, que
+ *   o tabletop é da segurança. Derivar isso de permissão exigiria uma `Acao` por
+ *   recorte de papel, e não existe ação que só a segurança tenha — o tabletop
+ *   caía em `escrever` e aparecia para três papéis.
+ *
+ * Quem filtra a fila depende **desta abstração**, não do papel concreto nem de
+ * qual das duas naturezas é. Acrescentar uma terceira origem amanhã não toca em
+ * `minhaFila` nem em `contadoresDe`.
+ */
+export type Titularidade =
+  | { tipo: 'derivada'; acao: Acao }
+  | { tipo: 'declarada'; responsavel: Papel };
+
+/** A única pergunta que a fila faz sobre titularidade. */
+export const eDe = (t: Titularidade, papel: Papel): boolean => (
+  t.tipo === 'derivada' ? pode(papel, t.acao) : t.responsavel === papel
+);
+
 export interface ItemDaFila {
   /** Código do artefato ou da obrigação. Nunca titular, nunca pseudônimo. */
   id: string;
   artefato: Origem;
   tipo: string;
-  /** A permissão que decidiu de quem é o item. */
-  acao: Acao;
+  /** De quem é o item — derivado da permissão ou declarado pelo autor. */
+  titularidade: Titularidade;
 
   // ── as quatro informações, sempre as mesmas (MAPA §4) ────────────────────
   travado: string;
@@ -470,7 +499,7 @@ function daObrigacao(o: Obrigacao, agora: number): ItemDaFila {
     id: o.codigo,
     artefato: 'obrigacao',
     tipo: o.tipo === 'prazo' ? 'Prazo do calendário' : 'Compromisso do calendário',
-    acao: o.acao,
+    titularidade: { tipo: 'declarada', responsavel: o.responsavel },
     // A consequência declarada é o que está em jogo — "revalidar consentimento
     // em março" não diz a ninguém por que largar o que está fazendo.
     travado: `${o.titulo}. Se passar: ${o.seFalhar}.`,
@@ -515,7 +544,7 @@ export function derivarFila(cenario: Cenario, agora: number): ItemDaFila[] {
       id: cand.id,
       artefato: cand.artefato,
       tipo: regra.tipo,
-      acao: regra.acao,
+      titularidade: { tipo: 'derivada', acao: regra.acao },
       travado: preencher(regra.travado, cand.contexto),
       prazo: { texto: cand.prazoTexto, urgencia, restanteMs: cand.restanteMs },
       proximaAcao: preencher(regra.proximaAcao, cand.contexto),
@@ -552,7 +581,7 @@ function ordenarPorConsequencia(a: ItemDaFila, b: ItemDaFila): number {
 }
 
 export const minhaFila = (itens: ItemDaFila[], papel: Papel): ItemDaFila[] =>
-  itens.filter((i) => pode(papel, i.acao));
+  itens.filter((i) => eDe(i.titularidade, papel));
 
 export interface ContadoresDaFila {
   vencido: number;
