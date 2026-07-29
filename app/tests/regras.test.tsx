@@ -4,7 +4,8 @@ import { parse as parseYaml } from 'yaml';
 import { dirname, join, resolve } from 'path';
 import { tmpdir } from 'os';
 import { render, screen, fireEvent, act, cleanup, within } from '@testing-library/react';
-import { BancoMock } from '../src/mock/db';
+import { BancoMock, FalhaDeAuditoria } from '../src/mock/db';
+import { varrerVencimentos } from '../src/mock/expurgo';
 import { CENARIOS } from '../src/mock/scenarios';
 import { request } from '../src/mock/api';
 import { ACOES, pode } from '../src/mock/permissoes';
@@ -26,6 +27,11 @@ import { DIREITOS, REGIME, nivelExigido } from '../src/mock/direitos';
 import {
   CAMINHO_DA_OPOSICAO, OPERACOES, RAIZES_DO_MOCK, ROTAS_APENAS_DEMO, canalDeOposicao, operacaoDe,
 } from '../src/mock/rotas';
+import {
+  LIMITE_DO_LOTE, criticidadeDoVencimento, derivarRetencaoAte, diasDeAtraso,
+  indeterminadoJustificado, lerRetencao, loteChave, lotesNecessarios, retencaoQueImpedeEliminacao,
+} from '../src/mock/retencao';
+import type { FatoGerador } from '../src/mock/retencao';
 import { REGRAS, derivarFila, eDe, minhaFila } from '../src/mock/fila';
 import type { ContadoresDaFila, ItemDaFila } from '../src/mock/fila';
 import {
@@ -5454,5 +5460,363 @@ describe('PR 17 · validação — o titular consegue se opor, e o tratamento pa
     const gravada = banco.cenario.solicitacoes.find((s) => s.protocolo === res.body.protocolo)!;
     expect(gravada.detalhe).toContain('[CPF removido]');
     expect(banco.auditoria.at(-1)!.justificativa).not.toContain('529.982.247-25');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 18 · ciclo de vida com motor (Risco-006)
+//
+// Quatro níveis, nesta ordem: a derivação (unidade), o executor (integração), a
+// tela e o achado (sistema), e as invariantes do banco (aceitação, em
+// db/tests.sql, executadas pelo job de Postgres do CI).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Os casos de derivação, lidos do MESMO arquivo que o db/tests.sql consome. */
+const CASOS_DE_RETENCAO = (() => {
+  const bruto = readFileSync(join('..', 'db', 'retencao-casos.csv'), 'utf8').trim().split('\n');
+  const cabecalho = bruto[0].split(',');
+  return bruto.slice(1).map((linha) => {
+    const v = linha.split(',');
+    return Object.fromEntries(cabecalho.map((c, i) => [c, v[i] ?? ''])) as {
+      caso: string; retencao: string; fato_gerador: FatoGerador; marco: string; esperado: string;
+    };
+  });
+})();
+
+describe('PR 18 · unidade — retencao_ate é derivada, e por uma função só', () => {
+  it('o CSV de paridade tem casos suficientes para a varredura provar algo', () => {
+    expect(CASOS_DE_RETENCAO.length).toBeGreaterThanOrEqual(14);
+    // Os três casos que não são aritmética precisam estar lá.
+    const textos = CASOS_DE_RETENCAO.map((c) => c.retencao);
+    expect(textos).toContain('indeterminado');
+    expect(textos).toContain('consentimento_revogado');
+    expect(textos.some((t) => t.startsWith('obrigacao_legal:'))).toBe(true);
+  });
+
+  it.each(CASOS_DE_RETENCAO)('$caso', ({ retencao, fato_gerador, marco, esperado }) => {
+    const marcos = marco ? { [fato_gerador]: marco } : {};
+    expect(derivarRetencaoAte(retencao, fato_gerador, marcos)).toBe(esperado || null);
+  });
+
+  it('a aritmética grampeia no fim do mês, como o Postgres — e não transborda como o JS', () => {
+    // 31/01 + 1 mês é 28/02 no banco. `setUTCMonth` daria 03/03, e a divergência
+    // apareceria anos depois como "um dia a mais de retenção" num relatório.
+    expect(derivarRetencaoAte('P1M', 'coleta', { coleta: '2026-01-31' })).toBe('2026-02-28');
+    const ingenuo = new Date('2026-01-31T00:00:00Z');
+    ingenuo.setUTCMonth(ingenuo.getUTCMonth() + 1);
+    expect(ingenuo.toISOString().slice(0, 10)).not.toBe('2026-02-28');
+  });
+
+  it('o que o domínio do banco recusaria, a leitura também recusa', () => {
+    for (const invalido of ['5 anos', 'P5', 'PY', 'obrigacao_legal:sem_prazo', '', 'P5X']) {
+      expect(lerRetencao(invalido), invalido).toBeNull();
+    }
+  });
+
+  it('indeterminado sem justificativa no ROPA é recusado; com justificativa, passa', () => {
+    expect(indeterminadoJustificado('indeterminado', null)).toBe(false);
+    expect(indeterminadoJustificado('indeterminado', '   ')).toBe(false);
+    expect(indeterminadoJustificado('indeterminado', 'Art. 37 — prova de conformidade')).toBe(true);
+    // Prazo definido não precisa de justificativa para ser nulo: ele não é nulo.
+    expect(indeterminadoJustificado('P5Y', null)).toBe(true);
+  });
+
+  it('obrigação legal devolve norma e data para a recusa — nunca uma exceção', () => {
+    const r = retencaoQueImpedeEliminacao('obrigacao_legal:lei_8846_1994:P5Y', '2031-07-29');
+    expect(r).toBeTruthy();
+    expect(r!.norma).toBe('lei_8846_1994');
+    expect(r!.retencaoAte).toBe('2031-07-29');
+    expect(r!.motivo).toContain('2031-07-29');
+    expect(retencaoQueImpedeEliminacao('P5Y', '2031-07-29')).toBeNull();
+  });
+});
+
+describe('PR 18 · unidade — a matriz de criticidade, nos limites', () => {
+  it('zero dia de atraso não é achado, e um dia já é', () => {
+    expect(criticidadeDoVencimento(0, 1_000_000)).toBeNull();
+    expect(criticidadeDoVencimento(-5, 1_000_000)).toBeNull();
+    expect(criticidadeDoVencimento(1, 10)).toBe('baixa');
+  });
+
+  it('volume nenhum não é achado, por mais atrasado que esteja', () => {
+    expect(criticidadeDoVencimento(400, 0)).toBeNull();
+  });
+
+  it('a pior das duas dimensões manda', () => {
+    // Um milhão vencido ontem é crítico pelo volume.
+    expect(criticidadeDoVencimento(1, 1_000_000)).toBe('critica');
+    // Cem registros vencidos há um ano são críticos pelo atraso.
+    expect(criticidadeDoVencimento(400, 100)).toBe('critica');
+    expect(criticidadeDoVencimento(10, 5_000)).toBe('media');
+    expect(criticidadeDoVencimento(45, 5_000)).toBe('alta');
+  });
+
+  it('dias de atraso contam do vencimento, e hoje não atrasou', () => {
+    expect(diasDeAtraso('2026-07-23', '2026-07-29')).toBe(6);
+    expect(diasDeAtraso('2026-07-29', '2026-07-29')).toBe(0);
+    expect(diasDeAtraso('2026-08-10', '2026-07-29')).toBe(0);
+    expect(diasDeAtraso(null, '2026-07-29')).toBe(0);
+  });
+});
+
+describe('PR 18 · unidade — a chave de idempotência não depende do estado', () => {
+  it('a mesma execução do mesmo dia produz a mesma chave', () => {
+    const a = loteChave(sha256, 'eventos', 'b-hist', '2026-07-29', 0);
+    const b = loteChave(sha256, 'eventos', 'b-hist', '2026-07-29', 0);
+    expect(a).toBe(b);
+  });
+
+  it('dia, campo, tabela e índice mudam a chave — a contagem restante, não', () => {
+    const base = loteChave(sha256, 'eventos', 'b-hist', '2026-07-29', 0);
+    expect(loteChave(sha256, 'eventos', 'b-hist', '2026-07-30', 0)).not.toBe(base);
+    expect(loteChave(sha256, 'eventos', 'b-cpf', '2026-07-29', 0)).not.toBe(base);
+    expect(loteChave(sha256, 'sessoes', 'b-hist', '2026-07-29', 0)).not.toBe(base);
+    expect(loteChave(sha256, 'eventos', 'b-hist', '2026-07-29', 1)).not.toBe(base);
+  });
+
+  it('o lote tem teto, e o resto vira um lote a mais', () => {
+    expect(lotesNecessarios(0)).toBe(0);
+    expect(lotesNecessarios(1)).toBe(1);
+    expect(lotesNecessarios(LIMITE_DO_LOTE)).toBe(1);
+    expect(lotesNecessarios(LIMITE_DO_LOTE + 1)).toBe(2);
+    // 1,2 milhão em lotes de 5 000 — o número que o comentário do executor cita.
+    expect(lotesNecessarios(1_284_502)).toBe(257);
+  });
+});
+
+describe('PR 18 · integração — o executor elimina, prova e não repete', () => {
+  const HOJE = () => new Date().toISOString().slice(0, 10);
+  const rodar = (body: Record<string, unknown> = {}) =>
+    chamar<any>('dpo', { metodo: 'POST', caminho: '/v1/purge/executar', body });
+
+  it('o campo vencido é eliminado em lotes, com par pré/pós no trail', () => {
+    const antes = banco.cenario.campos.find((c) => c.id === 'b-hist')!.registrosEstimados!;
+    expect(antes).toBe(1_284_502);
+
+    const res = rodar({ limite: 500_000 });
+    expect(res.status).toBe(200);
+    expect(res.body.registros_total).toBe(antes);
+    expect(res.body.lotes).toBe(3);
+
+    // A prova é DO LOTE: restante antes e depois, não recontagem da tabela.
+    const lotes = res.body.entradas.filter((e: any) => e.campo_id === 'b-hist');
+    expect(lotes[0].restante_antes).toBe(1_284_502);
+    expect(lotes[0].restante_depois).toBe(784_502);
+    expect(lotes.at(-1).restante_depois).toBe(0);
+    for (const e of lotes) expect(e.hash_pre).not.toBe(e.hash_pos);
+
+    // E cada lote deixou par pré/pós no trail, antes de eliminar.
+    const noTrail = banco.auditoria.filter((l) => l.acao === 'EXPURGO_LOTE');
+    expect(noTrail).toHaveLength(res.body.lotes);
+    expect(noTrail[0].campos.some((c) => c.startsWith('pre='))).toBe(true);
+    expect(noTrail[0].campos.some((c) => c.startsWith('pos='))).toBe(true);
+    expect(banco.auditVerificar().integro).toBe(true);
+  });
+
+  it('reexecutar a mesma data é no-op: não duplica registro nem reconta eliminados', () => {
+    const primeira = rodar({ limite: 500_000 });
+    const lotesNoTrail = banco.auditoria.filter((l) => l.acao === 'EXPURGO_LOTE').length;
+
+    const segunda = rodar({ limite: 500_000 });
+    expect(segunda.status).toBe(200);
+    expect(segunda.body.registros_total).toBe(0);
+    expect(segunda.body.lotes).toBe(0);
+    // Nada de novo no trail: reexecutar não é um evento de eliminação.
+    expect(banco.auditoria.filter((l) => l.acao === 'EXPURGO_LOTE')).toHaveLength(lotesNoTrail);
+    expect(banco.cenario.campos.find((c) => c.id === 'b-hist')!.registrosEstimados).toBe(0);
+    expect(primeira.body.lotes).toBe(3);
+  });
+
+  it('lote com chave já registrada é ignorado, e não reconta', () => {
+    // O caminho do skip, isolado: a primeira execução encontra a chave do lote 0
+    // já gravada — como aconteceria se ela tivesse morrido no meio e voltado.
+    const campo = banco.cenario.campos.find((c) => c.id === 'b-hist')!;
+    banco.lotesDeExpurgo.add(loteChave(sha256, campo.dataset, campo.id, HOJE(), 0));
+
+    const res = rodar({ limite: 500_000 });
+    expect(res.body.lotes_ignorados).toBe(1);
+    expect(res.body.lotes).toBe(2);
+    // O lote ignorado não entra na soma — é isso que "não reconta" significa.
+    expect(res.body.registros_total).toBe(res.body.entradas.reduce((a: number, e: any) => a + e.registros, 0));
+    expect(res.body.registros_total).toBeLessThan(1_284_502);
+  });
+
+  it('o total sai da soma dos lotes, e nunca de um contador', () => {
+    const res = rodar({ limite: 100_000 });
+    const somado = res.body.entradas.reduce((s: number, e: any) => s + e.registros, 0);
+    expect(res.body.registros_total).toBe(somado);
+  });
+
+  it('o executor não usa OFFSET — a paginação é por chave', () => {
+    // OFFSET reintroduziria O(n·b) pela porta dos fundos: cada lote reprocessa
+    // as linhas que já passaram. O teste é grosseiro de propósito; é uma
+    // catraca contra o refactor distraído, não uma análise.
+    const fonte = readFileSync(join('src', 'mock', 'expurgo.ts'), 'utf8');
+    // O comentário do arquivo cita OFFSET para explicar por que ele não está
+    // ali; a varredura é sobre o código, com os comentários removidos.
+    const codigo = fonte.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+    expect(/\boffset\b/i.test(codigo)).toBe(false);
+    expect(fonte).toContain('keyset');
+    // E o mesmo no executor de produção.
+    const sql = readFileSync(join('..', 'db', 'schema.sql'), 'utf8');
+    const corpo = sql.slice(sql.indexOf('FUNCTION gov.expurgar_pii_do_trail'), sql.indexOf('FUNCTION gov.expurgar_pii_do_trail') + 1200)
+      .replace(/--.*/g, '');
+    expect(/\boffset\b/i.test(corpo)).toBe(false);
+    expect(sql).toContain('keyset pelo índice parcial');
+  });
+
+  it('obrigação legal prevalece sobre o pedido de eliminação — com norma e data, não 500', () => {
+    const res = rodar({ campos_ids: ['b-cpf'] });
+    expect(res.status).toBe(200);
+    expect(res.body.entradas).toHaveLength(0);
+    expect(res.body.recusados).toHaveLength(1);
+    expect(res.body.recusados[0].norma).toBe('lei_8846_1994');
+    expect(res.body.recusados[0].retencao_ate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(res.body.recusados[0].motivo).toContain(res.body.recusados[0].retencao_ate);
+    // E o dado continua lá: recusar é não eliminar, não "eliminar e avisar".
+    expect(banco.cenario.campos.find((c) => c.id === 'b-cpf')!.registrosEstimados).toBeGreaterThan(0);
+  });
+
+  it('falha de log no meio da execução desfaz tudo: 503 e nada eliminado', () => {
+    const antes = banco.cenario.campos.find((c) => c.id === 'b-hist')!.registrosEstimados!;
+    const original = banco.auditAppend.bind(banco);
+    let n = 0;
+    banco.auditAppend = ((e: Parameters<typeof original>[0]) => {
+      n += 1;
+      if (n > 2) throw new FalhaDeAuditoria('O audit trail está indisponível.');
+      return original(e);
+    }) as typeof banco.auditAppend;
+
+    const res = rodar({ limite: 100_000 });
+    expect(res.status).toBe(503);
+
+    banco.auditAppend = original;
+    // Transacional: os dois primeiros lotes voltaram atrás junto com o terceiro.
+    expect(banco.cenario.campos.find((c) => c.id === 'b-hist')!.registrosEstimados).toBe(antes);
+    expect(banco.lotesDeExpurgo.size).toBe(0);
+    // E a execução seguinte funciona: o desfazimento não deixou lixo.
+    expect(rodar({ limite: 500_000 }).status).toBe(200);
+  });
+
+  it('o trail expurga a PII do operador em 30 dias — e a cadeia continua íntegra', () => {
+    chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/pseudonyms/resolve', purpose: 'cobranca',
+      body: {
+        titularId: 't1', campo: 'renda', protocolo: '2026-0731',
+        justificativa: 'Conferência de renda declarada para o atendimento do protocolo 2026-0731.',
+      },
+    });
+    expect(banco.auditoria.some((l) => l.justificativa?.includes('Conferência'))).toBe(true);
+    expect(banco.auditVerificar().integro).toBe(true);
+
+    // O relógio avança pelo PARÂMETRO: envelhecer a linha seria editar dado selado.
+    const n = banco.expurgarPiiDoTrail(Date.now() + 31 * 24 * 60 * 60 * 1000);
+    expect(n).toBeGreaterThan(0);
+    expect(banco.auditoria.some((l) => l.justificativa)).toBe(false);
+
+    // A prova da regra do selo: o texto sumiu e a cadeia continua fechando.
+    expect(banco.auditVerificar().integro).toBe(true);
+    expect(banco.auditoria.every((l) => l.justificativaSelo !== undefined)).toBe(true);
+    // E reexecutar é no-op.
+    expect(banco.expurgarPiiDoTrail(Date.now() + 31 * 24 * 60 * 60 * 1000)).toBe(0);
+  });
+});
+
+describe('PR 18 · sistema — prazo vencido vira achado, e não pendência silenciosa', () => {
+  it('seis dias de atraso abrem um achado; a segunda varredura não abre outro', () => {
+    const hoje = new Date().toISOString().slice(0, 10);
+    const antes = banco.cenario.achados.length;
+
+    const primeira = varrerVencimentos(banco, hoje);
+    expect(primeira).toHaveLength(1);
+    expect(primeira[0].codigo).toBe('RET-CLIENTES-HISTORICO_COMPRAS');
+    expect(primeira[0].origem).toBe('motor_de_retencao');
+    expect(primeira[0].descricao).toContain('venceu há 6 dia');
+    // 1,2 milhão de registros: o volume manda, e a criticidade é a pior das duas.
+    expect(primeira[0].criticidade).toBe('critica');
+    expect(banco.cenario.achados).toHaveLength(antes + 1);
+
+    const segunda = varrerVencimentos(banco, hoje);
+    expect(segunda).toHaveLength(1);
+    expect(banco.cenario.achados, 'a segunda varredura duplicou o achado')
+      .toHaveLength(antes + 1);
+  });
+
+  it('zero dia de atraso não abre achado nenhum', () => {
+    const campo = banco.cenario.campos.find((c) => c.id === 'b-hist')!;
+    // Recua o marco para o vencimento cair exatamente hoje.
+    const hoje = new Date();
+    campo.registroMaisAntigoEm = new Date(hoje.getTime() - 180 * 86_400_000)
+      .toISOString().slice(0, 10);
+    const antes = banco.cenario.achados.length;
+    expect(varrerVencimentos(banco, hoje.toISOString().slice(0, 10))).toEqual([]);
+    expect(banco.cenario.achados).toHaveLength(antes);
+  });
+
+  it('o achado do motor entra no ciclo da T11 pela mesma porta que os outros', () => {
+    varrerVencimentos(banco, new Date().toISOString().slice(0, 10));
+    const achado = banco.cenario.achados.find((a) => a.origem === 'motor_de_retencao')!;
+    // Sem atalho: a transição passa pela máquina de estados como qualquer outra.
+    const res = chamar('engenharia', {
+      metodo: 'POST', caminho: `/v1/estados/achado/${achado.codigo}`,
+      body: { para: 'causa_raiz', causaRaiz: 'O job de expurgo deste campo está desligado desde a migração de junho.' },
+    });
+    expect(res.status).toBe(200);
+    expect(banco.cenario.achados.find((a) => a.codigo === achado.codigo)!.status).toBe('causa_raiz');
+  });
+
+  it('GET /v1/retencao devolve os três estados que a T6 desenha', () => {
+    const res = chamar<any>('dpo', { metodo: 'GET', caminho: '/v1/retencao' });
+    expect(res.status).toBe(200);
+    const porCampo = Object.fromEntries(res.body.campos.map((c: any) => [c.campo, c]));
+
+    expect(porCampo['clientes.historico_compras'].estado).toBe('vencido_sem_expurgo');
+    expect(porCampo['clientes.historico_compras'].atraso_dias).toBe(6);
+    expect(porCampo['cadastros.biometria_facial'].estado).toBe('a_vencer');
+    // Campo sem fato gerador declarado não tem prazo derivável — e o diz.
+    expect(porCampo['clientes.nome_completo'].estado).toBe('sem_prazo');
+
+    chamar('dpo', { metodo: 'POST', caminho: '/v1/purge/executar', body: { limite: 2_000_000 } });
+    const depois = chamar<any>('dpo', { metodo: 'GET', caminho: '/v1/retencao' });
+    const hist = depois.body.campos.find((c: any) => c.campo === 'clientes.historico_compras');
+    expect(hist.estado).toBe('expurgo_comprovado');
+    expect(hist.prova_pre_pos).toBeTruthy();
+    expect(hist.registros).toBe(0);
+  });
+});
+
+describe('PR 18 · T6 na tela — os três estados do desenho, e o quarto que ele não previa', () => {
+  const montarT6 = () => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [], recusas: {} });
+    return render(<MemoryRouter><T6 /></MemoryRouter>);
+  };
+
+  it('a tabela mostra vencido sem expurgo, a vencer e sem fato gerador', () => {
+    montarT6();
+    expect(screen.getByText('Ciclo de vida do dado')).toBeInTheDocument();
+    expect(screen.getByText('clientes.historico_compras')).toBeInTheDocument();
+    expect(screen.getByText('venceu há 6 dias')).toBeInTheDocument();
+    expect(screen.getAllByText('vencido sem expurgo').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('a vencer').length).toBeGreaterThan(0);
+    // O quarto estado: campo sem fato gerador não recebe uma data inventada.
+    expect(screen.getAllByText('sem fato gerador').length).toBeGreaterThan(0);
+  });
+
+  it('executar o expurgo pela tela leva o campo a "expurgo comprovado"', () => {
+    montarT6();
+    fireEvent.click(screen.getByRole('button', { name: /executar expurgo do dia/i }));
+    expect(screen.getAllByText('expurgo comprovado').length).toBeGreaterThan(0);
+    // E a prova pré/pós deixou de ser um traço.
+    const banco = useSessao.getState().banco;
+    expect(banco.auditoria.some((l) => l.acao === 'EXPURGO_LOTE')).toBe(true);
+    expect(banco.auditVerificar().integro).toBe(true);
+  });
+
+  it('papel sem rodar_expurgo não recebe o botão no DOM', () => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'produto', banco: new BancoMock('banco'), versao: 0, avisos: [], recusas: {} });
+    render(<MemoryRouter><T6 /></MemoryRouter>);
+    expect(screen.queryByRole('button', { name: /executar expurgo do dia/i })).toBeNull();
   });
 });

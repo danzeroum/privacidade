@@ -157,6 +157,59 @@ SELECT assert_igual(
   (SELECT count(*)::bigint FROM audit_log WHERE hash_anterior IS NULL), 1::bigint,
   'apenas o bloco gênese sem predecessor');
 
+-- ---------------------------------------------------------------------
+-- Art. 37 c/c Art. 16 — o trail tem prazo, e a cadeia sobrevive ao expurgo
+-- ---------------------------------------------------------------------
+
+SELECT assert_igual(
+  (SELECT bool_and(integro) FROM verificar_integridade_audit('11111111-1111-4111-8111-111111111111')),
+  true, 'cadeia íntegra antes do expurgo de PII');
+
+-- Avança o relógio pelo PARÂMETRO, não mexendo nas linhas.
+--
+-- A primeira versão deste teste envelhecia `ocorrido_em` com o trigger
+-- desligado — e derrubava a cadeia, porque `ocorrido_em` está no payload do
+-- hash. O erro é instrutivo: prova que o encadeamento cobre o carimbo de tempo,
+-- e que "simular passagem de tempo" editando dado selado nunca é simulação.
+DO $$
+DECLARE v_afetadas BIGINT;
+BEGIN
+  v_afetadas := gov.expurgar_pii_do_trail('11111111-1111-4111-8111-111111111111', current_date + 60);
+  IF v_afetadas = 0 THEN
+    RAISE EXCEPTION 'FALHA: nenhuma linha de trail tinha PII para expurgar — o teste não prova nada.';
+  END IF;
+  RAISE NOTICE 'OK   %  → % linhas', rpad('PII do trail expurgada após 30 dias', 52), v_afetadas;
+END $$;
+
+SELECT assert_igual(
+  (SELECT count(*)::bigint FROM audit_log
+    WHERE ip IS NOT NULL OR user_agent IS NOT NULL OR justificativa IS NOT NULL),
+  0::bigint, 'nenhuma PII de operador sobrou no trail');
+
+-- A prova da regra do sha256: o texto sumiu e a cadeia continua fechando.
+SELECT assert_igual(
+  (SELECT bool_and(integro) FROM verificar_integridade_audit('11111111-1111-4111-8111-111111111111')),
+  true, 'cadeia íntegra DEPOIS do expurgo de PII');
+
+SELECT assert_igual(
+  (SELECT count(*)::bigint FROM audit_log WHERE justificativa_hash IS NULL), 0::bigint,
+  'o selo da justificativa fica, mesmo sem o texto');
+
+-- Reexecutar o expurgo é no-op: a linha já expurgada não volta.
+SELECT assert_igual(
+  gov.expurgar_pii_do_trail('11111111-1111-4111-8111-111111111111', current_date + 60),
+  0::bigint, 'segundo expurgo do trail é no-op');
+
+-- A exceção do append-only é estreita: qualquer outra mutação continua barrada.
+SELECT assert_falha($$
+  UPDATE audit_log SET acao = 'ADULTERADO' WHERE id = (SELECT min(id) FROM audit_log)
+$$, 'alterar a ação do trail pelo caminho do expurgo');
+
+SELECT assert_falha($$
+  DELETE FROM audit_log WHERE id = (SELECT min(id) FROM audit_log)
+$$, 'apagar linha do trail');
+
+
 -- Adulteração detectada: mesmo com os gatilhos desligados no banco (cenário de
 -- DBA comprometido), a recomputação da cadeia acusa a linha alterada e todas as
 -- seguintes. É isso que o botão "Verificar integridade" da T6 demonstra.
@@ -186,6 +239,88 @@ SELECT assert_igual(
   (SELECT round(100.0 * count(*) FILTER (WHERE dentro_do_sla) / count(*))::int
    FROM solicitacao_titular WHERE status = 'concluida'), 100,
   '% de solicitações concluídas dentro do SLA');
+
+-- ---------------------------------------------------------------------
+-- Art. 16 — o ciclo de vida tem motor (Risco-006)
+-- ---------------------------------------------------------------------
+
+-- PARIDADE: a derivação em SQL e a de TypeScript são cobradas contra a MESMA
+-- tabela de casos. O arquivo é lido pelos dois lados; divergir reprova aqui e
+-- na suíte do app. Sem isto, "espelhada em SQL e TS" seria uma frase.
+CREATE TEMP TABLE caso_retencao (
+  caso TEXT, retencao TEXT, fato_gerador TEXT, marco DATE, esperado DATE
+);
+\copy caso_retencao FROM 'db/retencao-casos.csv' WITH (FORMAT csv, HEADER true)
+
+SELECT assert_igual((SELECT count(*)::bigint FROM caso_retencao) >= 14, true,
+  'o CSV de paridade tem casos suficientes');
+
+DO $$
+DECLARE r RECORD; v_obtido DATE;
+BEGIN
+  FOR r IN SELECT * FROM caso_retencao LOOP
+    v_obtido := gov.retencao_ate(r.retencao, r.marco);
+    IF v_obtido IS DISTINCT FROM r.esperado THEN
+      RAISE EXCEPTION 'FALHA de paridade em "%": esperado %, obtido % (retencao=%, marco=%)',
+        r.caso, r.esperado, v_obtido, r.retencao, r.marco;
+    END IF;
+  END LOOP;
+  RAISE NOTICE 'OK   %  → % casos', rpad('paridade da derivação SQL × TypeScript', 52),
+    (SELECT count(*) FROM caso_retencao);
+END $$;
+
+-- O domínio recusa obrigação legal sem prazo: norma sem prazo não deriva data.
+SELECT assert_falha($$
+  INSERT INTO campo (dataset_id, nome, tipo_armazenado, categoria, sensivel, finalidade, base_legal, retencao)
+  VALUES ('55555555-5555-4555-8555-000000000001','sem_prazo','hash','pessoal',false,
+          'Teste','obrigacao_legal','obrigacao_legal:lei_8846_1994')
+$$, 'obrigação legal sem prazo no domínio retencao');
+
+-- retencao_ate é GERADA: o banco recusa quem tentar escrevê-la.
+SELECT assert_falha($$
+  INSERT INTO campo (dataset_id, nome, tipo_armazenado, categoria, sensivel, finalidade, base_legal, retencao, retencao_ate)
+  VALUES ('55555555-5555-4555-8555-000000000001','digitada','hash','pessoal',false,
+          'Teste','execucao_contrato','P5Y', DATE '2099-01-01')
+$$, 'retencao_ate digitada em vez de derivada');
+
+-- Prazo sem fim só existe declarado.
+SELECT assert_falha($$
+  INSERT INTO campo (dataset_id, nome, tipo_armazenado, categoria, sensivel, finalidade, base_legal, retencao)
+  VALUES ('55555555-5555-4555-8555-000000000001','sem_fonte','hash','pessoal',false,
+          'Teste','obrigacao_legal','indeterminado')
+$$, 'indeterminado sem justificativa no ROPA');
+
+SELECT assert_igual(
+  (SELECT retencao_ate FROM campo WHERE nome = 'historico_compras'),
+  (current_date - 6),
+  'historico_compras venceu há 6 dias — a linha vermelha da T6');
+
+SELECT assert_igual(
+  (SELECT retencao_ate FROM campo WHERE nome = 'email'), NULL::date,
+  'consentimento não revogado ainda não tem prazo');
+
+-- Idempotência: o mesmo lote não entra duas vezes.
+SELECT assert_falha($$
+  INSERT INTO expurgo_entrada (expurgo_run_id, sistema_slug, tabela, metodo, registros, lote_chave, ids_afetados_hash, hash_pre, hash_pos)
+  VALUES ('bbbbbbbb-bbbb-4bbb-8bbb-000000000002','credit-scoring','decisoes_ia','hard_delete',1,
+          'lote:d1:decisoes_ia:0','sha256:x','a','b')
+$$, 'reexecutar o mesmo lote duplicaria o registro');
+
+-- O total é somado, nunca incrementado.
+SELECT assert_igual(
+  (SELECT registros_total FROM gov.expurgo_run_resumo WHERE id = 'bbbbbbbb-bbbb-4bbb-8bbb-000000000001'),
+  18432::bigint,
+  'registros_total sai da soma dos lotes');
+
+-- ---------------------------------------------------------------------
+-- O resíduo retido de uma solicitação tem lei e data
+-- ---------------------------------------------------------------------
+
+SELECT assert_falha($$
+  INSERT INTO solicitacao_retido (solicitacao_id, item, base_legal, retencao, marco)
+  VALUES ((SELECT id FROM solicitacao_titular LIMIT 1),'Notas fiscais','obrigacao_legal',
+          'indeterminado', current_date)
+$$, 'reter resíduo de titular sem data de eliminação');
 
 DO $$ BEGIN RAISE NOTICE '';
        RAISE NOTICE '=== Todas as invariantes verificadas ===';

@@ -30,6 +30,8 @@ import type { MarcacaoPbd } from './pbd';
 /** PR 10 — as obrigações do ano moram em `mock/calendario.ts`. */
 export type { Obrigacao, Prorrogacao, Trilha, TipoObrigacao } from './calendario';
 import type { Obrigacao } from './calendario';
+import type { FatoGerador } from './retencao';
+export type { FatoGerador } from './retencao';
 
 export type Papel = 'engenharia' | 'dpo' | 'produto' | 'seguranca' | 'auditor';
 
@@ -85,6 +87,25 @@ export interface Campo {
   liaCodigo?: string;
   retencao: string;
   retencaoDias: number | null;
+  /**
+   * De que instante o prazo conta (PR do ciclo de vida). Opcional no modelo
+   * porque nem todo campo da massa foi marcado; **sem ele não há `retencao_ate`**,
+   * e o motor simplesmente não alcança o campo — o que é honesto: prazo sem
+   * fato gerador não é prazo, é intenção. No `db/schema.sql` a coluna é NOT NULL
+   * com default, porque lá o catálogo é a fonte da verdade.
+   */
+  /**
+   * O valor do **domínio** `retencao` do schema ("P180D",
+   * "obrigacao_legal:lei_8846_1994:P5Y"). Separado de `retencao`, que é rótulo
+   * para gente ("5 anos") — e rótulo é exatamente o que a auditoria encontrou
+   * no lugar de estrutura. O motor lê este; a tela lê aquele.
+   */
+  retencaoIso?: string;
+  fatoGerador?: FatoGerador;
+  /** Volume — a dimensão que dá criticidade ao achado de vencimento. */
+  registrosEstimados?: number;
+  /** O marco do registro mais antigo: é ele que vence primeiro. */
+  registroMaisAntigoEm?: string;
   origem: string;
   compartilhamentos: Compartilhamento[];
   /** Etapas da linhagem, da origem ao descarte. */
@@ -481,6 +502,16 @@ export interface AuditLinha {
   resultado: 'sucesso' | 'negado' | 'erro';
   hashAnterior: string | null;
   hash: string;
+  /**
+   * O texto da justificativa como estava no append — o que entra no hash é
+   * `sha256` dele. Fica para a verificação poder recomputar a cadeia depois de
+   * o texto ser expurgado (Art. 16 sobre dado de operador, sem quebrar Art. 37).
+   */
+  justificativaSelo?: string;
+  ip?: string;
+  userAgent?: string;
+  /** Carimbo do expurgo da PII do operador. Preenchido só pelo caminho controlado. */
+  piiExpurgadaEm?: string;
 }
 
 export interface Metrica {

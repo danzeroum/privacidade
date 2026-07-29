@@ -1,0 +1,17 @@
+caso,retencao,fato_gerador,marco,esperado
+periodo em anos,P5Y,coleta,2021-07-29,2026-07-29
+periodo em dias,P90D,coleta,2026-05-01,2026-07-30
+periodo em meses,P6M,ultima_atualizacao,2026-01-31,2026-07-31
+mes grampeia no fim do mes curto,P1M,coleta,2026-01-31,2026-02-28
+mes grampeia em ano bissexto,P1M,coleta,2024-01-31,2024-02-29
+ano grampeia 29 de fevereiro,P1Y,coleta,2024-02-29,2025-02-28
+dias atravessam a virada do ano,P30D,coleta,2026-12-20,2027-01-19
+prazo zero vence no proprio marco,P0D,coleta,2026-07-29,2026-07-29
+fim do contrato como fato gerador,P2Y,fim_do_contrato,2026-03-15,2028-03-15
+encerramento da solicitacao,P30D,encerramento_da_solicitacao,2026-07-01,2026-07-31
+indeterminado nunca vence,indeterminado,coleta,2021-01-01,
+periodo sem marco ainda nao vence,P5Y,fim_do_contrato,,
+consentimento revogado conta da revogacao com carencia,consentimento_revogado,revogacao_do_consentimento,2026-07-01,2026-07-31
+consentimento nao revogado nao tem prazo,consentimento_revogado,revogacao_do_consentimento,,
+obrigacao legal traz a norma e o prazo,obrigacao_legal:lei_8846_1994:P5Y,coleta,2026-07-29,2031-07-29
+obrigacao legal em meses,obrigacao_legal:art_16_i_lgpd:P18M,ultima_atualizacao,2026-07-29,2028-01-29
