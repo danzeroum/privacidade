@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { tmpdir } from 'os';
 import { render, screen, fireEvent, act, cleanup, within } from '@testing-library/react';
@@ -4017,5 +4017,192 @@ describe('PR 13 · declarado × derivado, travado como invariante', () => {
     for (const acao of ACOES) {
       expect(new RegExp(`'${acao}'|"${acao}"`).test(fontes), `a ação "${acao}" não é exercida em lugar nenhum`).toBe(true);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('PR 14 · verificação — o documento corresponde ao código?', () => {
+  const MAPA = readFileSync(join('..', 'docs', 'design_handoff_lastro_correcoes', 'MAPA-PROCESSOS.md'), 'utf8');
+  /**
+   * O markdown é quebrado em 100 colunas, então frase se parte no meio. As
+   * asserções de prosa rodam sobre o texto normalizado: reformatar o arquivo não
+   * pode quebrar teste, senão o teste vira obstáculo à edição que ele protege.
+   */
+  const prosa = MAPA.replace(/^>\s?/gm, '').replace(/\s+/g, ' ');
+  const README = readFileSync(join('..', 'docs', 'processos', 'README.md'), 'utf8');
+
+  /** O que o MAPA escreve como código: crases e blocos cercados. */
+  const codigoNoMapa = (): string[] => [
+    ...[...MAPA.matchAll(/`([^`\n]+)`/g)].map((m) => m[1]),
+    ...[...MAPA.matchAll(/```[\s\S]*?```/g)].map((m) => m[0]),
+  ];
+
+  it('nenhum identificador de estado é reenunciado no MAPA', () => {
+    // A comparação é sobre **código** no markdown, e não sobre prosa: "plano",
+    // "aberto" e "nova" são palavras comuns, e uma varredura por substring
+    // acusaria o texto inteiro. O que não pode voltar é a tabela — e tabela de
+    // estado se escreve em crase ou em bloco.
+    const estados = new Set(ARTEFATOS.flatMap((a) => estadosDe(a) as string[]));
+    const trechos = codigoNoMapa();
+    for (const e of estados) {
+      const reenunciado = trechos.filter((t) => new RegExp(`\\b${e}\\b`).test(t));
+      expect(reenunciado, `o MAPA reenuncia o estado "${e}": ${reenunciado.join(' | ')}`).toEqual([]);
+    }
+    // E o §2 não tem mais bloco cercado nenhum: era onde as oito tabelas viviam.
+    const secao2 = MAPA.slice(MAPA.indexOf('## 2 ·'), MAPA.indexOf('## 4 ·'));
+    expect(secao2).not.toContain('```');
+  });
+
+  it('nenhum limiar de decisão é reenunciado no MAPA', () => {
+    const limiares = new Set<string>();
+    for (const id of TABELAS_IDS) {
+      for (const v of TABELAS[id].versoes) {
+        for (const r of v.regras) {
+          for (const t of Object.values(r.quando)) {
+            if ('min' in t) limiares.add(String(t.min));
+            if ('max' in t) limiares.add(String(t.max));
+          }
+        }
+      }
+    }
+    expect(limiares.size, 'sem limiar extraído a varredura não prova nada').toBeGreaterThan(3);
+    const trechos = codigoNoMapa().join('\n');
+    for (const n of limiares) {
+      expect(new RegExp(`[<>=≥≤]\\s*${n}\\b`).test(trechos), `o MAPA reenuncia o limiar ${n}`).toBe(false);
+    }
+  });
+
+  it('todo caminho que o MAPA cita em docs/processos existe', () => {
+    const citados = [...MAPA.matchAll(/`(docs\/processos\/[^`]+)`/g)].map((m) => m[1]);
+    expect(citados.length, 'o MAPA precisa apontar para onde a especificação foi').toBeGreaterThan(1);
+    for (const c of citados) {
+      const alvo = c.replace('*', '');
+      // Glob aponta para o diretório; caminho literal, para o arquivo.
+      const caminho = c.includes('*')
+        ? join('..', 'docs', 'processos')
+        : join('..', ...c.split('/'));
+      expect(existsSync(caminho), `${c} não resolve`).toBe(true);
+      expect(alvo.startsWith('docs/processos/')).toBe(true);
+    }
+  });
+
+  it('todo ramo de 422 de exigenciasDe tem linha no README', () => {
+    // A catraca do lado da prosa: o teste extrai os ramos do código, e uma
+    // exigência nova sem enunciado vira lacuna apontada em vez de silêncio.
+    const fonte = readFileSync('src/mock/api.ts', 'utf8');
+    const corpo = fonte.slice(fonte.indexOf('function exigenciasDe'), fonte.indexOf('export function transitar'));
+    const ramos = [...corpo.matchAll(/artefato === '(\w+)' && para === '(\w+)'/g)]
+      .map((m) => ({ artefato: m[1], para: m[2] }));
+
+    expect(ramos.length, 'nenhum ramo extraído: a varredura não está olhando o código certo')
+      .toBeGreaterThanOrEqual(5);
+
+    const tabela = README.slice(README.indexOf('## As exigências de conteúdo'));
+    for (const r of ramos) {
+      const linha = tabela.split('\n').find(
+        (l) => l.startsWith('|') && l.includes(`\`${r.artefato}\``) && l.includes(r.para),
+      );
+      expect(linha, `sem linha no README para ${r.artefato} → ${r.para}`).toBeDefined();
+      // Linha que só nomeia a transição não ajuda ninguém: precisa dizer o que
+      // exige e por quê.
+      expect(linha!.split('|').filter(Boolean).length, `${r.artefato} → ${r.para}: colunas`).toBe(4);
+      expect(linha!.split('|')[4].trim().length, `${r.artefato} → ${r.para}: sem "por quê"`).toBeGreaterThan(40);
+    }
+  });
+
+  it('o limite de seis estados saiu, e a saída está explicada', () => {
+    // A regra não pode mais ser **enunciada**; falar dela para revogá-la é outra
+    // coisa, e é o que a seção nova faz. O teste separa as duas: a forma
+    // normativa original some, e qualquer menção sobra só dentro da revogação.
+    expect(MAPA).not.toContain('**máximo 6 estados**');
+    expect(MAPA).toContain('Sobre o antigo limite de seis estados');
+    const revogacao = MAPA.slice(MAPA.indexOf('### Sobre o antigo limite'), MAPA.indexOf('## 3 ·'));
+    const forasDaRevogacao = MAPA.split(/seis estados|6 estados/).length - 1
+      - (revogacao.split(/seis estados|6 estados/).length - 1);
+    expect(forasDaRevogacao, 'o limite ainda é enunciado fora da seção que o revoga').toBe(0);
+    expect(revogacao.replace(/\s+/g, ' ')).toContain('A regra sai');
+    // A explicação precisa cobrir as duas máquinas que a violavam.
+    const secao = revogacao;
+    expect(secao).toContain('RIPD tem sete');
+    expect(secao).toContain('achado tem sete');
+    // E o texto tem de bater com o código: exatamente duas máquinas com sete.
+    const comSete = ARTEFATOS.filter((a) => estadosDe(a).length === 7);
+    expect(comSete.sort()).toEqual(['achado', 'ripd']);
+    expect(ARTEFATOS.filter((a) => estadosDe(a).length > 7)).toEqual([]);
+    expect(secao.replace(/\s+/g, ' ')).toContain('seis das oito máquinas cabiam nele');
+    expect(ARTEFATOS.filter((a) => estadosDe(a).length <= 6), 'cabiam no limite antigo').toHaveLength(6);
+    expect(ARTEFATOS.filter((a) => estadosDe(a).length <= 5), 'cinco estados ou menos').toHaveLength(5);
+  });
+
+  it('o MAPA declara o próprio estatuto e traz a subseção que faltava', () => {
+    expect(prosa).toContain('este mapa é **documento de intenção**');
+    expect(MAPA).toContain('### Declarado × derivado — quem é dono');
+    const sub = MAPA.slice(MAPA.indexOf('### Declarado × derivado'), MAPA.indexOf('## 5 ·'))
+      .replace(/\s+/g, ' ');
+    expect(sub).toContain('nunca de campo escrito à mão');
+    expect(sub).toContain('`responsavel`');
+    expect(sub).toContain('`escrever`');
+  });
+});
+
+describe('PR 14 · validação — o que o documento enuncia é o que a LGPD exige?', () => {
+  const README = readFileSync(join('..', 'docs', 'processos', 'README.md'), 'utf8');
+  const tabela = README.slice(README.indexOf('## As exigências de conteúdo'));
+
+  const semExigencia = (artefato: string, id: string, de: string, para: string) => {
+    const b = new BancoMock('banco');
+    const artefatos: Record<string, () => void> = {
+      parecer: () => { b.cenario.pareceres[0].status = de as never; },
+      ripd: () => { b.cenario.ripds[0].status = de as never; },
+      risco: () => { b.cenario.riscos[0].status = de as never; },
+      solicitacao: () => { b.cenario.solicitacoes[0].status = de as never; },
+      achado: () => { b.cenario.achados[0].status = de as never; },
+    };
+    artefatos[artefato]();
+    return request(b, { papel: 'dpo', ator: 'teste', metodo: 'POST', caminho: `/v1/estados/${artefato}/${id}`, body: { para } });
+  };
+
+  it('cada linha enunciada é de fato recusada com 422 pela rota', () => {
+    // O enunciado e o comportamento têm de concordar em efeito, não só em
+    // existência: uma linha que descreve exigência que a rota não aplica seria
+    // documentação bonita e falsa.
+    const casos: [string, string, string, string][] = [
+      ['parecer', 'PT-2026-018', 'homologado', 'devolvido'],
+      ['ripd', 'RIPD-2026-014', 'triagem', 'dispensado'],
+      ['risco', 'R1', 'em_tratamento', 'aceito'],
+      ['solicitacao', '2026-0731', 'em_analise', 'recusada_com_fundamento'],
+      ['achado', 'ACH-2026-007', 'executado', 'verificado'],
+    ];
+    for (const [artefato, id, de, para] of casos) {
+      const res = semExigencia(artefato, id, de, para);
+      expect(res.status, `${artefato}: ${de} → ${para}`).toBe(422);
+      // A transição era legal: o 422 é sobre conteúdo, não sobre sequência.
+      expect(transicaoPermitida(artefato as never, de as never, para as never)).toBe(true);
+    }
+  });
+
+  it('a recusa do direito do titular cita o artigo, no código e no documento', () => {
+    const res = semExigencia('solicitacao', '2026-0731', 'em_analise', 'recusada_com_fundamento');
+    expect((res.body as { erro: string }).erro).toContain('Art. 18, §4º');
+    expect(tabela).toContain('Art. 18, §4º');
+  });
+
+  it('o README enuncia as duas exigências transversais que não são de transição', () => {
+    // Gravar antes de aplicar e redigir antes de gravar valem para todas, e por
+    // isso não cabem em nenhuma linha da tabela.
+    expect(tabela).toContain('grava antes de aplicar');
+    expect(tabela).toContain('`503`');
+    expect(tabela).toContain('redator');
+
+    // E as duas são comportamento, não promessa.
+    const b = new BancoMock('banco');
+    b.cenario.riscos[0].status = 'em_tratamento';
+    b.simularFalhaDeLog = true;
+    const res = request(b, {
+      papel: 'dpo', ator: 'teste', metodo: 'POST', caminho: '/v1/estados/risco/R1',
+      body: { para: 'aceito', donoDaAceitacao: '@dpo', prazoDeReavaliacao: '90 dias', gatilhoDeReabertura: 'Incidente reabre.' },
+    });
+    expect(res.status).toBe(503);
+    expect(b.cenario.riscos[0].status).toBe('em_tratamento');
   });
 });
