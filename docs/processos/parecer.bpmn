@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PR-01 · Parecer técnico — ciclo de vida do artefato "parecer".
+
+  Especificação de referência. O runtime que a executa é app/src/mock/estados.ts,
+  e o teste de conformidade (app/tests/regras.test.tsx) reprova o build quando
+  os dois divergem — em qualquer direção.
+
+  Cada <task> é um estado; cada <sequenceFlow> entre tasks é uma transição legal.
+  O que este arquivo NÃO diz, de propósito: o conteúdo que cada transição exige
+  (fundamento, dono, prazo). Isso é validação e vive em app/src/mock/api.ts —
+  misturar as duas produz 422 onde devia ser 409.
+-->
+<bpmn:definitions
+    xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    id="definicoes-parecer"
+    targetNamespace="https://lastro.exemplo/processos">
+  <bpmn:process id="parecer" name="PR-01 · Parecer técnico" isExecutable="false">
+    <bpmn:documentation>Devolvido volta a emitido: a devolução é ida e volta, não beco sem saída. Na terceira devolução o parecer vai ao comitê.</bpmn:documentation>
+    <bpmn:startEvent id="inicio" name="Parecer técnico aberto">
+      <bpmn:outgoing>flow-inicio</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:task id="rascunho" name="rascunho">
+      <bpmn:incoming>flow-inicio</bpmn:incoming>
+      <bpmn:outgoing>flow-rascunho-emitido</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="emitido" name="emitido">
+      <bpmn:incoming>flow-rascunho-emitido</bpmn:incoming>
+      <bpmn:incoming>flow-devolvido-emitido</bpmn:incoming>
+      <bpmn:outgoing>flow-emitido-homologado</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="homologado" name="homologado">
+      <bpmn:incoming>flow-emitido-homologado</bpmn:incoming>
+      <bpmn:outgoing>flow-homologado-vigente</bpmn:outgoing>
+      <bpmn:outgoing>flow-homologado-devolvido</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="devolvido" name="devolvido">
+      <bpmn:incoming>flow-homologado-devolvido</bpmn:incoming>
+      <bpmn:outgoing>flow-devolvido-emitido</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="vigente" name="vigente">
+      <bpmn:incoming>flow-homologado-vigente</bpmn:incoming>
+      <bpmn:outgoing>flow-vigente-fim</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:endEvent id="fim-vigente" name="vigente">
+      <bpmn:incoming>flow-vigente-fim</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="flow-inicio" sourceRef="inicio" targetRef="rascunho" />
+    <bpmn:sequenceFlow id="flow-rascunho-emitido" sourceRef="rascunho" targetRef="emitido" name="emitir" />
+    <bpmn:sequenceFlow id="flow-emitido-homologado" sourceRef="emitido" targetRef="homologado" name="homologar" />
+    <bpmn:sequenceFlow id="flow-homologado-vigente" sourceRef="homologado" targetRef="vigente" name="colocar em vigência" />
+    <bpmn:sequenceFlow id="flow-homologado-devolvido" sourceRef="homologado" targetRef="devolvido" name="devolver com motivo" />
+    <bpmn:sequenceFlow id="flow-devolvido-emitido" sourceRef="devolvido" targetRef="emitido" name="reemitir" />
+    <bpmn:sequenceFlow id="flow-vigente-fim" sourceRef="vigente" targetRef="fim-vigente" />
+  </bpmn:process>
+</bpmn:definitions>

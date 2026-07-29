@@ -8,9 +8,12 @@ import { request } from '../src/mock/api';
 import { pode } from '../src/mock/permissoes';
 import { POLITICAS, POLITICA_PADRAO, politicaDe } from '../src/mock/politicas';
 import {
-  MAQUINAS, TRANSICOES_INCIDENTE, estadosDe, motivoDaRecusa, transicaoPermitida,
-  type Artefato,
+  ARTEFATOS, MAQUINAS, TRANSICOES_INCIDENTE, estadosDe, motivoDaRecusa, proximosDe,
+  transicaoPermitida, type Artefato,
 } from '../src/mock/estados';
+import {
+  aplicarDmn, combinacoes, divergenciasBpmn, dominioDe, lerBpmn, lerDmn, lerEntrada, lerProcesso,
+} from './conformidade';
 import {
   CATEGORIAS, GATILHOS, TABELAS, TABELAS_IDS, aplicar, condicoesDe, nivelDoRisco,
   reproduzir, tomDoRisco, ultimaDecisao, vigenteDe,
@@ -28,6 +31,7 @@ import { CampoPII, Didatico, Explica } from '../src/ui/primitivos';
 import { MemoryRouter } from 'react-router-dom';
 import T2 from '../src/screens/T2';
 import { Casca, TELAS } from '../src/App';
+import ComoFunciona from '../src/screens/ComoFunciona';
 import T0 from '../src/screens/T0';
 import T1 from '../src/screens/T1';
 import T10 from '../src/screens/T10';
@@ -3653,5 +3657,245 @@ describe('PR 11 · o gate de privacidade — validação: ele barra o que a LGPD
     // e a que valeria seria a que ninguém está olhando.
     expect(fonte).not.toContain('marcado_sem_evidencia:');
     expect(fonte.match(/const MINIMO_EVIDENCIA/)).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('PR 12 · conformidade — o documento corresponde ao código?', () => {
+  it('cada .bpmn cobre exatamente os estados e as transições da máquina', () => {
+    for (const artefato of ARTEFATOS) {
+      const leitura = lerBpmn(`${artefato}.bpmn`);
+      const divergencias = divergenciasBpmn(leitura, MAQUINAS[artefato] as Record<string, string[]>);
+      expect(divergencias, `${artefato}.bpmn:\n  ${divergencias.join('\n  ')}`).toEqual([]);
+      // Documento vazio não confere nada: a leitura precisa ter achado algo.
+      expect(leitura.estados.length, artefato).toBe(estadosDe(artefato).length);
+      expect(leitura.arestas.length, artefato).toBeGreaterThan(0);
+    }
+  });
+
+  it('a catraca vale nos dois sentidos: aresta a mais ou a menos reprova', () => {
+    // É a prova de que o teste acima não passa por não estar olhando. Sem ela,
+    // um comparador quebrado ficaria verde para sempre.
+    const leitura = lerBpmn('incidente.bpmn');
+    const original = MAQUINAS.incidente as Record<string, string[]>;
+
+    const comArestaNova = { ...original, aberto: [...original.aberto, 'comunicado'] };
+    expect(divergenciasBpmn(leitura, comArestaNova))
+      .toContain('transição aberto→comunicado existe no runtime e não no .bpmn');
+
+    const semAresta = { ...original, contido: [] };
+    const d = divergenciasBpmn(leitura, semAresta);
+    expect(d).toContain('transição contido→decidido existe no .bpmn e não no runtime');
+    // Apagar a saída de `contido` o torna final no runtime, e o desenho não tem
+    // evento de fim ali: a catraca acusa a assimetria pelos dois lados.
+    expect(d).toContain('estado final "contido" não tem evento de fim no .bpmn');
+
+    const comEstadoNovo = { ...original, arquivado: [] };
+    expect(divergenciasBpmn(leitura, comEstadoNovo))
+      .toContain('estado "arquivado" existe no runtime e não no .bpmn');
+  });
+
+  it('transição ilegal no .bpmn do incidente é ilegal em estados.ts, e vice-versa', () => {
+    const arestas = new Set(lerBpmn('incidente.bpmn').arestas);
+    const estados = estadosDe('incidente');
+    for (const de of estados) {
+      for (const para of estados) {
+        expect(arestas.has(`${de}→${para}`), `incidente: ${de} → ${para}`)
+          .toBe(transicaoPermitida('incidente', de, para));
+      }
+    }
+    // E as nomeadas no MAPA seguem fora do desenho.
+    expect(arestas.has('aberto→comunicado')).toBe(false);
+    expect(arestas.has('contido→comunicado')).toBe(false);
+  });
+
+  it('todo .bpmn declara o estado inicial e os finais que o runtime tem', () => {
+    for (const artefato of ARTEFATOS) {
+      const leitura = lerBpmn(`${artefato}.bpmn`);
+      expect(leitura.inicial, `${artefato}: estado inicial`).toBe(estadosDe(artefato)[0]);
+      const finaisDoCodigo = (estadosDe(artefato) as string[])
+        .filter((e) => proximosDe(artefato, e as never).length === 0);
+      expect([...leitura.finais].sort(), artefato).toEqual([...finaisDoCodigo].sort());
+    }
+  });
+
+  it('cada .dmn reproduz a saída de decisoes.ts para toda combinação de entrada', () => {
+    let combinacoesConferidas = 0;
+    for (const id of TABELAS_IDS) {
+      for (const v of TABELAS[id].versoes) {
+        const leitura = lerDmn(`${id}.v${v.versao}.dmn`);
+        // Estrutura antes do conteúdo: campos, saídas e política de acerto.
+        expect(leitura.hitPolicy, `${id}@${v.versao}`).toBe('FIRST');
+        expect(leitura.campos.sort(), `${id}@${v.versao}: campos`).toEqual(Object.keys(v.restritivo).sort());
+        expect(leitura.regras.length, `${id}@${v.versao}: regras`).toBe(v.regras.length);
+
+        for (const entradas of combinacoes(dominioDe(leitura, v.restritivo))) {
+          const doDoc = aplicarDmn(leitura, entradas);
+          const doCodigo = aplicar(id, entradas, v.versao).saida;
+          expect(doDoc, `${id}@${v.versao} · ${JSON.stringify(entradas)}`).toEqual(doCodigo);
+          combinacoesConferidas += 1;
+        }
+      }
+    }
+    // Varredura que não varreu nada passaria calada.
+    expect(combinacoesConferidas).toBeGreaterThan(200);
+  });
+
+  it('a D2 do .dmn dá a mesma faixa que a matriz da T5, célula a célula', () => {
+    const leitura = lerDmn('d2.v1.dmn');
+    for (let p = 1; p <= 5; p += 1) {
+      for (let i = 1; i <= 5; i += 1) {
+        const doDoc = aplicarDmn(leitura, { probabilidade: p, impacto: i, score: p * i });
+        expect(doDoc!.nivel, `P${p} × I${i}`).toBe(nivelDoRisco(p, i));
+      }
+    }
+  });
+
+  it('regra a mais ou limiar mudado no .dmn quebra a conformidade', () => {
+    // A contraprova do teste de varredura, no mesmo espírito da catraca do BPMN.
+    const leitura = lerDmn('d2.v1.dmn');
+    const adulterada = {
+      ...leitura,
+      regras: leitura.regras.map((r, i) => (i === 0 ? { ...r, quando: { score: { min: 8 } } } : r)),
+    };
+    const divergiu = combinacoes(dominioDe(leitura, TABELAS.d2.versoes[0].restritivo))
+      .some((e) => JSON.stringify(aplicarDmn(adulterada, e)) !== JSON.stringify(aplicar('d2', e, 1).saida));
+    expect(divergiu, 'o comparador precisa acusar o limiar trocado').toBe(true);
+  });
+
+  it('o vocabulário FEEL conferível é fechado — entrada estranha estoura', () => {
+    expect(lerEntrada('-')).toBeNull();
+    expect(lerEntrada('>= 15')).toEqual({ min: 15 });
+    expect(lerEntrada('"sensivel"')).toEqual({ em: ['sensivel'] });
+    expect(lerEntrada('"a","b"')).toEqual({ em: ['a', 'b'] });
+    expect(lerEntrada('true')).toEqual({ em: [true] });
+    expect(lerEntrada('list contains(?, "T3")')).toEqual({ contem: 'T3' });
+    // Parser generoso conferiria o que não entende, e passaria a comparar duas
+    // coisas diferentes achando que são a mesma.
+    expect(() => lerEntrada('not(1..5)')).toThrow(/fora do vocabulário/);
+  });
+
+  it('os arquivos de processo não carregam dado de cenário', () => {
+    const arquivos = [...ARTEFATOS.map((a) => `${a}.bpmn`),
+      ...TABELAS_IDS.flatMap((id) => TABELAS[id].versoes.map((v) => `${id}.v${v.versao}.dmn`))];
+    const banco = new BancoMock('banco');
+    const proibidos = [
+      ...banco.cenario.titulares.map((t) => t.cpfHash),
+      ...banco.cenario.solicitacoes.flatMap((s) => [s.protocolo, s.titularPseudonimo]),
+      ...banco.cenario.ripds.map((r) => r.codigo),
+      ...banco.cenario.riscos.map((r) => r.descricao),
+    ];
+    for (const nome of arquivos) {
+      const xml = readFileSync(join('..', 'docs', 'processos', nome), 'utf8');
+      for (const p of proibidos) {
+        expect(xml.includes(p), `${nome} carrega "${p}"`).toBe(false);
+      }
+      // A especificação descreve o processo, não uma instância dele.
+      expect(xml).not.toMatch(/hmac:|cpf|\d{3}\.\d{3}\.\d{3}-\d{2}/i);
+    }
+  });
+});
+
+describe('PR 12 · validação — o processo desenhado é o que a LGPD exige?', () => {
+  it('o incidente comunica só depois de conter e decidir com fundamento (Art. 48)', () => {
+    const arestas = new Set(lerBpmn('incidente.bpmn').arestas);
+    // O caminho legal é um só, e passa pela decisão registrada.
+    expect(arestas.has('aberto→contido')).toBe(true);
+    expect(arestas.has('contido→decidido')).toBe(true);
+    expect(arestas.has('decidido→comunicado')).toBe(true);
+    // E não comunicar é decisão declarada no desenho, não a ausência de uma.
+    expect(arestas.has('decidido→nao_comunicado')).toBe(true);
+    expect(lerProcesso('incidente.bpmn').documentElement.textContent)
+      .toContain('inclusive para não comunicar');
+  });
+
+  it('a LIA vencida não volta a vigente sem rebalanceamento (Art. 7º, IX)', () => {
+    const arestas = new Set(lerBpmn('lia.bpmn').arestas);
+    expect(arestas.has('vencida→vigente')).toBe(false);
+    expect(arestas.has('vencida→balanceamento')).toBe(true);
+  });
+
+  it('a solicitação não conclui sem análise, e a recusa é estado próprio (Art. 18, §4º)', () => {
+    const arestas = new Set(lerBpmn('solicitacao.bpmn').arestas);
+    expect(arestas.has('recebida→concluida')).toBe(false);
+    expect(arestas.has('em_analise→recusada_com_fundamento')).toBe(true);
+  });
+
+  it('a dispensa de RIPD tem caminho de volta — não é beco sem saída', () => {
+    const arestas = new Set(lerBpmn('ripd.bpmn').arestas);
+    expect(arestas.has('triagem→dispensado')).toBe(true);
+    // É a aresta que o gatilho de reabertura do PR 11 percorre.
+    expect(arestas.has('dispensado→elaboracao')).toBe(true);
+    expect(lerBpmn('ripd.bpmn').finais).not.toContain('dispensado');
+  });
+
+  it('cada .dmn declara vigência e o que a versão mudou', () => {
+    for (const id of TABELAS_IDS) {
+      for (const v of TABELAS[id].versoes) {
+        const xml = readFileSync(join('..', 'docs', 'processos', `${id}.v${v.versao}.dmn`), 'utf8');
+        expect(xml, `${id}@${v.versao}`).toContain(v.vigenciaInicio);
+        expect(xml, `${id}@${v.versao}: nota da versão`).toContain(v.nota.slice(0, 40));
+        // E diz o que não está na tabela: o restritivo é contrato de aplicar().
+        expect(xml).toContain('entrada ausente cai no cenário mais restritivo');
+      }
+    }
+  });
+});
+
+describe('PR 12 · a página "Como funciona" é referência, não operação', () => {
+  it('não importa runtime: nenhum mock/* entra na página', () => {
+    const fonte = readFileSync('src/screens/ComoFunciona.tsx', 'utf8');
+    const imports = [...fonte.matchAll(/^import .*from '([^']+)';/gm)].map((m) => m[1]);
+    // Página de referência que lê o banco vira tela de operação com outro nome,
+    // e passa a poder mostrar dado de titular por acidente.
+    expect(imports.filter((i) => i.includes('mock/')), imports.join(', ')).toEqual([]);
+    expect(imports.filter((i) => i.includes('store/'))).toEqual([]);
+    expect(imports.sort()).toEqual(['../ui/primitivos', 'react-router-dom']);
+  });
+
+  it('não renderiza dado de titular, e não tem como: ela não lê o banco', () => {
+    limparBancosDaSessao();
+    const b = new BancoMock('banco');
+    useSessao.setState({ papel: 'dpo', banco: b, versao: 0, avisos: [] });
+    const { container } = render(<MemoryRouter><ComoFunciona /></MemoryRouter>);
+    const texto = container.textContent ?? '';
+
+    expect(texto).not.toContain('hmac:');
+    for (const s of b.cenario.solicitacoes) {
+      expect(texto.includes(s.protocolo), `protocolo ${s.protocolo}`).toBe(false);
+      expect(texto.includes(s.titularPseudonimo)).toBe(false);
+    }
+    for (const t of b.cenario.titulares) expect(texto.includes(t.cpfHash)).toBe(false);
+    expect(texto).not.toMatch(/\d{3}\.\d{3}\.\d{3}-\d{2}/);
+  });
+
+  it('não tem controle operável: nenhum botão, campo ou seletor', () => {
+    render(<MemoryRouter><ComoFunciona /></MemoryRouter>);
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+    expect(screen.queryAllByRole('textbox')).toHaveLength(0);
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    expect(screen.queryAllByRole('combobox')).toHaveLength(0);
+    // Links de navegação continuam, porque ler e ir para outro lugar não é operar.
+    expect(screen.getAllByRole('link').length).toBeGreaterThan(0);
+  });
+
+  it('não enumera estados nem regras — aponta para quem tem prova', () => {
+    const fonte = readFileSync('src/screens/ComoFunciona.tsx', 'utf8');
+    // Uma terceira cópia da lista de estados seria a única sem catraca, e por
+    // isso a primeira a envelhecer.
+    for (const estado of ['parecer_juridico', 'recusada_com_fundamento', 'recriptografando']) {
+      expect(fonte.includes(estado), `a página enumera "${estado}"`).toBe(false);
+    }
+    expect(fonte).toContain('docs/processos/*.bpmn');
+    expect(fonte).toContain('docs/processos/*.dmn');
+  });
+
+  it('fica fora do trilho de telas e é alcançável por link direto', () => {
+    expect(TELAS.map((t) => t.rota)).not.toContain('/como-funciona');
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'auditor', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    render(<MemoryRouter initialEntries={['/como-funciona']}><Casca /></MemoryRouter>);
+    expect(screen.getByRole('heading', { level: 1, name: 'Como funciona' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Como funciona/ })).toBeInTheDocument();
   });
 });
