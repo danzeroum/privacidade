@@ -15,6 +15,7 @@ import {
 } from './calendario';
 import { executarExpurgo, retencaoAteDoCampo, varrerVencimentos } from './expurgo';
 import { codigoDoAchado, diasDeAtraso } from './retencao';
+import { motivoDaCessacao, temProvaVersionada, titularesAtivos } from './consentimento';
 import { redigir } from '../lib/redator';
 import { hashEncadeado, sha256 } from '../lib/sha256';
 import { BASES_LEGAIS, BASES_PARA_SENSIVEL } from './types';
@@ -207,26 +208,42 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
        * tratamento perdeu fundamento no instante da revogação, e continuar
        * mostrando o valor faria da revogação um rótulo.
        */
-      if (catalogado.baseLegal === 'consentimento' && !consentimentoVigente(banco, catalogado.id)) {
-        registrarNegativa(banco, ator, papel, campo, 'consentimento revogado');
-        return erro(422, `O consentimento de ${catalogado.nome} foi revogado: o campo não é mais tratável.`,
-          'Art. 8º, §5º e Art. 18, VIII: revogado o consentimento, cessa o tratamento que dependia dele.') as Res<T>;
+      /**
+       * Duas perguntas diferentes, e por isso duas checagens.
+       *
+       * A primeira é sobre o **campo**: existe texto de consentimento publicado
+       * que sustente a base legal declarada no ROPA? Sem ele, a base é uma
+       * afirmação sobre a vontade de alguém que ninguém consultou — e nenhum
+       * titular é tratável, independentemente de quem aceitou o quê.
+       */
+      if (catalogado.baseLegal === 'consentimento'
+        && !temProvaVersionada(banco.cenario.consentimentoTextos, catalogado.id)) {
+        registrarNegativa(banco, ator, papel, campo, 'campo sem texto de consentimento vigente');
+        return erro(422, `${catalogado.nome} declara base legal "consentimento" sem texto publicado vigente.`,
+          'Art. 8º, §1º: o consentimento se prova pelo texto que a pessoa aceitou, versionado — e sem ele não há base.') as Res<T>;
       }
 
       /**
-       * A revogação feita pelo titular **no portal** propaga até aqui, e é por
-       * titular — não pelo campo inteiro.
-       *
-       * A checagem acima derruba o campo para todo mundo quando o registro
-       * agregado é revogado; esta derruba só para quem revogou. Sem ela, o botão
-       * do portal mudaria um estado que nenhuma leitura consulta, que é a
-       * definição de revogação de fachada. (A entidade de consentimento por
-       * titular no schema de produção continua sendo o Risco-002.)
+       * A segunda é sobre **esta pessoa**: o aceite dela está vivo? Revogado e
+       * expirado cessam o tratamento do mesmo jeito e dizem coisas diferentes —
+       * um 422 que não os distingue manda o titular reclamar de uma retirada
+       * que ele não fez, ou aceitar como escolha dele um vencimento que foi da
+       * empresa.
        */
-      if (catalogado.baseLegal === 'consentimento' && banco.revogacaoDe(titularId, catalogado.id)) {
-        registrarNegativa(banco, ator, papel, campo, 'consentimento revogado pelo titular');
-        return erro(422, `Este titular retirou a autorização de ${catalogado.nome}: o campo não é mais tratável para ele.`,
-          'Art. 8º, §5º e Art. 18, VIII: a revogação é individual, e cessa o tratamento que dependia dela.') as Res<T>;
+      if (catalogado.baseLegal === 'consentimento') {
+        const consentimento = banco.consentimentoDe(titularId, catalogado.id);
+        if (!consentimento) {
+          registrarNegativa(banco, ator, papel, campo, 'sem aceite deste titular');
+          return erro(422, `Não há consentimento deste titular para ${catalogado.nome}.`,
+            'Art. 7º, I: sem aceite não há base legal, e ausência de fato não é o mesmo que aceite vencido.') as Res<T>;
+        }
+        if (consentimento.estado !== 'ativo') {
+          registrarNegativa(banco, ator, papel, campo, `consentimento ${consentimento.estado}`);
+          return erro(422, motivoDaCessacao(consentimento.estado, catalogado.nome, consentimento.expiraEm),
+            consentimento.estado === 'revogado'
+              ? 'Art. 8º, §5º e Art. 18, VIII: revogado o consentimento, cessa o tratamento que dependia dele.'
+              : 'Art. 8º, §5º: consentimento tem prazo, e vencido ele não sustenta tratamento — renovar é ato do titular.') as Res<T>;
+        }
       }
 
       /**
@@ -363,7 +380,9 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
        * vigente é afirmação sobre a vontade de alguém que ninguém consultou.
        */
       if (c.baseLegal === 'consentimento') {
-        const registro = c.campoId ? consentimentoVigente(banco, c.campoId) : null;
+        const registro = c.campoId
+          ? temProvaVersionada(banco.cenario.consentimentoTextos, c.campoId)
+          : false;
         if (!registro) {
           erros.push('Base legal "consentimento" exige registro de consentimento vigente — com texto, versão, canal e hash. '
             + 'Sem ele, ou com ele revogado, o campo não entra no ROPA.');
@@ -889,8 +908,33 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
     }
 
     // ── C-08 — consentimento como prova, e revogação que propaga ──────────
-    case 'GET consentimentos':
-      return ok(banco.cenario.consentimentos) as Res<T>;
+    /**
+     * O console vê o mesmo que o banco: texto vigente por campo, com a contagem
+     * de titulares **somada** da entidade. Não existe mais um campo `titulares`
+     * para divergir do que ele conta.
+     */
+    case 'GET consentimentos': {
+      const hoje = new Date().toISOString().slice(0, 10);
+      return ok(banco.cenario.consentimentoTextos.map((t) => ({
+        campoId: t.campoId,
+        versao: t.versao,
+        texto: t.texto,
+        hash: t.hash,
+        publicadoEm: t.publicadoEm,
+        validade: t.validade,
+        canal: banco.cenario.consentimentos.find((c) => c.textoId === t.id)?.canal ?? '—',
+        coletadoEm: banco.cenario.consentimentos.find((c) => c.textoId === t.id)?.coletadoEm ?? '—',
+        aceites: banco.cenario.consentimentos.filter((c) => c.textoId === t.id).length,
+        titularesAtivos: titularesAtivos(
+          banco.cenario.consentimentoTextos, banco.cenario.consentimentos,
+          banco.revogacoesTitular.map((r) => ({
+            id: r.id, consentimentoId: r.consentimentoId, revogadoEmMs: r.revogadoEmMs, canal: r.canal,
+          })),
+          t.campoId, hoje,
+        ),
+        vigente: banco.textoVigenteDe(t.campoId)?.id === t.id,
+      }))) as Res<T>;
+    }
 
     case 'POST consentimentos': {
       if (partes[2] !== 'revogar') break;
@@ -1814,10 +1858,25 @@ function encerrarIncidente<T>(banco: BancoMock, req: Req, inc: Incidente): Res<T
  * na tela é o teatro que este projeto existe para não fazer.
  */
 function revogarConsentimento<T>(banco: BancoMock, req: Req, campoId: string): Res<T> {
-  const registro = banco.cenario.consentimentos.find((c) => c.campoId === campoId);
-  if (!registro) return erro(404, 'Não encontrado.') as Res<T>;
-  if (registro.estado === 'revogado') {
-    return erro(409, `O consentimento de ${campoId} já está revogado desde ${registro.revogadoEm}.`,
+  const texto = banco.textoVigenteDe(campoId);
+  if (!texto) return erro(404, 'Não encontrado.') as Res<T>;
+
+  const hoje = new Date().toISOString().slice(0, 10);
+  /**
+   * Sob a entidade, a revogação do balcão é o que ela sempre disse ser: revoga
+   * **cada aceite vivo** daquele campo, um fato por pessoa. Antes ela virava um
+   * único rótulo, e por isso conseguia cessar o tratamento de trinta mil
+   * titulares sem que nenhum deles tivesse pedido.
+   */
+  const vivos = banco.cenario.consentimentos
+    .filter((c) => banco.cenario.consentimentoTextos.some(
+      (t) => t.id === c.textoId && t.campoId === campoId,
+    ))
+    .map((c) => banco.consentimentoDe(c.titularId, campoId, hoje))
+    .filter((x): x is NonNullable<typeof x> => Boolean(x) && x!.estado === 'ativo');
+
+  if (vivos.length === 0) {
+    return erro(409, `Não há consentimento ativo de ${campoId} para revogar.`,
       'Revogar de novo não é revogação: seria ruído num registro que precisa contar uma história só.') as Res<T>;
   }
 
@@ -1832,28 +1891,42 @@ function revogarConsentimento<T>(banco: BancoMock, req: Req, campoId: string): R
   try {
     banco.auditAppend({
       ator: req.ator, atorPapel: req.papel, acao: 'CONSENTIMENTO_REVOGADO',
-      recursoTipo: 'consentimento', recursoId: `${campoId}@${registro.versao}`,
-      justificativa: motivo || undefined, campos: [campoId],
+      recursoTipo: 'consentimento', recursoId: `${campoId}@${texto.versao}`,
+      justificativa: motivo || undefined, campos: [campoId, `aceites=${vivos.length}`],
     });
   } catch (e) {
     const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a revogação.';
     return erro(503, msg, 'Revogação sem registro não é oponível a ninguém.') as Res<T>;
   }
 
-  registro.estado = 'revogado';
-  registro.revogadoEm = new Date().toISOString();
+  /**
+   * Um fato novo por aceite. O aceite em si não é tocado — é ele que prova que
+   * houve consentimento enquanto houve tratamento, e o Art. 8º, §2º cobra essa
+   * prova inclusive depois da revogação.
+   */
+  const agora = Date.now();
+  for (const v of vivos) {
+    banco.revogacoesTitular.push({
+      id: `rev_${sha256(`${v.aceite.id}|${agora}`).slice(0, 10)}`,
+      consentimentoId: v.aceite.id,
+      titularId: v.aceite.titularId,
+      campoId,
+      canal: 'balcao',
+      revogadoEmMs: agora,
+      cascata: [],
+    });
+  }
+
   // A consequência sai do mesmo ato: o gate volta a bloquear o repositório do
   // campo, como já acontece com RIPD pendente.
   for (const g of gates) { g.conclusao = 'failure'; g.bloqueouMerge = true; }
 
   return ok({
-    campoId, estado: registro.estado, gatesBloqueados: gates.length,
+    campoId, estado: 'revogado', aceitesRevogados: vivos.length, gatesBloqueados: gates.length,
   }, 200) as Res<T>;
 }
 
-/** C-08 — o consentimento vigente de um campo, ou `null` se não houver base viva. */
-const consentimentoVigente = (banco: BancoMock, campoId: string) =>
-  banco.cenario.consentimentos.find((c) => c.campoId === campoId && c.estado === 'ativo') ?? null;
+
 
 /**
  * C-06 — exportação do audit trail.

@@ -4,6 +4,7 @@ import { Estados, useRecurso } from '../ui/estados';
 import { useSessao } from '../store/sessao';
 import { hashCpf } from '../lib/sha256';
 import { redigir, resumoDaRedacao } from '../lib/redator';
+import { titularesAtivos } from '../mock/consentimento';
 import type { Campo, Categoria, Finalidade, TipoArmazenado } from '../mock/types';
 
 const ICONE: Record<TipoArmazenado, string> = {
@@ -468,7 +469,28 @@ function RegistrosDeConsentimento() {
   const [motivo, setMotivo] = useState('');
   const previa = redigir(motivo);
 
-  const registros = banco.cenario.consentimentos;
+  /**
+   * A tela lê o mesmo que o banco: uma linha por texto publicado, com a
+   * contagem de titulares **somada** da entidade. Não existe mais um campo
+   * `titulares` para divergir do que ele conta.
+   */
+  const hoje = new Date().toISOString().slice(0, 10);
+  const registros = banco.cenario.consentimentoTextos.map((t) => ({
+    campoId: t.campoId,
+    versao: t.versao,
+    texto: t.texto,
+    hash: t.hash,
+    vigente: banco.textoVigenteDe(t.campoId)?.id === t.id,
+    coletadoEm: banco.cenario.consentimentos.find((c) => c.textoId === t.id)?.coletadoEm ?? '—',
+    canal: banco.cenario.consentimentos.find((c) => c.textoId === t.id)?.canal ?? '—',
+    ativos: titularesAtivos(
+      banco.cenario.consentimentoTextos, banco.cenario.consentimentos,
+      banco.revogacoesTitular.map((r) => ({
+        id: r.id, consentimentoId: r.consentimentoId, revogadoEmMs: r.revogadoEmMs, canal: r.canal,
+      })),
+      t.campoId, hoje,
+    ),
+  }));
   if (registros.length === 0) {
     return (
       <Cartao titulo="Registro de consentimento">
@@ -490,7 +512,9 @@ function RegistrosDeConsentimento() {
       </Nota>
       {registros.map((c) => {
         const campo = banco.cenario.campos.find((x) => x.id === c.campoId);
-        const ativo = c.estado === 'ativo';
+        // Vivo é ter ao menos um aceite de pé: o campo perde a base legal
+        // quando ninguém mais o sustenta, não quando um rótulo muda.
+        const ativo = c.vigente && c.ativos > 0;
         return (
           <div key={c.campoId} style={{ paddingTop: 12, borderTop: '1px solid var(--line)', marginTop: 12 }}>
             <dl className="kv">
@@ -501,7 +525,9 @@ function RegistrosDeConsentimento() {
               <dt>Estado</dt>
               <dd>
                 <Pill tom={ativo ? 'ok' : 'crit'}>
-                  {ativo ? `ativo · ${c.titulares.toLocaleString('pt-BR')} titulares` : `revogado`}
+                  {ativo
+                    ? `ativo · ${c.ativos.toLocaleString('pt-BR')} titulares`
+                    : 'sem aceite vivo'}
                 </Pill>
                 {!ativo && <div className="hint">o campo perdeu a base legal e não é mais revelável</div>}
               </dd>

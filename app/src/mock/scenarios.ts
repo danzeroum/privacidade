@@ -359,6 +359,69 @@ const solicitacoesPadrao = (titularIds: string[], sistemas: string[]): Solicitac
 const diasAtras = (n: number): string =>
   new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
 
+
+/**
+ * Um texto publicado e os aceites dele, do jeito que o banco persiste.
+ *
+ * Antes era um registro só por campo, com `titulares: number` — um contador no
+ * lugar das pessoas. Ele não respondia às duas perguntas do Art. 8º (*esta
+ * pessoa consentiu?* e *com qual texto?*) e tornava a revogação individual do
+ * Art. 18, VIII inexecutável. A contagem agora é `titularesAtivos()`, somada
+ * da entidade.
+ */
+const consentir = (
+  campoId: string, versao: string, texto: string, canal: string, validade: string,
+  aceites: { titularId: string; ha: number }[],
+  validadeFonte?: string,
+) => {
+  const textoId = `ct-${campoId}-${versao}`;
+  return {
+    texto: {
+      id: textoId, campoId, versao, texto,
+      hash: sha256(`consent-${campoId}-${versao}`).slice(0, 16),
+      publicadoEm: diasAtras(420), validade, validadeFonte, vigente: true,
+    },
+    aceites: aceites.map((a) => ({
+      id: `ac-${campoId}-${a.titularId}`,
+      titularId: a.titularId,
+      textoId,
+      canal,
+      coletadoEm: diasAtras(a.ha),
+      provaHash: sha256(`prova-${campoId}-${a.titularId}`).slice(0, 12),
+    })),
+  };
+};
+
+/** Biometria de onboarding: aceite de um ano, vivo para os dois titulares que a têm. */
+const consentimentoBanco = [
+  consentir('b-bio', 'v3',
+    'Autorizo o uso da minha imagem facial para verificação de identidade na abertura de conta.',
+    'app iOS', 'P1Y', [{ titularId: 't1', ha: 40 }, { titularId: 't2', ha: 90 }]),
+];
+
+/**
+ * Fidelidade. Rafael (t2) aceitou o e-mail há mais de um ano e **não** revogou:
+ * o aceite dele expirou sozinho. É o par que prova que expirado e revogado
+ * cessam o tratamento do mesmo jeito, e dizem coisas diferentes.
+ */
+const consentimentoVarejo = [
+  consentir('v-email', 'v2', 'Aceito receber comunicações do programa de fidelidade por e-mail.',
+    'checkout web', 'P1Y',
+    [{ titularId: 't1', ha: 30 }, { titularId: 't2', ha: 400 }, { titularId: 't3', ha: 30 }]),
+  consentir('v-tel', 'v2', 'Aceito receber comunicações do programa de fidelidade por SMS.',
+    'checkout web', 'P2Y', [{ titularId: 't1', ha: 30 }, { titularId: 't3', ha: 30 }]),
+];
+
+const consentimentoMidia = [
+  consentir('m-inferencia', 'v5',
+    'Autorizo o uso do meu histórico de consumo para recomendação e publicidade segmentada.',
+    'app Android', 'P1Y',
+    [{ titularId: 't1', ha: 60 }, { titularId: 't2', ha: 60 }, { titularId: 't3', ha: 60 }]),
+  consentir('m-orientacao', 'v5',
+    'Autorizo o uso de afinidade temática do meu perfil para curadoria editorial.',
+    'app Android', 'P1Y', [{ titularId: 't3', ha: 60 }]),
+];
+
 const titular = (
   id: string, prefixo: 'b' | 'v' | 'm', cpf: string, nome: string, email: string,
   extras: { chave: string; rotulo: string; grupo: string; valor: string; mascara: string; catalogo: string; baseLegal: Titular['campos'][number]['baseLegal'] }[],
@@ -425,11 +488,8 @@ const banco: Cenario = {
   pareceres: pareceresPadrao(),
   achados: achadosPadrao(),
   incidentes: incidentePadrao(['b-cpf', 'b-nome', 'b-hist'], 'R09', 'r1'),
-  consentimentos: [
-    { campoId: 'b-bio', versao: 'v3', texto: 'Autorizo o uso da minha imagem facial para verificação de identidade na abertura de conta.',
-      coletadoEm: '14/03/2026', canal: 'app iOS', hash: sha256('consent-b-bio-v3').slice(0, 16),
-      estado: 'ativo', titulares: 8412 },
-  ],
+  consentimentoTextos: consentimentoBanco.map((c) => c.texto),
+  consentimentos: consentimentoBanco.flatMap((c) => c.aceites),
   gates: [
     { id: 'g1', workflow: 'privacy-ci-gate', repositorio: 'credit-scoring', prNumero: 1234, prTitulo: 'feat: scoring v2 com LLM', prAutor: '@maria.silva', headSha: 'a1b2c3d', conclusao: 'failure', bloqueouMerge: true, runUrl: 'https://github.com/danzeroum/credit-scoring/actions/runs/1234', quando: 'há 4 h', ripdId: 'r1',
       findings: [
@@ -604,14 +664,8 @@ const varejo: Cenario = {
   pareceres: pareceresPadrao(),
   achados: achadosPadrao(),
   incidentes: incidentePadrao(['v-cpf', 'v-email', 'v-tel'], 'R09', 'r1'),
-  consentimentos: [
-    { campoId: 'v-email', versao: 'v2', texto: 'Aceito receber comunicações do programa de fidelidade por e-mail.',
-      coletadoEm: '02/02/2026', canal: 'checkout web', hash: sha256('consent-v-email-v2').slice(0, 16),
-      estado: 'ativo', titulares: 31207 },
-    { campoId: 'v-tel', versao: 'v2', texto: 'Aceito receber comunicações do programa de fidelidade por SMS.',
-      coletadoEm: '02/02/2026', canal: 'checkout web', hash: sha256('consent-v-tel-v2').slice(0, 16),
-      estado: 'ativo', titulares: 18904 },
-  ],
+  consentimentoTextos: consentimentoVarejo.map((c) => c.texto),
+  consentimentos: consentimentoVarejo.flatMap((c) => c.aceites),
   gates: [
     { id: 'g1', workflow: 'privacy-ci-gate', repositorio: 'recomendacao', prNumero: 512, prTitulo: 'feat: cruzar cesta da farmácia com recomendação', prAutor: '@lucas.dias', headSha: 'd9c8b7a', conclusao: 'failure', bloqueouMerge: true, runUrl: '#', quando: 'há 2 h', ripdId: 'r1',
       findings: [
@@ -760,14 +814,8 @@ const midia: Cenario = {
   pareceres: pareceresPadrao(),
   achados: achadosPadrao(),
   incidentes: incidentePadrao(['m-cpf', 'm-inferencia'], 'R09', 'r1'),
-  consentimentos: [
-    { campoId: 'm-inferencia', versao: 'v5', texto: 'Autorizo o uso do meu histórico de consumo para recomendação e publicidade segmentada.',
-      coletadoEm: '21/05/2026', canal: 'app Android', hash: sha256('consent-m-inferencia-v5').slice(0, 16),
-      estado: 'ativo', titulares: 96330 },
-    { campoId: 'm-orientacao', versao: 'v5', texto: 'Autorizo o uso de afinidade temática do meu perfil para curadoria editorial.',
-      coletadoEm: '21/05/2026', canal: 'app Android', hash: sha256('consent-m-orientacao-v5').slice(0, 16),
-      estado: 'ativo', titulares: 4211 },
-  ],
+  consentimentoTextos: consentimentoMidia.map((c) => c.texto),
+  consentimentos: consentimentoMidia.flatMap((c) => c.aceites),
   gates: [
     { id: 'g1', workflow: 'privacy-ci-gate', repositorio: 'ads', prNumero: 77, prTitulo: 'feat: segmento por afinidade de acervo', prAutor: '@bruno.reis', headSha: 'e1f2a3b', conclusao: 'failure', bloqueouMerge: true, runUrl: '#', quando: 'há 1 h', ripdId: 'r1',
       findings: [

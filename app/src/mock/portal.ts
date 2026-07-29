@@ -577,11 +577,10 @@ function mensagem<T>(banco: BancoMock, s: Solicitacao, body: Record<string, any>
 /**
  * 08 · minhas autorizações.
  *
- * O registro do cenário é agregado por campo (`titulares: number`) — a entidade
- * de consentimento por titular é o Risco-002, do bloco seguinte. O que dá para
- * fazer com honestidade hoje é o que esta função faz: cruzar os campos **deste**
- * titular cuja base é consentimento com o registro versionado do campo, e
- * derivar o estado individual das revogações que o portal registrou.
+ * Lê a entidade: o aceite **desta** pessoa, na versão que ela aceitou, com o
+ * estado derivado dos fatos. Antes cruzava os campos do titular com um agregado
+ * por campo — e por isso mostrava a todo mundo o mesmo texto e o mesmo estado,
+ * que é o avesso do que o Art. 8º, §2º pede provar.
  */
 function consentimentosDoTitular<T>(banco: BancoMock, sessao: SessaoTitular): Res<T> {
   if (sessao.nivelAtingido < nivelExigido('revogacao')) return naoConfirmado<T>();
@@ -590,18 +589,20 @@ function consentimentosDoTitular<T>(banco: BancoMock, sessao: SessaoTitular): Re
   const consentimentos = titular.campos
     .filter((c) => c.baseLegal === 'consentimento' && c.campoCatalogoId)
     .map((c) => {
-      const registro = banco.cenario.consentimentos.find((r) => r.campoId === c.campoCatalogoId);
-      const revogacao = banco.revogacaoDe(titular.id, c.campoCatalogoId!);
+      const registro = banco.consentimentoDe(titular.id, c.campoCatalogoId!);
       return {
         id: c.campoCatalogoId!,
         rotulo: c.rotulo,
-        texto: registro?.texto ?? '—',
-        versao: registro?.versao ?? '—',
-        coletado_em: registro?.coletadoEm ?? '—',
-        canal: registro?.canal ?? '—',
-        hash: registro?.hash ?? '—',
-        estado: revogacao ? 'revogado' : (registro?.estado ?? 'ativo'),
-        ...(revogacao ? { revogado_em: iso(revogacao.revogadoEmMs) } : {}),
+        // O texto **na versão que esta pessoa aceitou**, não a mais recente:
+        // publicar uma versão nova não reescreve o que alguém consentiu.
+        texto: registro?.texto.texto ?? '—',
+        versao: registro?.texto.versao ?? '—',
+        coletado_em: registro?.aceite.coletadoEm ?? '—',
+        canal: registro?.aceite.canal ?? '—',
+        hash: registro?.texto.hash ?? '—',
+        estado: registro?.estado ?? 'ausente',
+        ...(registro?.expiraEm ? { expira_em: registro.expiraEm } : {}),
+        ...(registro?.revogacao ? { revogado_em: iso(registro.revogacao.revogadoEmMs) } : {}),
         o_que_voce_perde: oQueSePerde(banco, c.campoCatalogoId!, c.rotulo),
       };
     });
@@ -639,7 +640,11 @@ function revogar<T>(banco: BancoMock, sessao: SessaoTitular, campoId: string, ag
   // Campo que não é seu, ou que não é consentido: a mesma recusa de sempre.
   if (!campoDoTitular) return naoConfirmado<T>();
 
-  if (banco.revogacaoDe(titular.id, campoId)) {
+  const registro = banco.consentimentoDe(titular.id, campoId);
+  // Sem aceite não há o que retirar — e dizer isso é diferente de dizer que já
+  // foi retirado.
+  if (!registro) return naoConfirmado<T>();
+  if (registro.estado === 'revogado') {
     return erro(409, 'Esta autorização já tinha sido retirada.',
       'Retirar de novo não muda nada; o andamento da primeira está em /propagacao.') as Res<T>;
   }
@@ -657,10 +662,16 @@ function revogar<T>(banco: BancoMock, sessao: SessaoTitular, campoId: string, ag
       'Revogação sem registro não se prova depois — e é justamente a prova que o Art. 8º, §2º exige.') as Res<T>;
   }
 
+  /**
+   * A revogação **aponta** para o aceite; não o edita. É o que mantém legível,
+   * depois, que houve consentimento enquanto houve tratamento.
+   */
   const revogacao = {
     id: novoId('rev'),
+    consentimentoId: registro.aceite.id,
     titularId: titular.id,
     campoId,
+    canal: 'portal',
     revogadoEmMs: agora,
     cascata,
   };
