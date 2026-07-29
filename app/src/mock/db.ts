@@ -1,6 +1,9 @@
 import { sha256 } from '../lib/sha256';
 import { CENARIOS } from './scenarios';
 import { estadoDe, expiraEm } from './consentimento';
+import { novoSegredoDeFeed } from './calendario';
+import { VALIDADE_DO_DESAFIO_MS, novoCodigoDeStepUp } from './stepup';
+import type { DesafioDeStepUp, FatorDeStepUp, SessaoDeStepUp } from './stepup';
 import type { Consentimento, TextoDeConsentimento } from './consentimento';
 import type { Fornecedor } from './fornecedor';
 import type {
@@ -113,6 +116,68 @@ export class BancoMock {
    */
   codigoDaVerificacao(id: string): string {
     return this.verificacoes.get(id)?.codigo ?? '';
+  }
+
+  /**
+   * Risco-036 — o segredo que assina o feed ICS, gerado por instância.
+   *
+   * Era a constante `'lastro-ics-demo'` dentro de `mock/calendario.ts`, e
+   * portanto dentro de `dist/assets/*.js`: quem abrisse o DevTools mintava o
+   * feed de qualquer papel. Agora nasce de bytes aleatórios a cada banco, e não
+   * existe como literal em lugar nenhum do repositório.
+   *
+   * O efeito colateral é a demonstração que faltava: recarregar rotaciona o
+   * segredo e **revoga todos os feeds emitidos** — o mecanismo que o comentário
+   * antigo prometia para "um backend de verdade".
+   */
+  readonly segredoDoFeed = novoSegredoDeFeed();
+
+  // ── step-up do console (Risco-011) ───────────────────────────────────────
+  /**
+   * Desafios e confirmações vivem **no servidor**, por ator.
+   *
+   * Guardar a confirmação num cabeçalho ou num token que o cliente devolve
+   * transformaria a exigência em declaração do próprio interessado — que é
+   * exatamente o defeito que o step-up existe para fechar.
+   */
+  private desafiosDeStepUp = new Map<string, DesafioDeStepUp>();
+
+  private stepUpPorAtor = new Map<string, SessaoDeStepUp>();
+
+  private proximoDesafio = 1;
+
+  abrirDesafioDeStepUp(ator: string, fator: FatorDeStepUp, agoraMs = Date.now()): DesafioDeStepUp {
+    const d: DesafioDeStepUp = {
+      id: `su_${this.proximoDesafio}`,
+      ator,
+      fator,
+      codigo: novoCodigoDeStepUp(this.proximoDesafio),
+      criadoEmMs: agoraMs,
+      expiraEmMs: agoraMs + VALIDADE_DO_DESAFIO_MS,
+      tentativas: 0,
+    };
+    this.proximoDesafio += 1;
+    this.desafiosDeStepUp.set(d.id, d);
+    return d;
+  }
+
+  desafioDeStepUp(id: string): DesafioDeStepUp | undefined {
+    return this.desafiosDeStepUp.get(id);
+  }
+
+  /** O código, para teste e demonstração — nunca para uma resposta HTTP. */
+  codigoDoDesafio(id: string): string {
+    return this.desafiosDeStepUp.get(id)?.codigo ?? '';
+  }
+
+  confirmarStepUp(ator: string, fator: FatorDeStepUp, agoraMs = Date.now()): SessaoDeStepUp {
+    const s: SessaoDeStepUp = { ator, fator, confirmadoEmMs: agoraMs };
+    this.stepUpPorAtor.set(ator, s);
+    return s;
+  }
+
+  stepUpDe(ator: string): SessaoDeStepUp | undefined {
+    return this.stepUpPorAtor.get(ator);
   }
 
   abrirSessaoTitular(s: SessaoTitular): void {

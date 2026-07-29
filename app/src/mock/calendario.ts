@@ -151,20 +151,67 @@ export function cargaDoAno(obrigacoes: Obrigacao[]): CargaDoMes[] {
 // ── feed ICS ────────────────────────────────────────────────────────────────
 
 /**
- * A assinatura do feed por papel.
+ * O token do feed (Risco-036).
  *
- * O feed é lido por um cliente de calendário que não tem sessão: a URL **é** a
- * credencial, como em qualquer ICS. Assinar por papel mantém a regra do PR 9 —
- * cada um vê a própria fila — sem exigir permissão de escrita no calendário de
- * ninguém, que é a razão de o MAPA §4 mandar começar por aqui.
+ * O feed é lido por um cliente de calendário que não tem sessão e não manda
+ * cabeçalho: a URL **é** a credencial, como em qualquer ICS. Isso é do
+ * protocolo. O que era defeito nosso, e o PR 5 corrige, são quatro coisas:
  *
- * O segredo é de demonstração e está no código de propósito: num backend de
- * verdade ele viria do KMS, e a rotação dele revogaria os feeds.
+ * 1. **o segredo estava no código** — `'lastro-ics-demo'`, literal, e portanto
+ *    dentro de `dist/assets/*.js`. Quem abrisse o DevTools mintava o feed de
+ *    qualquer papel. Agora ele nasce por instância do banco, de bytes
+ *    aleatórios, e nunca é literal em lugar nenhum;
+ * 2. **não vencia** — assinatura de papel, válida para sempre. Agora o prazo
+ *    entra no token e é conferido na hora;
+ * 3. **ia na query string** — `?papel=dpo&token=…`, que é onde credencial vaza
+ *    por `Referer` e por log de proxy que não normaliza query. Agora vai no
+ *    caminho, como Google e Outlook fazem. O caminho também é registrado em
+ *    log: o que isso compra é menos superfície, não sigilo — e vale dizer;
+ * 4. **estava truncada em 16 hex** (64 bits). Agora é o digest inteiro.
+ *
+ * O segredo por instância tem um efeito colateral que é demonstração, não
+ * acidente: reiniciar rotaciona o segredo e **revoga todos os feeds** — que é
+ * exatamente o mecanismo que o comentário antigo prometia para "um backend de
+ * verdade".
  */
-const SEGREDO_DO_FEED = 'lastro-ics-demo';
+export const VALIDADE_DO_FEED_MS = 30 * 24 * 60 * 60_000;
 
-export const assinaturaDoFeed = (papel: string, sha256: (s: string) => string): string =>
-  sha256(`${SEGREDO_DO_FEED}:${papel}`).slice(0, 16);
+/**
+ * Bytes de verdade, e sem plano B.
+ *
+ * Se `crypto` não existir, isto lança. Um `catch` que caísse para uma constante
+ * reintroduziria o defeito exatamente onde ninguém olharia de novo — e um
+ * segredo que só às vezes é segredo não é segredo.
+ */
+export function novoSegredoDeFeed(): string {
+  const bytes = new Uint8Array(32);
+  globalThis.crypto.getRandomValues(bytes);
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** `papel.expiraEmMs.assinatura` — tudo o que a verificação precisa, e nada além. */
+export const tokenDoFeed = (
+  segredo: string, papel: string, expiraEmMs: number, sha256: (s: string) => string,
+): string => `${papel}.${expiraEmMs}.${sha256(`${segredo}|${papel}|${expiraEmMs}`)}`;
+
+/**
+ * Devolve o papel quando o token é válido **nesta hora**, e `null` para tudo
+ * mais — assinatura errada, prazo vencido, formato estranho.
+ *
+ * Uma recusa só, sem dizer qual das três: distinguir "expirou" de "assinatura
+ * inválida" diria a quem tenta forjar o que ele acertou.
+ */
+export function papelDoTokenDeFeed(
+  segredo: string, token: string, agoraMs: number, sha256: (s: string) => string,
+): string | null {
+  const partes = token.split('.');
+  if (partes.length !== 3) return null;
+  const [papel, expira, assinatura] = partes;
+  const expiraEmMs = Number(expira);
+  if (!Number.isFinite(expiraEmMs) || expiraEmMs <= agoraMs) return null;
+  if (assinatura !== sha256(`${segredo}|${papel}|${expiraEmMs}`)) return null;
+  return papel;
+}
 
 /** Escapa TEXT conforme a RFC 5545 §3.3.11. */
 const escapar = (t: string): string =>

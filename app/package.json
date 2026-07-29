@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "gate:privacidade": "vite-node scripts/gate.ts"
+    "gate:privacidade": "vite-node scripts/gate.ts",
+    "varredura:segredos": "vite-node scripts/segredos.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

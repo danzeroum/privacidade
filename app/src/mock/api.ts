@@ -1,6 +1,9 @@
 import { BancoMock, FalhaDeAuditoria, LogImutavel } from './db';
 import { pode } from './permissoes';
 import { POLITICA_PADRAO, politicaDe } from './politicas';
+import { ACESSO_SEM_FINALIDADE, campoAlcancado, recusaDeFinalidade } from './finalidade';
+import { TENTATIVAS_MAXIMAS, motivoDaFaltaDeStepUp } from './stepup';
+import type { FatorDeStepUp } from './stepup';
 import { ARTEFATOS, estadosDe, motivoDaRecusa, transicaoPermitida } from './estados';
 import type { Artefato, EstadoDe } from './estados';
 import {
@@ -11,7 +14,7 @@ import { vereditoPbd } from './pbd';
 import type { DecisaoRegistrada, TabelaId, Valor } from './decisoes';
 import { contadoresDe, derivarFila, minhaFila } from './fila';
 import {
-  assinaturaDoFeed, cargaDoAno, diasAte, naAntecedencia, paraIcs,
+  VALIDADE_DO_FEED_MS, cargaDoAno, diasAte, naAntecedencia, papelDoTokenDeFeed, paraIcs, tokenDoFeed,
 } from './calendario';
 import { executarExpurgo, retencaoAteDoCampo, varrerVencimentos } from './expurgo';
 import { codigoDoAchado, diasDeAtraso } from './retencao';
@@ -91,7 +94,8 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
    * rota existe e que o pedido só falhou por permissão — o oráculo que a
    * Regra 5 fecha.
    */
-  const politica = politicaDe(metodo, partes.join('/')) ?? POLITICA_PADRAO;
+  const politicaDeclarada = politicaDe(metodo, partes.join('/'));
+  const politica = politicaDeclarada ?? POLITICA_PADRAO;
 
   const recusaDeEscopo = (): Res<T> => (politica.foraDeEscopo === '404_uniforme'
     ? erro(404, 'Não encontrado.',
@@ -106,6 +110,71 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
   if (politica.acao && !pode(papel, politica.acao)) {
     registrarRecusaNaGuarda(banco, req, politica.nota);
     return recusaDeEscopo();
+  }
+
+  /**
+   * Risco-011 — a finalidade, cobrada pela guarda e não por cada rota.
+   *
+   * Vem **depois** das duas guardas de papel de propósito. Antes delas, uma
+   * recusa por finalidade em `GET titulares/{id}` diria "a rota existe e o seu
+   * papel alcança, faltou o cabeçalho" para quem sequer podia chegar ali — e o
+   * `404_uniforme` que a Regra 5 sustenta perderia o sentido.
+   *
+   * Duas coisas conferidas por uma função só (`mock/finalidade.ts`): que a
+   * finalidade foi declarada, e que ela consta no catálogo do campo alcançado.
+   * A segunda morava dentro de `POST /pseudonyms/resolve`; regra dentro de rota
+   * é regra que a próxima rota não herda.
+   */
+  /**
+   * `politicaDeclarada` e não `politica`: caminho sem política é caminho que
+   * **não existe**, e a resposta certa para ele é o 404 do fim do `switch`.
+   * Cobrar finalidade antes disso responderia "declare a finalidade" para
+   * `GET /v1/fila/dpo`, dizendo que o endereço foi entendido — o recorte
+   * silencioso que o PR 9 fechou, de volta por outra porta.
+   *
+   * O fecho não se perde: `POLITICA_PADRAO` continua tratando rota não
+   * declarada como escrita, e um invariante do PR 5 cobra que **toda** operação
+   * servida pelo dispatcher tenha política própria — nenhuma cai no padrão.
+   */
+  if (politicaDeclarada?.finalidade === 'exigida') {
+    const recusa = recusaDeFinalidade(req.purpose, campoAlcancado(banco, body, partes));
+    if (recusa) {
+      // A promessa do `openapi.yaml:20` passa a ter contraparte executável: a
+      // ausência **grava** no trail. Registro de negativa não pode depender da
+      // finalidade que acabou de faltar, por isso a ação fica fora de ACOES_PII.
+      try {
+        banco.auditAppend({
+          ator, atorPapel: papel, acao: ACESSO_SEM_FINALIDADE,
+          recursoTipo: 'rota', recursoId: `${metodo} ${partes.join('/')}`,
+          resultado: 'negado', justificativa: recusa.motivoNoTrail,
+        });
+      } catch { /* a negativa não pode derrubar a resposta de negativa */ }
+      return erro(recusa.status, recusa.mensagem, recusa.regra) as Res<T>;
+    }
+  }
+
+  /**
+   * Risco-011 — o step-up, derivado da operação.
+   *
+   * A janela vem de `politicas.ts`, no servidor. Se viesse do pedido, quem
+   * executa a operação escolheria o rigor da própria confirmação — que é
+   * alegar, não provar. Mesma regra do nível de verificação do portal, que vem
+   * do direito e nunca do cliente.
+   */
+  if (politicaDeclarada?.stepUp) {
+    const falta = motivoDaFaltaDeStepUp(banco.stepUpDe(ator), Date.now(), politicaDeclarada.stepUp.janelaMin);
+    if (falta) {
+      try {
+        banco.auditAppend({
+          ator, atorPapel: papel, acao: 'STEP_UP_EXIGIDO',
+          recursoTipo: 'rota', recursoId: `${metodo} ${partes.join('/')}`,
+          resultado: 'negado', justificativa: falta,
+        });
+      } catch { /* idem */ }
+      return erro(403, falta,
+        'Operação sensível exige confirmação de identidade recente. A janela é derivada da operação '
+        + 'no servidor — quem executa não escolhe o próprio rigor.') as Res<T>;
+    }
   }
 
   /**
@@ -146,6 +215,62 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
   }
 
   switch (`${metodo} ${raiz}`) {
+    /**
+     * Risco-011 — o step-up, em duas etapas como no portal.
+     *
+     * Duas rotas e não uma: com uma só, "confirmar identidade" seria uma
+     * chamada que confirma a si mesma, e o fator viraria enfeite. Com desafio e
+     * código, o que fica instrumentado é a mecânica — abrir, responder no
+     * prazo, com número limitado de tentativas.
+     *
+     * O código **não sai na resposta**: vai pelo canal, como no portal. Aqui não
+     * há canal, e é por isso que `banco.codigoDoDesafio()` existe para o demo e
+     * para o teste — não para um cliente.
+     */
+    case 'POST step-up': {
+      if (!partes[1]) {
+        const fator = String(body.fator ?? 'totp') as FatorDeStepUp;
+        if (fator !== 'totp' && fator !== 'webauthn') {
+          return erro(422, 'Fator desconhecido. Os aceitos são: totp, webauthn.',
+            'O fator é simulado neste protótipo, e o vocabulário é o real de propósito: '
+            + 'o que está instrumentado é a janela e a derivação, não a criptografia do fator.') as Res<T>;
+        }
+        const d = banco.abrirDesafioDeStepUp(ator, fator);
+        return ok({ id: d.id, fator: d.fator, expiraEmMs: d.expiraEmMs }, 201) as Res<T>;
+      }
+
+      if (partes[2] !== 'confirmar') break;
+
+      /**
+       * A recusa é uma só, como a do portal: código errado, desafio vencido,
+       * tentativas esgotadas, id inventado e desafio de outro ator respondem
+       * igual. Diferenciar transformaria a rota num oráculo de desafios vivos.
+       */
+      const naoConfirmado = () => erro(401, 'Não foi possível confirmar a identidade.',
+        'A recusa é idêntica para código errado, desafio vencido e desafio de outra pessoa: '
+        + 'mensagens diferentes seriam um oráculo sobre desafios em aberto.') as Res<T>;
+
+      const desafio = banco.desafioDeStepUp(String(partes[1]));
+      const agora = Date.now();
+      if (!desafio || desafio.ator !== ator || desafio.expiraEmMs <= agora
+        || desafio.tentativas >= TENTATIVAS_MAXIMAS) return naoConfirmado();
+
+      desafio.tentativas += 1;
+      if (desafio.codigo !== String(body.codigo ?? '')) return naoConfirmado();
+
+      const sessao = banco.confirmarStepUp(ator, desafio.fator, agora);
+      try {
+        banco.auditAppend({
+          ator, atorPapel: papel, acao: 'STEP_UP_CONFIRMADO',
+          recursoTipo: 'sessao', recursoId: desafio.id, campos: [desafio.fator],
+        });
+      } catch (e) {
+        const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a confirmação.';
+        return erro(503, msg, 'Confirmação que não fica registrada não sustenta operação nenhuma.') as Res<T>;
+      }
+      return ok({ confirmadoEmMs: sessao.confirmadoEmMs, fator: sessao.fator }) as Res<T>;
+    }
+
     // ── REGRA 3 e 4 — revelação de PII ────────────────────────────────────
     case 'POST pseudonyms': {
       if (partes[1] !== 'resolve') break;
@@ -153,11 +278,9 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         titularId: string; campo: string; justificativa: string; protocolo?: string;
       };
 
-      if (!req.purpose) {
-        registrarNegativa(banco, ator, papel, campo, 'sem X-Purpose');
-        return erro(403, 'Finalidade não declarada no cabeçalho X-Purpose.',
-          'Art. 37: acesso a dado pessoal exige finalidade registrada.') as Res<T>;
-      }
+      // A finalidade — declarada e compatível — já foi conferida pela guarda do
+      // dispatcher, por uma função só (`mock/finalidade.ts`). Ela morava aqui, e
+      // era por isso que as outras onze rotas que tocam titular não a herdavam.
       const titular = banco.cenario.titulares.find((t) => t.id === titularId);
       if (!titular) return erro(404, 'Não encontrado.') as Res<T>;
 
@@ -184,22 +307,6 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         registrarNegativa(banco, ator, papel, campo, 'campo fora do catálogo');
         return erro(422, `O campo ${meta.rotulo} não está no catálogo de dados.`,
           'C-17: campo sem entrada no ROPA não tem finalidade, base legal nem prazo declarados — e por isso não é revelável.') as Res<T>;
-      }
-
-      /**
-       * C-03 — a finalidade declarada é confrontada com as finalidades
-       * catalogadas do campo. Lista vazia significa não revelável, jamais
-       * "qualquer uma": campo que nasce sem política não ganha política por
-       * omissão.
-       */
-      if (!catalogado.finalidadesCompativeis.includes(req.purpose)) {
-        registrarNegativa(banco, ator, papel, campo, `finalidade ${req.purpose} incompatível`);
-        const registradas = catalogado.finalidadesCompativeis.length > 0
-          ? `As registradas para ele são: ${catalogado.finalidadesCompativeis.join(', ')}.`
-          : 'Ele não tem nenhuma finalidade de acesso registrada.';
-        return erro(422,
-          `A finalidade "${req.purpose}" não consta no catálogo para ${catalogado.nome}. ${registradas}`,
-          'Art. 6º, I: a finalidade do acesso precisa ser uma das declaradas no inventário para aquele campo.') as Res<T>;
       }
 
       /**
@@ -777,14 +884,40 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
 
     case 'GET calendario': {
       if (partes[1] === 'assinatura') {
-        // A URL do feed **do próprio papel**, e de mais nenhum: a assinatura é a
-        // credencial, e mintar a de outro exigiria o segredo.
+        // A URL do feed **do próprio papel**, e de mais nenhum: o token é a
+        // credencial, e mintar a de outro exigiria o segredo da instância.
+        const expira = Date.now() + VALIDADE_DO_FEED_MS;
+        const token = tokenDoFeed(banco.segredoDoFeed, papel, expira, sha256);
         return ok({
           papel,
-          token: assinaturaDoFeed(papel, sha256),
-          caminho: `/v1/calendario.ics?papel=${papel}&token=${assinaturaDoFeed(papel, sha256)}`,
+          token,
+          expiraEmMs: expira,
+          // No caminho, não na query: é onde credencial menos vaza por `Referer`
+          // e por log de proxy. Menos superfície, não sigilo.
+          caminho: `/v1/calendario/${token}.ics`,
         }) as Res<T>;
       }
+
+      /**
+       * O feed, somente leitura, com o token no caminho.
+       *
+       * Fica dentro de `GET calendario` porque o caminho passou a ser
+       * `/v1/calendario/{token}.ics` — antes era a raiz `calendario.ics`, com o
+       * papel e o token na query string.
+       */
+      if (partes[1]?.endsWith('.ics')) {
+        const alvo = papelDoTokenDeFeed(
+          banco.segredoDoFeed, partes[1].replace(/\.ics$/, ''), Date.now(), sha256,
+        );
+        if (!alvo || !PAPEIS_VALIDOS.includes(alvo)) {
+          return erro(403, 'Token de feed inválido ou vencido.',
+            'A URL do ICS é a credencial: cada papel assina a própria, ela vence, e o segredo não '
+            + 'sai da plataforma — nem no bundle.') as Res<T>;
+        }
+        const minhas = banco.cenario.obrigacoes.filter((o) => o.responsavel === alvo);
+        return ok(paraIcs(minhas, alvo, 'https://lastro.exemplo/')) as Res<T>;
+      }
+
       if (partes[1]) break;
       const agora = Date.now();
       return ok({
@@ -793,24 +926,6 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         naAntecedencia: banco.cenario.obrigacoes
           .filter((o) => naAntecedencia(o, agora)).map((o) => o.codigo),
       }) as Res<T>;
-    }
-
-    /**
-     * O feed, somente leitura e assinado por papel.
-     *
-     * Quem consome é um cliente de calendário sem sessão, então a URL é a
-     * credencial — como em qualquer ICS. Sem a assinatura certa, 403: assim o
-     * feed não vira a janela para a fila alheia que o PR 9 fechou.
-     */
-    case 'GET calendario.ics': {
-      const alvo = String(query.papel ?? '');
-      const token = String(query.token ?? '');
-      if (!PAPEIS_VALIDOS.includes(alvo) || token !== assinaturaDoFeed(alvo, sha256)) {
-        return erro(403, 'Assinatura de feed inválida.',
-          'A URL do ICS é a credencial: cada papel assina a própria, e o segredo não sai da plataforma.') as Res<T>;
-      }
-      const minhas = banco.cenario.obrigacoes.filter((o) => o.responsavel === alvo);
-      return ok(paraIcs(minhas, alvo, 'https://lastro.exemplo/')) as Res<T>;
     }
 
     case 'POST calendario': {

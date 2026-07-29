@@ -7,6 +7,18 @@ import { pode } from '../mock/permissoes';
 import { BASES_LEGAIS } from '../mock/types';
 import type { BaseLegal, DesfechoSolicitacao, Finalidade, ResultadoRevisao, Solicitacao } from '../mock/types';
 
+/**
+ * Risco-011 — a finalidade do balcão é derivada do trabalho, não escolhida.
+ *
+ * A T4 faz uma coisa só: atender o pedido de um titular, sob protocolo. Um
+ * seletor de finalidade aqui não daria escolha nenhuma — daria um clique a mais
+ * antes de cada ato, e clique reflexo é como uma declaração vira formalidade.
+ * Onde há mesmo escolha (a busca por documento, que serve atendimento e
+ * cobrança), o seletor continua existindo logo acima.
+ */
+const FINALIDADE_DO_BALCAO: Finalidade = 'atendimento';
+
+
 /** Linha do editor de retidos. `retencaoAte` é string porque vem de um `<input type="date">`. */
 interface RetidoEmEdicao { item: string; baseLegal: BaseLegal; artigo: string; retencaoAte: string }
 
@@ -120,7 +132,10 @@ export default function T4() {
   };
 
   const enviarMensagem = () => {
-    const res = chamar({ metodo: 'POST', caminho: `/v1/requests/${foco.id}/mensagens`, body: { corpo: rascunho } });
+    const res = chamar({
+      metodo: 'POST', caminho: `/v1/requests/${foco.id}/mensagens`,
+      purpose: FINALIDADE_DO_BALCAO, body: { corpo: rascunho },
+    });
     if (res.status === 200) setRascunho('');
   };
 
@@ -526,6 +541,7 @@ function PainelConclusao({ solicitacao }: { solicitacao: Solicitacao }) {
   const concluir = () => {
     const res = chamar({
       metodo: 'POST', caminho: `/v1/requests/${solicitacao.id}/concluir`,
+      purpose: FINALIDADE_DO_BALCAO,
       body: {
         desfecho,
         evidencia,
@@ -696,7 +712,7 @@ function PainelRevisao({ titularId }: { titularId: string }) {
   const revisar = () => {
     const res = chamar({
       metodo: 'POST', caminho: `/v1/decisoes/${decisao.id}/revisar`,
-      body: { resultado, fundamento },
+      purpose: FINALIDADE_DO_BALCAO, body: { resultado, fundamento },
     });
     if (res.status === 200) setFundamento('');
   };

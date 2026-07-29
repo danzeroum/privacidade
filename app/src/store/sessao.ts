@@ -43,6 +43,15 @@ interface Estado {
   /** T1-02 — a simulação de violação é estado da sessão, não da tela. */
   simulandoViolacao: boolean;
   /**
+   * Risco-011 — quando o ator desta sessão confirmou a identidade.
+   *
+   * Fica aqui só para a tela **mostrar** o estado. Quem decide se a confirmação
+   * ainda vale é o servidor, que lê a janela da política da operação: se a
+   * decisão morasse aqui, o cliente escolheria o próprio rigor — que é alegar,
+   * não provar.
+   */
+  identidadeConfirmadaEmMs: number | null;
+  /**
    * C-10 — recusas ancoradas no controle que falhou, indexadas por âncora.
    *
    * O canal do canto passou a ser só de confirmação. Recusa longe da ação
@@ -71,6 +80,8 @@ interface Estado {
   setProtocolo: (protocolo: string | null) => void;
   setRisco: (codigo: string | null) => void;
   setSimulacao: (ativa: boolean) => void;
+  /** Risco-011 — abre o desafio de step-up e o confirma. Devolve se passou. */
+  confirmarIdentidade: () => boolean;
   setApresentacao: (ativo: boolean) => void;
   setFalhaDeTransporte: (ativa: boolean) => void;
   /**
@@ -122,11 +133,13 @@ export const useSessao = create<Estado>((set, get) => ({
   protocoloSelecionado: null,
   riscoSelecionado: null,
   simulandoViolacao: false,
+  identidadeConfirmadaEmMs: null,
   recusas: {},
   modoApresentacao: true,
   falhaDeTransporte: false,
 
-  setPapel: (papel) => set({ papel }),
+  // Trocar de papel troca o ator, e a confirmação é do ator — não da sessão.
+  setPapel: (papel) => set({ papel, identidadeConfirmadaEmMs: null }),
 
   // O protocolo é de outro cenário: mantê-lo faria a revelação registrar um
   // atendimento que não existe mais. O banco, esse, volta como estava.
@@ -135,6 +148,8 @@ export const useSessao = create<Estado>((set, get) => ({
       cenarioId, banco: bancoDe(cenarioId), versao: s.versao + 1,
       avisos: [], recusas: {}, protocoloSelecionado: null,
       riscoSelecionado: null, simulandoViolacao: false,
+      // Cenário novo é banco novo: a confirmação de identidade não atravessa.
+      identidadeConfirmadaEmMs: null,
     })),
 
   setProtocolo: (protocoloSelecionado) => set({ protocoloSelecionado }),
@@ -142,6 +157,38 @@ export const useSessao = create<Estado>((set, get) => ({
   setRisco: (riscoSelecionado) => set({ riscoSelecionado }),
 
   setSimulacao: (simulandoViolacao) => set({ simulandoViolacao }),
+
+  /**
+   * Risco-011 — confirma a identidade do ator desta sessão.
+   *
+   * Duas chamadas, porque são dois atos: abrir o desafio e respondê-lo. O código
+   * **não volta na resposta** — vai pelo canal, como no portal. Aqui não há
+   * canal, e por isso a tela o lê do banco, do mesmo jeito que a demonstração do
+   * portal lê o código da verificação. Numa plataforma de verdade este trecho
+   * não existiria: o número nasceria no autenticador da pessoa.
+   */
+  confirmarIdentidade: () => {
+    const { banco, papel } = get();
+    const ator = NOME_POR_PAPEL[papel];
+    const abrir = request<{ id: string }>(banco, {
+      metodo: 'POST', caminho: '/v1/step-up', papel, ator, body: { fator: 'totp' },
+    });
+    if (abrir.status !== 201) {
+      get().avisar('negado', (abrir.body as unknown as { erro?: string })?.erro ?? 'Não foi possível abrir o desafio.');
+      return false;
+    }
+    const res = request<{ confirmadoEmMs: number }>(banco, {
+      metodo: 'POST', caminho: `/v1/step-up/${abrir.body.id}/confirmar`, papel, ator,
+      body: { codigo: banco.codigoDoDesafio(abrir.body.id) },
+    });
+    if (res.status !== 200) {
+      get().avisar('negado', 'Não foi possível confirmar a identidade.');
+      return false;
+    }
+    set((s) => ({ identidadeConfirmadaEmMs: res.body.confirmadoEmMs, versao: s.versao + 1 }));
+    get().avisar('ok', 'Identidade confirmada. A janela é derivada de cada operação, no servidor.');
+    return true;
+  },
 
   setApresentacao: (modoApresentacao) => set({ modoApresentacao }),
 

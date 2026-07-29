@@ -1,7 +1,18 @@
 import { useState } from 'react';
+import type { Finalidade } from '../mock/types';
 import { Cabecalho, Cartao, Didatico, Kpi, NaoImplementado, Nota, Permitido, Pill, Tabela } from '../ui/primitivos';
 import { useSessao } from '../store/sessao';
 import { curto } from '../lib/sha256';
+
+/**
+ * Risco-011 — a finalidade da T6 é a razão de a tela existir.
+ *
+ * Trilha, integridade, exportação e expurgo são atos de auditoria e de ciclo de
+ * vida. Derivada, e não escolhida: quem abre a trilha para auditar não vai
+ * declarar "cobrança" — e se pudesse, a declaração deixaria de dizer algo.
+ */
+const FINALIDADE_DA_TRILHA: Finalidade = 'auditoria';
+
 
 interface CicloDeVida {
   campo: string;
@@ -44,7 +55,7 @@ export default function T6() {
 
   const executarExpurgoDoDia = () => {
     const res = chamar<{ registros_total: number; achados: string[] }>({
-      metodo: 'POST', caminho: '/v1/purge/executar', body: {},
+      metodo: 'POST', caminho: '/v1/purge/executar', purpose: FINALIDADE_DA_TRILHA, body: {},
     });
     if (res.status === 200) {
       avisar('ok', `${res.body.registros_total.toLocaleString('pt-BR')} registro(s) eliminados`
@@ -90,7 +101,7 @@ export default function T6() {
   // montá-lo. O navegador só entrega o arquivo.
   const exportar = () => {
     const res = chamar<{ csv: string; linhas: number; hashArquivo: string }>({
-      metodo: 'POST', caminho: '/v1/audit/exportar', body: { filtro },
+      metodo: 'POST', caminho: '/v1/audit/exportar', purpose: FINALIDADE_DA_TRILHA, body: { filtro },
     });
     if (res.status !== 200) return;
     setExportado(`${res.body.linhas} linhas · sha256 ${curto(res.body.hashArquivo)}`);

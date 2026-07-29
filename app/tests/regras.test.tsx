@@ -33,6 +33,9 @@ import {
   CATEGORIAS, GATILHOS, TABELAS, TABELAS_IDS, aplicar, condicoesDe, nivelDoRisco,
   reproduzir, tomDoRisco, ultimaDecisao, vigenteDe,
 } from '../src/mock/decisoes';
+import { TENTATIVAS_MAXIMAS, motivoDaFaltaDeStepUp, stepUpVigente } from '../src/mock/stepup';
+import { recusaDeFinalidade } from '../src/mock/finalidade';
+import { SEGREDOS_HISTORICOS, varrerBundle, varrerFonte } from '../src/lib/segredos';
 import { requestPortal } from '../src/mock/portal';
 import { DIREITOS, REGIME, nivelExigido } from '../src/mock/direitos';
 import {
@@ -46,7 +49,8 @@ import type { FatoGerador } from '../src/mock/retencao';
 import { REGRAS, derivarFila, eDe, minhaFila } from '../src/mock/fila';
 import type { ContadoresDaFila, ItemDaFila } from '../src/mock/fila';
 import {
-  CAPACIDADE_DIAS_MES, RESERVA_DEMANDA, assinaturaDoFeed, cargaDoAno, mesDe,
+  CAPACIDADE_DIAS_MES, RESERVA_DEMANDA, VALIDADE_DO_FEED_MS, cargaDoAno, mesDe,
+  papelDoTokenDeFeed, tokenDoFeed,
 } from '../src/mock/calendario';
 import type { Obrigacao } from '../src/mock/calendario';
 import { PRINCIPIOS_PBD, avaliarPbd, vereditoPbd } from '../src/mock/pbd';
@@ -74,9 +78,43 @@ import type { DecisaoRegistrada, Direito, EstadoIncidente, Finalidade, Papel } f
 
 let banco: BancoMock;
 beforeEach(() => {
-  banco = new BancoMock('banco');
+  banco = novoBanco('banco');
+  /**
+   * PR 5 — o operador da suíte chega com a identidade confirmada.
+   *
+   * As quatro operações sensíveis passaram a exigir step-up recente, e é assim
+   * que o dia de trabalho começa numa plataforma de verdade: confirma-se a
+   * identidade e depois se opera. Sem esta linha, cada teste de revelação,
+   * conclusão, exportação e expurgo passaria a provar duas coisas ao mesmo
+   * tempo — e a segunda esconderia a primeira quando quebrasse.
+   *
+   * Os testes que provam o step-up não usam este atalho: eles mexem no relógio
+   * e no ator, e estão no bloco próprio do PR 23.
+   */
+  banco.confirmarStepUp('teste', 'totp');
   cleanup();
 });
+
+/**
+ * PR 5 — o banco de teste já vem com a identidade do operador confirmada.
+ *
+ * As quatro operações sensíveis passaram a exigir step-up recente, e é assim que
+ * um dia de trabalho começa numa plataforma de verdade: confirma-se a identidade
+ * e depois se opera. Sem isto, cada teste de revelação, conclusão, exportação e
+ * expurgo passaria a provar duas coisas ao mesmo tempo — e a segunda esconderia
+ * a primeira quando quebrasse.
+ *
+ * Todos os atores das telas entram, porque `useSessao` manda o nome da pessoa e
+ * não o papel. Os testes que provam o step-up **não** usam este atalho: eles
+ * constroem `new BancoMock` direto, mexem no relógio e no ator, e vivem no bloco
+ * do PR 23.
+ */
+const ATORES_DA_CASA = ['teste', 'Maria Souza', 'Marcela Dias', 'Pedro Lima', 'Rita Nunes', 'Auditoria Externa'];
+const novoBanco = (cenario: string): BancoMock => {
+  const b = new BancoMock(cenario);
+  for (const ator of ATORES_DA_CASA) b.confirmarStepUp(ator, 'totp');
+  return b;
+};
 
 const chamar = <T = unknown,>(papel: Papel, req: Partial<Parameters<typeof request>[1]> & { metodo: 'GET' | 'POST' | 'PATCH' | 'DELETE'; caminho: string }) =>
   request<T>(banco, { papel, ator: 'teste', ...req });
@@ -128,6 +166,8 @@ describe('Regra 3 — revelar exige finalidade, justificativa e registro ANTES d
   it('recusa sem X-Purpose', () => {
     const res = chamar('dpo', { metodo: 'POST', caminho: '/v1/pseudonyms/resolve', body: corpo });
     expect(res.status).toBe(403);
+    // PR 5 — a recusa passou da rota para a guarda, e agora deixa rastro.
+    expect(banco.auditoria.at(-1)!.acao).toBe('ACESSO_SEM_FINALIDADE');
   });
 
   it('recusa justificativa com menos de 20 caracteres', () => {
@@ -181,14 +221,14 @@ describe('Regra 4 — dado sensível não é revelável em tela alguma', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe('Regra 5 — 404, nunca 403, para recurso fora do escopo', () => {
   it('devolve 404 para o papel Segurança, que não opera o portal', () => {
-    const res = chamar('seguranca', { metodo: 'GET', caminho: '/v1/titulares/t1' });
+    const res = chamar('seguranca', { metodo: 'GET', caminho: '/v1/titulares/t1', purpose: 'atendimento' });
     expect(res.status).toBe(404);
     expect(res.status).not.toBe(403);
   });
 
   it('devolve 404 também para titular inexistente — respostas indistinguíveis', () => {
-    const inexistente = chamar('dpo', { metodo: 'GET', caminho: '/v1/titulares/nao-existe' });
-    const semEscopo = chamar('seguranca', { metodo: 'GET', caminho: '/v1/titulares/t1' });
+    const inexistente = chamar('dpo', { metodo: 'GET', caminho: '/v1/titulares/nao-existe', purpose: 'atendimento' });
+    const semEscopo = chamar('seguranca', { metodo: 'GET', caminho: '/v1/titulares/t1', purpose: 'atendimento' });
     expect(inexistente.status).toBe(semEscopo.status);
     expect(inexistente.body).toEqual(semEscopo.body);
   });
@@ -211,8 +251,8 @@ describe('Regra 6 — totalItems omitido para papéis não confiáveis', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe('Regra 7 — audit trail append-only e cadeia verificável', () => {
   it('recusa UPDATE e DELETE com 409', () => {
-    expect(chamar('dpo', { metodo: 'PATCH', caminho: '/v1/audit/1', body: { acao: 'X' } }).status).toBe(409);
-    expect(chamar('dpo', { metodo: 'DELETE', caminho: '/v1/audit/1' }).status).toBe(409);
+    expect(chamar('dpo', { metodo: 'PATCH', caminho: '/v1/audit/1', purpose: 'auditoria', body: { acao: 'X' } }).status).toBe(409);
+    expect(chamar('dpo', { metodo: 'DELETE', caminho: '/v1/audit/1', purpose: 'auditoria' }).status).toBe(409);
   });
 
   it('detecta adulteração feita direto no banco e aponta a primeira linha divergente', () => {
@@ -282,7 +322,7 @@ describe('Privacy by default na interface', () => {
 
   it('o DPO revela com justificativa e o valor volta a mascarar em 60 segundos', () => {
     vi.useFakeTimers();
-    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [], protocoloSelecionado: '2026-0731' });
+    useSessao.setState({ papel: 'dpo', banco: novoBanco('banco'), versao: 0, avisos: [], protocoloSelecionado: '2026-0731' });
     render(<CampoPII titularId="t1" chave="cpf" rotulo="CPF" mascara="•••.•••.•••-••" sensivel={false} />);
 
     fireEvent.click(screen.getByRole('button', { name: /revelar/i }));
@@ -319,7 +359,7 @@ describe('Privacy by default na interface', () => {
 
   it('o canal titular↔DPO recusa CPF em texto claro', () => {
     const res = chamar('dpo', {
-      metodo: 'POST', caminho: '/v1/requests/s1/mensagens',
+      metodo: 'POST', caminho: '/v1/requests/s1/mensagens', purpose: 'atendimento',
       body: { corpo: 'Confirmando o CPF 274.065.813-77 do titular.' },
     });
     expect(res.status).toBe(422);
@@ -336,7 +376,7 @@ describe('Privacy by default na interface', () => {
 describe('Cenários', () => {
   it('os três cenários carregam com dado sensível, transferência internacional e PR bloqueado', () => {
     for (const id of ['banco', 'varejo', 'midia']) {
-      const b = new BancoMock(id);
+      const b = novoBanco(id);
       expect(b.cenario.campos.some((c) => c.sensivel), `${id}: dado sensível`).toBe(true);
       expect(b.cenario.campos.some((c) => c.compartilhamentos.some((s) => s.internacional)), `${id}: transferência`).toBe(true);
       expect(b.cenario.gates.some((g) => g.bloqueouMerge), `${id}: PR bloqueado`).toBe(true);
@@ -382,6 +422,9 @@ describe('C-01 · Regra 5b — busca por hash não é oráculo de existência', 
       metodo: 'POST', caminho: '/v1/titulares/buscar', body: { cpfHash: HASH_EXISTENTE },
     });
     expect(res.status).toBe(403);
+    // PR 5 — a promessa do openapi.yaml:20 passa a ter contraparte: a ausência
+    // não é só recusada, é registrada.
+    expect(banco.auditoria.at(-1)!.acao).toBe('ACESSO_SEM_FINALIDADE');
   });
 
   it('Regra 3b — a busca é registrada antes da resposta', () => {
@@ -444,21 +487,21 @@ describe('C-01 · Regra 5b — busca por hash não é oráculo de existência', 
   });
 
   it('T2 não monta o campo de CPF para papel sem a ação', () => {
-    useSessao.setState({ papel: 'produto', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    useSessao.setState({ papel: 'produto', banco: novoBanco('banco'), versao: 0, avisos: [] });
     render(<T2 />);
     expect(screen.queryByLabelText(/^CPF$/i)).toBeNull();
     expect(screen.queryByRole('button', { name: /calcular hash/i })).toBeNull();
   });
 
   it('T2 monta o campo de CPF para o DPO — contraprova', () => {
-    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    useSessao.setState({ papel: 'dpo', banco: novoBanco('banco'), versao: 0, avisos: [] });
     render(<T2 />);
     expect(screen.getByLabelText(/^CPF$/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/finalidade da busca/i)).toBeInTheDocument();
   });
 
   it('T4 não monta o campo de CPF para papel sem a ação', () => {
-    useSessao.setState({ papel: 'produto', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    useSessao.setState({ papel: 'produto', banco: novoBanco('banco'), versao: 0, avisos: [] });
     render(<T4 />);
     expect(screen.queryByLabelText(/^CPF$/i)).toBeNull();
   });
@@ -466,8 +509,8 @@ describe('C-01 · Regra 5b — busca por hash não é oráculo de existência', 
 
 describe('C-02 · Regra 7b — a guarda de escrita cobre também as rotas de auditoria', () => {
   it('auditor externo não alcança PATCH nem DELETE do trail', () => {
-    expect(chamar('auditor', { metodo: 'PATCH', caminho: '/v1/audit/1', body: {} }).status).toBe(403);
-    expect(chamar('auditor', { metodo: 'DELETE', caminho: '/v1/audit/1' }).status).toBe(403);
+    expect(chamar('auditor', { metodo: 'PATCH', caminho: '/v1/audit/1', purpose: 'auditoria', body: {} }).status).toBe(403);
+    expect(chamar('auditor', { metodo: 'DELETE', caminho: '/v1/audit/1', purpose: 'auditoria' }).status).toBe(403);
   });
 
   it('auditor externo não alcança a rota de forjar', () => {
@@ -499,14 +542,14 @@ describe('C-02 · Regra 7b — a guarda de escrita cobre também as rotas de aud
 
 describe('T6-02 — os controles de ataque não são renderizados para papel de leitura', () => {
   it('auditor externo não recebe nenhum dos dois botões', () => {
-    useSessao.setState({ papel: 'auditor', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    useSessao.setState({ papel: 'auditor', banco: novoBanco('banco'), versao: 0, avisos: [] });
     render(<T6 />);
     expect(screen.queryByRole('button', { name: /tentar editar/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /forjar/i })).toBeNull();
   });
 
   it('engenharia recebe os dois, agrupados no bloco de demonstração', () => {
-    useSessao.setState({ papel: 'engenharia', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    useSessao.setState({ papel: 'engenharia', banco: novoBanco('banco'), versao: 0, avisos: [] });
     render(<T6 />);
     expect(screen.getByRole('button', { name: /tentar editar/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /forjar/i })).toBeInTheDocument();
@@ -514,7 +557,7 @@ describe('T6-02 — os controles de ataque não são renderizados para papel de 
   });
 
   it('fora do modo demonstração o bloco some mesmo para quem escreve', () => {
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     b.modoDemo = false;
     useSessao.setState({ papel: 'engenharia', banco: b, versao: 0, avisos: [] });
     render(<T6 />);
@@ -571,7 +614,7 @@ describe('Política de resposta por rota (PR 1 → tabela declarativa)', () => {
 describe('C-17 — campo revelável precisa estar no ROPA', () => {
   it('todo campo exibível de todo cenário aponta para uma entrada do catálogo', () => {
     for (const id of ['banco', 'varejo', 'midia']) {
-      const b = new BancoMock(id);
+      const b = novoBanco(id);
       for (const t of b.cenario.titulares) {
         for (const c of t.campos) {
           const alvo = b.cenario.campos.find((x) => x.id === c.campoCatalogoId);
@@ -633,7 +676,7 @@ describe('C-03 — a finalidade é confrontada com o catálogo', () => {
   });
 
   it('o formulário oferece só as finalidades do catálogo — não uma lista fixa da tela', () => {
-    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [], protocoloSelecionado: '2026-0731' });
+    useSessao.setState({ papel: 'dpo', banco: novoBanco('banco'), versao: 0, avisos: [], protocoloSelecionado: '2026-0731' });
     render(<CampoPII titularId="t1" chave="renda" rotulo="Renda declarada" mascara="R$ ••••,••" sensivel={false} />);
     fireEvent.click(screen.getByRole('button', { name: /revelar/i }));
     const opcoes = [...screen.getByLabelText(/finalidade/i).querySelectorAll('option')]
@@ -669,7 +712,7 @@ describe('C-04 — justificativa é redigida antes de entrar no log imutável', 
 describe('C-05 — o re-mascaramento é do relógio, não do contador da aba', () => {
   it('o valor some ao passar dos 60 segundos, mesmo sem os ticks intermediários', () => {
     vi.useFakeTimers();
-    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [], protocoloSelecionado: '2026-0731' });
+    useSessao.setState({ papel: 'dpo', banco: novoBanco('banco'), versao: 0, avisos: [], protocoloSelecionado: '2026-0731' });
     render(<CampoPII titularId="t1" chave="cpf" rotulo="CPF" mascara="•••.•••.•••-••" sensivel={false} />);
     fireEvent.click(screen.getByRole('button', { name: /revelar/i }));
     fireEvent.change(screen.getByLabelText(/finalidade/i), { target: { value: 'atendimento' } });
@@ -718,7 +761,7 @@ describe('T4-02 — concluir o atendimento', () => {
   it('a conclusão para o cronômetro e registra antes de responder', () => {
     const antes = banco.auditoria.length;
     const res = chamar('dpo', {
-      metodo: 'POST', caminho: '/v1/requests/s1/concluir',
+      metodo: 'POST', caminho: '/v1/requests/s1/concluir', purpose: 'atendimento',
       body: { desfecho: 'atendido', evidencia: 'Relação de destinatários enviada ao titular.' },
     });
     expect(res.status).toBe(200);
@@ -732,7 +775,7 @@ describe('T4-02 — concluir o atendimento', () => {
 
   it('recusar sem fundamento é 422; com fundamento, muda o status para recusada', () => {
     const semRazao = chamar('dpo', {
-      metodo: 'POST', caminho: '/v1/requests/s1/concluir',
+      metodo: 'POST', caminho: '/v1/requests/s1/concluir', purpose: 'atendimento',
       body: { desfecho: 'recusado_com_fundamento', evidencia: 'não dá' },
     });
     expect(semRazao.status).toBe(422);
@@ -741,13 +784,13 @@ describe('T4-02 — concluir o atendimento', () => {
     // PR 16 — fundamento continua obrigatório, e agora a recusa também nomeia o
     // que ficou: item, lei e data. Sem a lista, 422 mesmo com a razão escrita.
     const semRetidos = chamar('dpo', {
-      metodo: 'POST', caminho: '/v1/requests/s1/concluir',
+      metodo: 'POST', caminho: '/v1/requests/s1/concluir', purpose: 'atendimento',
       body: { desfecho: 'recusado_com_fundamento', evidencia: 'Guarda fiscal obrigatória de 5 anos impede a eliminação agora.' },
     });
     expect(semRetidos.status).toBe(422);
 
     const comRazao = chamar('dpo', {
-      metodo: 'POST', caminho: '/v1/requests/s1/concluir',
+      metodo: 'POST', caminho: '/v1/requests/s1/concluir', purpose: 'atendimento',
       body: {
         desfecho: 'recusado_com_fundamento',
         evidencia: 'Guarda fiscal obrigatória de 5 anos impede a eliminação agora.',
@@ -765,7 +808,7 @@ describe('T4-02 — concluir o atendimento', () => {
   it('se o audit trail falha, a solicitação continua aberta', () => {
     banco.simularFalhaDeLog = true;
     const res = chamar('dpo', {
-      metodo: 'POST', caminho: '/v1/requests/s1/concluir',
+      metodo: 'POST', caminho: '/v1/requests/s1/concluir', purpose: 'atendimento',
       body: { desfecho: 'atendido', evidencia: 'Pacote entregue.' },
     });
     expect(res.status).toBe(503);
@@ -776,7 +819,7 @@ describe('T4-02 — concluir o atendimento', () => {
     expect(pode('engenharia', 'escrever')).toBe(true);
     expect(pode('engenharia', 'concluir_solicitacao')).toBe(false);
     const res = chamar('engenharia', {
-      metodo: 'POST', caminho: '/v1/requests/s1/concluir',
+      metodo: 'POST', caminho: '/v1/requests/s1/concluir', purpose: 'atendimento',
       body: { desfecho: 'atendido', evidencia: 'Pacote entregue.' },
     });
     expect(res.status).toBe(403);
@@ -786,7 +829,7 @@ describe('T4-02 — concluir o atendimento', () => {
 describe('T4-03 — revisão de decisão automatizada deixa prova (Art. 20)', () => {
   it('exige fundamento, registra e devolve resposta ao titular no mesmo ato', () => {
     const curto = chamar('dpo', {
-      metodo: 'POST', caminho: '/v1/decisoes/dec_44ab10/revisar',
+      metodo: 'POST', caminho: '/v1/decisoes/dec_44ab10/revisar', purpose: 'atendimento',
       body: { resultado: 'revertida', fundamento: 'ok' },
     });
     expect(curto.status).toBe(422);
@@ -794,7 +837,7 @@ describe('T4-03 — revisão de decisão automatizada deixa prova (Art. 20)', ()
     const s3 = banco.cenario.solicitacoes.find((x) => x.id === 's3')!;
     const mensagensAntes = s3.mensagens.length;
     const res = chamar('dpo', {
-      metodo: 'POST', caminho: '/v1/decisoes/dec_44ab10/revisar',
+      metodo: 'POST', caminho: '/v1/decisoes/dec_44ab10/revisar', purpose: 'atendimento',
       body: { resultado: 'revertida', fundamento: 'Comprovante de renda apresentado não estava na base na hora da decisão.' },
     });
     expect(res.status).toBe(200);
@@ -809,7 +852,7 @@ describe('T4-03 — revisão de decisão automatizada deixa prova (Art. 20)', ()
 
   it('manter o resultado também exige fundamento — homologar não é revisar', () => {
     const res = chamar('dpo', {
-      metodo: 'POST', caminho: '/v1/decisoes/dec_44ab10/revisar',
+      metodo: 'POST', caminho: '/v1/decisoes/dec_44ab10/revisar', purpose: 'atendimento',
       body: { resultado: 'mantida', fundamento: '' },
     });
     expect(res.status).toBe(422);
@@ -819,7 +862,7 @@ describe('T4-03 — revisão de decisão automatizada deixa prova (Art. 20)', ()
     for (const p of ['engenharia', 'produto', 'seguranca', 'auditor'] as Papel[]) {
       expect(pode(p, 'revisar_decisao'), p).toBe(false);
       const res = chamar(p, {
-        metodo: 'POST', caminho: '/v1/decisoes/dec_44ab10/revisar',
+        metodo: 'POST', caminho: '/v1/decisoes/dec_44ab10/revisar', purpose: 'atendimento',
         body: { resultado: 'mantida', fundamento: 'Decisão conferida e mantida após análise dos fatores.' },
       });
       expect(res.status, p).toBe(403);
@@ -830,7 +873,7 @@ describe('T4-03 — revisão de decisão automatizada deixa prova (Art. 20)', ()
 describe('T4-05 — "atendidas no SLA" mede SLA', () => {
   it('cada solicitação encerrada tem instante de conclusão comparável ao prazo', () => {
     for (const id of ['banco', 'varejo', 'midia']) {
-      const b = new BancoMock(id);
+      const b = novoBanco(id);
       const encerradas = b.cenario.solicitacoes.filter((s) => s.status === 'concluida' || s.status === 'recusada_com_fundamento');
       expect(encerradas.length, id).toBeGreaterThan(0);
       for (const s of encerradas) {
@@ -844,7 +887,7 @@ describe('T4-05 — "atendidas no SLA" mede SLA', () => {
   it('a conclusão registrada pela rota fica dentro ou fora do prazo conforme o relógio', () => {
     const s2 = banco.cenario.solicitacoes.find((x) => x.id === 's2')!;
     chamar('dpo', {
-      metodo: 'POST', caminho: '/v1/requests/s2/concluir',
+      metodo: 'POST', caminho: '/v1/requests/s2/concluir', purpose: 'atendimento',
       body: { desfecho: 'atendido', evidencia: 'Eliminação executada e verificada.' },
     });
     // s2 vence em 19 h: concluída agora, está no prazo.
@@ -895,7 +938,7 @@ describe('T6-01 — verificar integridade deixa rastro de quem verificou', () =>
   it('todos os cinco papéis verificam — o auditor externo inclusive', () => {
     for (const p of PAPEIS_TODOS) {
       expect(pode(p, 'verificar_integridade'), p).toBe(true);
-      const b = new BancoMock('banco');
+      const b = novoBanco('banco');
       expect(request(b, { papel: p, ator: 'teste', metodo: 'POST', caminho: '/v1/audit/verificar' }).status, p).toBe(200);
     }
   });
@@ -923,7 +966,7 @@ describe('T6-01 — verificar integridade deixa rastro de quem verificou', () =>
 describe('C-06 — exportar o audit trail é um acesso, e fica registrado', () => {
   it('papel sem exportar_auditoria recebe 403 e nenhum CSV', () => {
     expect(pode('engenharia', 'exportar_auditoria')).toBe(false);
-    const res = chamar('engenharia', { metodo: 'POST', caminho: '/v1/audit/exportar' });
+    const res = chamar('engenharia', { metodo: 'POST', caminho: '/v1/audit/exportar', purpose: 'auditoria' });
     expect(res.status).toBe(403);
     expect(res.body).not.toHaveProperty('csv');
   });
@@ -931,7 +974,7 @@ describe('C-06 — exportar o audit trail é um acesso, e fica registrado', () =
   it('o registro entra antes de o arquivo existir, e a si mesmo não conta', () => {
     const antes = banco.auditoria.length;
     const res = chamar<{ csv: string; linhas: number }>('dpo', {
-      metodo: 'POST', caminho: '/v1/audit/exportar',
+      metodo: 'POST', caminho: '/v1/audit/exportar', purpose: 'auditoria',
     });
     expect(res.status).toBe(200);
     expect(banco.auditoria.length).toBe(antes + 1);
@@ -941,27 +984,27 @@ describe('C-06 — exportar o audit trail é um acesso, e fica registrado', () =
   });
 
   it('a exportação filtrada e a completa são atos distintos no trail', () => {
-    chamar('dpo', { metodo: 'POST', caminho: '/v1/audit/exportar', body: { filtro: 'EXPURGO' } });
+    chamar('dpo', { metodo: 'POST', caminho: '/v1/audit/exportar', purpose: 'auditoria', body: { filtro: 'EXPURGO' } });
     const filtrada = banco.auditoria.at(-1)!;
     expect(filtrada.acao).toBe('AUDIT_EXPORTADO');
     expect(filtrada.recursoId).toBe('filtro:EXPURGO');
     expect(filtrada.campos.some((c) => c.startsWith('linhas='))).toBe(true);
     expect(filtrada.campos).toContain('papel=dpo');
 
-    chamar('dpo', { metodo: 'POST', caminho: '/v1/audit/exportar' });
+    chamar('dpo', { metodo: 'POST', caminho: '/v1/audit/exportar', purpose: 'auditoria' });
     expect(banco.auditoria.at(-1)!.recursoId).toBe('trail_completo');
   });
 
   it('se o audit trail falha, nada é exportado', () => {
     banco.simularFalhaDeLog = true;
-    const res = chamar('dpo', { metodo: 'POST', caminho: '/v1/audit/exportar' });
+    const res = chamar('dpo', { metodo: 'POST', caminho: '/v1/audit/exportar', purpose: 'auditoria' });
     expect(res.status).toBe(503);
     expect(res.body).not.toHaveProperty('csv');
   });
 
   it('o CSV carrega o hash do próprio conteúdo no rodapé', () => {
     const res = chamar<{ csv: string; hashArquivo: string; linhas: number }>('dpo', {
-      metodo: 'POST', caminho: '/v1/audit/exportar',
+      metodo: 'POST', caminho: '/v1/audit/exportar', purpose: 'auditoria',
     });
     expect(res.status).toBe(200);
     expect(res.body.csv).toContain(`# sha256=${res.body.hashArquivo}`);
@@ -973,14 +1016,14 @@ describe('C-06 — exportar o audit trail é um acesso, e fica registrado', () =
 
   it('anti-enumeração vale no export: papel não confiável não recebe o total', () => {
     const doAuditor = chamar<{ totalNoTrail?: number; linhas: number }>('auditor', {
-      metodo: 'POST', caminho: '/v1/audit/exportar', body: { filtro: 'EXPURGO' },
+      metodo: 'POST', caminho: '/v1/audit/exportar', purpose: 'auditoria', body: { filtro: 'EXPURGO' },
     });
     expect(doAuditor.status).toBe(200);
     expect(pode('auditor', 'ver_total_itens')).toBe(false);
     expect(doAuditor.body.totalNoTrail).toBeUndefined();
     expect(doAuditor.body.linhas).toBeGreaterThan(0);
 
-    const doDpo = chamar<{ totalNoTrail?: number }>('dpo', { metodo: 'POST', caminho: '/v1/audit/exportar' });
+    const doDpo = chamar<{ totalNoTrail?: number }>('dpo', { metodo: 'POST', caminho: '/v1/audit/exportar', purpose: 'auditoria' });
     expect(doDpo.body.totalNoTrail).toBe(banco.auditoria.length);
   });
 });
@@ -988,7 +1031,7 @@ describe('C-06 — exportar o audit trail é um acesso, e fica registrado', () =
 describe('T5-01 — reclassificar sem arrasto', () => {
   beforeEach(() => {
     limparBancosDaSessao();
-    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    useSessao.setState({ papel: 'dpo', banco: novoBanco('banco'), versao: 0, avisos: [] });
   });
 
   it('a matriz é grade com 25 células e um botão por risco', () => {
@@ -1092,7 +1135,7 @@ describe('T5-02 — cada cenário guarda o próprio histórico', () => {
 describe('T5-03 — só é botão a célula que a ação alcança', () => {
   it('as letras do RACI não são mais botões', () => {
     limparBancosDaSessao();
-    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    useSessao.setState({ papel: 'dpo', banco: novoBanco('banco'), versao: 0, avisos: [] });
     render(<MemoryRouter><T5 /></MemoryRouter>);
     for (const letra of ['A', 'R', 'C', 'I']) {
       expect(screen.queryByRole('button', { name: new RegExp(`^${letra}$`) })).toBeNull();
@@ -1101,7 +1144,7 @@ describe('T5-03 — só é botão a célula que a ação alcança', () => {
 
   it('a demonstração da recusa é um controle só, e some para papel de leitura', () => {
     limparBancosDaSessao();
-    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    useSessao.setState({ papel: 'dpo', banco: novoBanco('banco'), versao: 0, avisos: [] });
     const { unmount } = render(<MemoryRouter><T5 /></MemoryRouter>);
     const doDpo = screen.getAllByRole('button', { name: /Tentar um segundo accountable/i });
     expect(doDpo.length).toBe(useSessao.getState().banco.cenario.raci.length);
@@ -1283,7 +1326,7 @@ describe('C-08 · consentimento como prova, e revogação que propaga', () => {
     },
   });
 
-  beforeEach(() => { varejo = new BancoMock('varejo'); });
+  beforeEach(() => { varejo = novoBanco('varejo'); });
 
   /*
    * Bloco reescrito contra a entidade. As garantias que ele cobrava continuam
@@ -1301,7 +1344,7 @@ describe('C-08 · consentimento como prova, e revogação que propaga', () => {
   });
 
   it('revogado, o mesmo campo deixa de ser revelável — 422 citando o artigo', () => {
-    chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: MOTIVO } });
+    chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', purpose: 'atendimento', body: { motivo: MOTIVO } });
     const res = revelarTelefone('t1');
     expect(res.status).toBe(422);
     expect(`${(res.body as { erro: string }).erro} ${res.regra ?? ''}`).toContain('Art. 8');
@@ -1310,7 +1353,7 @@ describe('C-08 · consentimento como prova, e revogação que propaga', () => {
 
   it('o aceite revogado segue legível como fato histórico', () => {
     const antes = varejo.consentimentoDe('t1', 'v-tel')!.aceite;
-    chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: MOTIVO } });
+    chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', purpose: 'atendimento', body: { motivo: MOTIVO } });
     const depois = varejo.consentimentoDe('t1', 'v-tel')!;
     // Revogar cria fato novo; o aceite continua byte a byte o que era. É o que
     // prova que houve consentimento enquanto houve tratamento (Art. 8º, §2º).
@@ -1323,7 +1366,7 @@ describe('C-08 · consentimento como prova, e revogação que propaga', () => {
   it('a revogação fica registrada e aciona o gate do repositório do campo', () => {
     const antes = varejo.auditoria.length;
     const res = chamarV<{ gatesBloqueados: number; aceitesRevogados: number }>('dpo', {
-      metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: MOTIVO },
+      metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', purpose: 'atendimento', body: { motivo: MOTIVO },
     });
     expect(res.status).toBe(200);
     // Um ato do balcão, um registro — e a contagem de aceites atingidos no trail.
@@ -1336,8 +1379,8 @@ describe('C-08 · consentimento como prova, e revogação que propaga', () => {
 
   it('revogar duas vezes é 409: a segunda não é revogação, é ruído no trail', () => {
     const corpo = { motivo: MOTIVO };
-    expect(chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: corpo }).status).toBe(200);
-    expect(chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: corpo }).status).toBe(409);
+    expect(chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', purpose: 'atendimento', body: corpo }).status).toBe(200);
+    expect(chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', purpose: 'atendimento', body: corpo }).status).toBe(409);
   });
 
   it('validar inventário recusa baseLegal consentimento sem texto publicado vigente', () => {
@@ -1365,7 +1408,7 @@ describe('C-08 · consentimento como prova, e revogação que propaga', () => {
    * revogação de um cessando o tratamento dos outros trinta mil.
    */
   it('revogado por um titular, o inventário segue aceitando o campo', () => {
-    chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: MOTIVO } });
+    chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', purpose: 'atendimento', body: { motivo: MOTIVO } });
     const res = chamarV('engenharia', {
       metodo: 'POST', caminho: '/v1/catalog/validar',
       body: { campoId: 'v-tel', nome: 'telefone', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, baseLegal: 'consentimento', finalidadesCompativeis: ['atendimento'] },
@@ -1392,7 +1435,7 @@ describe('C-08 · consentimento como prova, e revogação que propaga', () => {
     expect(screen.getByRole('button', { name: /revelar/i })).toBeInTheDocument();
     unmount();
 
-    chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: MOTIVO } });
+    chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', purpose: 'atendimento', body: { motivo: MOTIVO } });
     useSessao.setState({ versao: 1 });
     render(<CampoPII titularId="t1" chave="telefone" rotulo="Telefone" mascara="(••) •••••-••••" sensivel={false} />);
     // Ausência em vez de desabilitado — e a razão fica visível no lugar.
@@ -1404,7 +1447,7 @@ describe('C-08 · consentimento como prova, e revogação que propaga', () => {
     for (const p of ['engenharia', 'produto', 'seguranca', 'auditor'] as Papel[]) {
       expect(pode(p, 'revogar_consentimento'), p).toBe(false);
       expect(chamarV(p, {
-        metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: 'x'.repeat(30) },
+        metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', purpose: 'atendimento', body: { motivo: 'x'.repeat(30) },
       }).status, p).toBe(403);
     }
   });
@@ -1415,7 +1458,7 @@ const montar = (tela: React.ReactNode) => render(<MemoryRouter>{tela}</MemoryRou
 describe('C-10 · unidade — a recusa mora no controle, não no canto', () => {
   beforeEach(() => {
     limparBancosDaSessao();
-    useSessao.setState({ papel: 'engenharia', banco: new BancoMock('banco'), versao: 0, avisos: [], recusas: {} });
+    useSessao.setState({ papel: 'engenharia', banco: novoBanco('banco'), versao: 0, avisos: [], recusas: {} });
   });
 
   it('chamada com âncora não polui o canal de confirmação', () => {
@@ -1467,7 +1510,7 @@ describe('C-16 · unidade — didático some, operacional permanece', () => {
   it('a recusa e o estado continuam visíveis com o didático desligado', () => {
     limparBancosDaSessao();
     useSessao.setState({
-      papel: 'engenharia', banco: new BancoMock('banco'), versao: 0,
+      papel: 'engenharia', banco: novoBanco('banco'), versao: 0,
       modoApresentacao: false, recusas: { 'ripd-aprovar': { texto: 'Somente o DPO aprova RIPD.', id: 1 } },
     });
     montar(<T3 />);
@@ -1481,7 +1524,7 @@ describe('T3 · integração — o parecer diz a verdade sobre si mesmo', () => 
   beforeEach(() => {
     limparBancosDaSessao();
     useSessao.setState({
-      papel: 'engenharia', banco: new BancoMock('banco'), versao: 0,
+      papel: 'engenharia', banco: novoBanco('banco'), versao: 0,
       avisos: [], recusas: {}, modoApresentacao: true,
     });
   });
@@ -1567,7 +1610,7 @@ describe('T8 · integração — o editor edita e o veredito guarda o raciocíni
   beforeEach(() => {
     limparBancosDaSessao();
     useSessao.setState({
-      papel: 'dpo', banco: new BancoMock('banco'), versao: 0,
+      papel: 'dpo', banco: novoBanco('banco'), versao: 0,
       avisos: [], recusas: {}, modoApresentacao: true,
     });
   });
@@ -1618,7 +1661,7 @@ describe('T2 · integração — filtros e linhagem', () => {
   beforeEach(() => {
     limparBancosDaSessao();
     useSessao.setState({
-      papel: 'engenharia', banco: new BancoMock('banco'), versao: 0,
+      papel: 'engenharia', banco: novoBanco('banco'), versao: 0,
       avisos: [], recusas: {}, modoApresentacao: true,
     });
   });
@@ -1659,7 +1702,7 @@ describe('T1 · sistema — dois mapas, dois eixos, um caminho de reclassificaç
   beforeEach(() => {
     limparBancosDaSessao();
     useSessao.setState({
-      papel: 'dpo', banco: new BancoMock('banco'), versao: 0,
+      papel: 'dpo', banco: novoBanco('banco'), versao: 0,
       avisos: [], recusas: {}, simulandoViolacao: false, riscoSelecionado: null, modoApresentacao: true,
     });
   });
@@ -1711,7 +1754,7 @@ describe('T7 · integração — a tela deixa operar, e recusa o que o pipeline 
   beforeEach(() => {
     limparBancosDaSessao();
     useSessao.setState({
-      papel: 'seguranca', banco: new BancoMock('banco'), versao: 0,
+      papel: 'seguranca', banco: novoBanco('banco'), versao: 0,
       avisos: [], recusas: {}, modoApresentacao: true,
     });
   });
@@ -1750,7 +1793,7 @@ describe('C-15 · sistema — nenhum rótulo promete o que o clique não faz', (
   it('os controles inertes de T4 e T6 estão marcados e inoperantes', () => {
     limparBancosDaSessao();
     useSessao.setState({
-      papel: 'dpo', banco: new BancoMock('banco'), versao: 0,
+      papel: 'dpo', banco: novoBanco('banco'), versao: 0,
       avisos: [], recusas: {}, protocoloSelecionado: '2026-0731', modoApresentacao: true,
     });
     const { unmount } = montar(<T4 />);
@@ -1800,7 +1843,7 @@ describe('C-09 · sistema — o menu reflete o papel', () => {
   beforeEach(() => {
     limparBancosDaSessao();
     useSessao.setState({
-      papel: 'engenharia', banco: new BancoMock('banco'), versao: 0,
+      papel: 'engenharia', banco: novoBanco('banco'), versao: 0,
       avisos: [], recusas: {}, modoApresentacao: true, falhaDeTransporte: false,
     });
   });
@@ -1908,7 +1951,7 @@ describe('C-12 · unidade — um só padrão de popover, acionável por teclado'
   it('integração — a guarda do catálogo explica por popover, não só por title', () => {
     limparBancosDaSessao();
     useSessao.setState({
-      papel: 'engenharia', banco: new BancoMock('banco'), versao: 0,
+      papel: 'engenharia', banco: novoBanco('banco'), versao: 0,
       avisos: [], recusas: {}, falhaDeTransporte: false,
     });
     render(<MemoryRouter><T2 /></MemoryRouter>);
@@ -1924,7 +1967,7 @@ describe('C-13 · integração — os quatro estados', () => {
   beforeEach(() => {
     limparBancosDaSessao();
     useSessao.setState({
-      papel: 'engenharia', banco: new BancoMock('banco'), versao: 0,
+      papel: 'engenharia', banco: novoBanco('banco'), versao: 0,
       avisos: [], recusas: {}, modoApresentacao: true, falhaDeTransporte: false,
     });
   });
@@ -1980,7 +2023,7 @@ describe('C-13 · integração — os quatro estados', () => {
 
   it('sem permissão é ausência — nunca carregando nem erro', () => {
     limparBancosDaSessao();
-    useSessao.setState({ papel: 'auditor', banco: new BancoMock('banco'), versao: 0, falhaDeTransporte: false });
+    useSessao.setState({ papel: 'auditor', banco: novoBanco('banco'), versao: 0, falhaDeTransporte: false });
     render(<MemoryRouter><T2 /></MemoryRouter>);
     // O auditor não escreve: o validador não é montado, e nenhum esqueleto ou
     // bloco de falha aparece no lugar dele.
@@ -1994,7 +2037,7 @@ describe('T1-03 · unidade — a bolha é botão inteiro', () => {
   beforeEach(() => {
     limparBancosDaSessao();
     useSessao.setState({
-      papel: 'dpo', banco: new BancoMock('banco'), versao: 0,
+      papel: 'dpo', banco: novoBanco('banco'), versao: 0,
       avisos: [], recusas: {}, simulandoViolacao: false, falhaDeTransporte: false,
     });
   });
@@ -2413,7 +2456,7 @@ describe('PR 8 · D1, D2 e D3 como dados versionados', () => {
 
   it('score 15 na D2 é a mesma faixa da célula correspondente da grade da T5', () => {
     limparBancosDaSessao();
-    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    useSessao.setState({ papel: 'dpo', banco: novoBanco('banco'), versao: 0, avisos: [] });
     render(<MemoryRouter><T5 /></MemoryRouter>);
 
     // P 3 × I 5 = 15. A célula e a tabela não podem discordar.
@@ -2434,7 +2477,7 @@ describe('PR 8 · D1, D2 e D3 como dados versionados', () => {
       expect(tomDoRisco(2, 4)).toBe('warn');
       regra.min = 8;
       limparBancosDaSessao();
-      useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+      useSessao.setState({ papel: 'dpo', banco: novoBanco('banco'), versao: 0, avisos: [] });
       render(<MemoryRouter><T5 /></MemoryRouter>);
       expect(tomDoRisco(2, 4)).toBe('crit');
       expect(screen.getByLabelText(/Probabilidade 2, impacto 4, score 8/).className).toContain('crit');
@@ -2465,7 +2508,7 @@ describe('PR 8 · D1, D2 e D3 como dados versionados', () => {
 
   it('toda decisão semeada em todo cenário reproduz', () => {
     for (const id of ['banco', 'varejo', 'midia']) {
-      const b = new BancoMock(id);
+      const b = novoBanco(id);
       const registros = [
         ...b.cenario.ripds.flatMap((r) => r.decisoes ?? []),
         ...b.cenario.riscos.flatMap((r) => r.decisoes ?? []),
@@ -2489,7 +2532,7 @@ describe('PR 8 · D1, D2 e D3 como dados versionados', () => {
 
   it('todo gatilho de todo cenário está no catálogo, e nenhum rótulo é repetido no dado', () => {
     for (const id of ['banco', 'varejo', 'midia']) {
-      const b = new BancoMock(id);
+      const b = novoBanco(id);
       for (const r of b.cenario.ripds) {
         for (const t of r.triggers) {
           expect(GATILHOS[t.codigo], `${id}: gatilho ${t.codigo} fora do catálogo`).toBeDefined();
@@ -2609,7 +2652,7 @@ describe('PR 8 · a rota que aplica a tabela', () => {
 describe('PR 8 · a tela explica a decisão em uma frase', () => {
   beforeEach(() => {
     limparBancosDaSessao();
-    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    useSessao.setState({ papel: 'dpo', banco: novoBanco('banco'), versao: 0, avisos: [] });
   });
 
   it('a T3 mostra o rito citando as entradas, a versão e o que a vigente diria', () => {
@@ -2691,7 +2734,7 @@ describe('PR 9 · a fila derivada — a tabela e a derivação', () => {
     // `{codigo}` que sobra é dado que a tabela pediu e o artefato não tem.
     // Sem esta varredura, o defeito chega à tela como texto com chave crua.
     for (const id of ['banco', 'varejo', 'midia']) {
-      for (const item of derivarFila(new BancoMock(id).cenario, HOJE)) {
+      for (const item of derivarFila(novoBanco(id).cenario, HOJE)) {
         for (const campo of [item.travado, item.proximaAcao, item.proximo, item.prazo.texto]) {
           expect(campo, `${id} · ${item.id}: "${campo}"`).not.toMatch(/\{\w+\}/);
         }
@@ -2701,7 +2744,7 @@ describe('PR 9 · a fila derivada — a tabela e a derivação', () => {
   });
 
   it('todo item de artefato aponta para um estado que a faixa de passos contém', () => {
-    for (const item of derivarFila(new BancoMock('banco').cenario, HOJE)) {
+    for (const item of derivarFila(novoBanco('banco').cenario, HOJE)) {
       if (item.artefato === 'obrigacao') {
         // Obrigação não tem máquina de estados, e a faixa fica vazia em vez de
         // ganhar uma barra falsa só para o cartão ficar simétrico.
@@ -2719,7 +2762,7 @@ describe('PR 9 · a fila derivada — a tabela e a derivação', () => {
     // solicitação; o pseudônimo, o id e o hash do titular não podem aparecer em
     // campo nenhum do item — nem no travado, nem no rito.
     for (const id of ['banco', 'varejo', 'midia']) {
-      const b = new BancoMock(id);
+      const b = novoBanco(id);
       const proibidos = b.cenario.titulares.flatMap((t) => [t.id, t.cpfHash]);
       proibidos.push(...b.cenario.solicitacoes.map((s) => s.titularPseudonimo));
       // Só os campos que chegam a gente. `tela` e `estados` são vocabulário do
@@ -2735,7 +2778,7 @@ describe('PR 9 · a fila derivada — a tabela e a derivação', () => {
   });
 
   it('trabalho em curso não vira item: risco em tratamento fica de fora', () => {
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     const emTratamento = b.cenario.riscos.filter((r) => r.status === 'em_tratamento');
     expect(emTratamento.length).toBeGreaterThan(0);
     const itens = derivarFila(b.cenario, HOJE);
@@ -2748,7 +2791,7 @@ describe('PR 9 · a fila derivada — a tabela e a derivação', () => {
   });
 
   it('a solicitação vencida vem antes da chave que vence em 8 dias', () => {
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     const s = b.cenario.solicitacoes.find((x) => x.status === 'em_analise')!;
     s.prazoLimiteMs = HOJE - 2 * 86_400_000;
     const chave = b.cenario.chaves.find((k) => k.status === 'ativa')!;
@@ -2766,7 +2809,7 @@ describe('PR 9 · a fila derivada — a tabela e a derivação', () => {
   });
 
   it('dentro da faixa, o que não tem relógio vem antes do que tem', () => {
-    const fila = derivarFila(new BancoMock('banco').cenario, HOJE);
+    const fila = derivarFila(novoBanco('banco').cenario, HOJE);
     const trinta = fila.filter((i) => i.prazo.urgencia === '30d');
     const primeiroComRelogio = trinta.findIndex((i) => i.prazo.restanteMs !== null);
     expect(primeiroComRelogio).toBeGreaterThan(0);
@@ -2778,7 +2821,7 @@ describe('PR 9 · a fila derivada — a tabela e a derivação', () => {
   });
 
   it('prazo legal correndo vem antes de vencimento de artefato mais próximo', () => {
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     // Uma solicitação com três dias de folga e uma chave que vence amanhã: a
     // faixa é da natureza do prazo, não da distância dele.
     const chave = b.cenario.chaves.find((k) => k.status === 'ativa')!;
@@ -2791,7 +2834,7 @@ describe('PR 9 · a fila derivada — a tabela e a derivação', () => {
   });
 
   it('o rito cita a regra que produziu o item, com a versão quando existe', () => {
-    const fila = derivarFila(new BancoMock('banco').cenario, HOJE);
+    const fila = derivarFila(novoBanco('banco').cenario, HOJE);
     const doRipd = fila.find((i) => i.artefato === 'ripd')!;
     expect(doRipd.rito.fonte).toBe('d1@1');
     expect(doRipd.rito.texto).toContain('complexidade');
@@ -2855,15 +2898,15 @@ describe('PR 9 · a rota da fila', () => {
   it('cenário desconhecido falha em vez de cair no padrão', () => {
     // O fallback silencioso fazia um teste do PR 8 pedir 'streaming' e receber
     // o banco: passava por três cenários exercitando um só.
-    expect(() => new BancoMock('streaming')).toThrow(/Cenário desconhecido/);
-    expect(new BancoMock('midia').cenario.id).toBe('midia');
+    expect(() => novoBanco('streaming')).toThrow(/Cenário desconhecido/);
+    expect(novoBanco('midia').cenario.id).toBe('midia');
   });
 });
 
 describe('PR 9 · T0 na tela', () => {
   const montarT0 = (papel: Papel, cenario = 'banco') => {
     limparBancosDaSessao();
-    useSessao.setState({ papel, banco: new BancoMock(cenario), versao: 0, avisos: [] });
+    useSessao.setState({ papel, banco: novoBanco(cenario), versao: 0, avisos: [] });
     return render(<MemoryRouter><T0 /></MemoryRouter>);
   };
 
@@ -2952,7 +2995,7 @@ describe('PR 9 · T0 na tela', () => {
 
   it('T0 é a entrada do trilho e abre na raiz', () => {
     limparBancosDaSessao();
-    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    useSessao.setState({ papel: 'dpo', banco: novoBanco('banco'), versao: 0, avisos: [] });
     render(<MemoryRouter initialEntries={['/']}><Casca /></MemoryRouter>);
     expect(screen.getByRole('heading', { level: 1, name: 'Minha fila' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /T0 Minha fila/ })).toBeInTheDocument();
@@ -2973,7 +3016,7 @@ describe('PR 10 · o calendário como dado, e a promoção à fila', () => {
   });
 
   it('obrigação fora da antecedência não está na fila; dentro, está', () => {
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     // 60 dias com antecedência de 30: existe no ano, não ocupa ninguém.
     b.cenario.obrigacoes = [obrigacao()];
     expect(derivarFila(b.cenario, HOJE).some((i) => i.artefato === 'obrigacao')).toBe(false);
@@ -2991,7 +3034,7 @@ describe('PR 10 · o calendário como dado, e a promoção à fila', () => {
   });
 
   it('a fronteira da antecedência é exata, e vencida não sai da fila', () => {
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     const daFila = (o: Obrigacao) => derivarFila({ ...b.cenario, obrigacoes: [o] }, HOJE)
       .filter((i) => i.artefato === 'obrigacao');
 
@@ -3006,7 +3049,7 @@ describe('PR 10 · o calendário como dado, e a promoção à fila', () => {
   });
 
   it('a obrigação só entra na fila de quem responde por ela', () => {
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     b.cenario.obrigacoes = [obrigacao({ vence: emDias(10), responsavel: 'seguranca' })];
     const todos = derivarFila(b.cenario, HOJE);
     const alcanca = (['engenharia', 'dpo', 'produto', 'seguranca', 'auditor'] as Papel[])
@@ -3016,7 +3059,7 @@ describe('PR 10 · o calendário como dado, e a promoção à fila', () => {
   });
 
   it('a carga do mês é somada das obrigações, não digitada', () => {
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     const carga = cargaDoAno(b.cenario.obrigacoes);
     expect(carga).toHaveLength(12);
     for (const c of carga) {
@@ -3045,7 +3088,7 @@ describe('PR 10 · o calendário como dado, e a promoção à fila', () => {
 
   it('toda obrigação semeada declara consequência, antecedência e ação', () => {
     for (const id of ['banco', 'varejo', 'midia']) {
-      const b = new BancoMock(id);
+      const b = novoBanco(id);
       expect(b.cenario.obrigacoes.length, id).toBe(22);
       const codigos = new Set<string>();
       for (const o of b.cenario.obrigacoes) {
@@ -3063,10 +3106,13 @@ describe('PR 10 · o calendário como dado, e a promoção à fila', () => {
 });
 
 describe('PR 10 · o feed ICS', () => {
-  const feed = (papel: Papel, token?: string) => {
-    const t = token ?? assinaturaDoFeed(papel, sha256);
-    return chamar<string>(papel, { metodo: 'GET', caminho: `/v1/calendario.ics?papel=${papel}&token=${t}` });
-  };
+  /** O token do papel, emitido pela própria rota — como um cliente de calendário faria. */
+  const tokenDe = (papel: Papel) => chamar<{ token: string }>(papel, {
+    metodo: 'GET', caminho: '/v1/calendario/assinatura',
+  }).body.token;
+  const feed = (papel: Papel, token?: string) => chamar<string>(papel, {
+    metodo: 'GET', caminho: `/v1/calendario/${token ?? tokenDe(papel)}.ics`,
+  });
 
   it('responde só as obrigações do papel pedido', () => {
     for (const papel of ['engenharia', 'dpo', 'seguranca'] as Papel[]) {
@@ -3084,14 +3130,29 @@ describe('PR 10 · o feed ICS', () => {
     }
   });
 
-  it('a assinatura é a credencial: a de outro papel não abre o feed', () => {
-    expect(feed('dpo', assinaturaDoFeed('engenharia', sha256)).status).toBe(403);
+  it('o token é a credencial: o de outro papel abre o feed do outro, e o forjado não abre nada', () => {
+    // O token carrega o papel: apresentar o de engenharia devolve o feed de
+    // engenharia, e não o de quem pediu. É o que separa credencial de filtro.
+    const deEngenharia = tokenDe('engenharia');
+    const res = feed('dpo', deEngenharia);
+    expect(res.status).toBe(200);
+    expect(res.body).toContain('de engenharia');
+
     expect(feed('dpo', 'token-inventado').status).toBe(403);
-    expect(chamar('dpo', { metodo: 'GET', caminho: '/v1/calendario.ics?papel=ninguem&token=x' }).status).toBe(403);
-    // E a rota devolve a assinatura do papel da sessão, nunca a de outro.
-    const minha = chamar<{ papel: string; caminho: string }>('dpo', { metodo: 'GET', caminho: '/v1/calendario/assinatura' });
+    expect(feed('dpo', 'ninguem.99999999999999.abc').status).toBe(403);
+
+    // Assinatura de papel inexistente, com o segredo certo, continua fechada.
+    const forjado = tokenDoFeed(banco.segredoDoFeed, 'ninguem', Date.now() + 60_000, sha256);
+    expect(feed('dpo', forjado).status).toBe(403);
+
+    // E a rota devolve o caminho do papel da sessão, nunca o de outro.
+    const minha = chamar<{ papel: string; caminho: string; token: string }>('dpo', {
+      metodo: 'GET', caminho: '/v1/calendario/assinatura',
+    });
     expect(minha.body.papel).toBe('dpo');
-    expect(minha.body.caminho).toContain(assinaturaDoFeed('dpo', sha256));
+    expect(minha.body.caminho).toBe(`/v1/calendario/${minha.body.token}.ics`);
+    // Sem credencial na query string: ela vaza por Referer e por log de proxy.
+    expect(minha.body.caminho).not.toContain('?');
   });
 
   it('nenhum dado pessoal no ICS de nenhum dos cinco papéis', () => {
@@ -3212,7 +3273,7 @@ describe('PR 10 · prorrogar é ato registrado', () => {
   });
 
   it('prorrogar tira o item da fila quando a data sai da antecedência', () => {
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     // A obrigação precisa ser do papel que prorroga: titularidade é declarada.
     const o = b.cenario.obrigacoes.find((x) => !x.cumpridaEm && x.responsavel === 'dpo')!;
     const agora = Date.now();
@@ -3235,7 +3296,7 @@ describe('PR 10 · prorrogar é ato registrado', () => {
 
 describe('PR 10 · as duas decisões do PR 9', () => {
   it('a condição declarada separa engenharia do DPO no mesmo estado', () => {
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     const ripd = b.cenario.ripds[0];
     expect(ripd.status).toBe('em_revisao');
     expect(ripd.recomendacoes.some((r) => r.prioridade === 'P0' && !r.concluida)).toBe(true);
@@ -3275,7 +3336,7 @@ describe('PR 10 · as duas decisões do PR 9', () => {
   });
 
   it('o achado é de engenharia e do DPO — e de mais ninguém', () => {
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     const achado = b.cenario.achados[0];
     achado.status = 'causa_raiz';
     const todos = derivarFila(b.cenario, Date.now());
@@ -3296,7 +3357,7 @@ describe('PR 10 · as duas decisões do PR 9', () => {
 describe('PR 10 · T10 na tela', () => {
   const montarT10 = (papel: Papel) => {
     limparBancosDaSessao();
-    useSessao.setState({ papel, banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    useSessao.setState({ papel, banco: novoBanco('banco'), versao: 0, avisos: [] });
     return render(<MemoryRouter><T10 /></MemoryRouter>);
   };
 
@@ -3317,7 +3378,7 @@ describe('PR 10 · T10 na tela', () => {
 
   it('o cartão da obrigação não monta faixa de estados vazia', () => {
     limparBancosDaSessao();
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     const o = b.cenario.obrigacoes.find((x) => !x.cumpridaEm && x.responsavel === 'dpo')!;
     o.vence = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
     o.antecedenciaDias = 30;
@@ -3366,7 +3427,7 @@ describe('PR 10 · T10 na tela', () => {
 
   it('o feed mostrado é o do papel da sessão, e o corpo não traz dado pessoal', () => {
     montarT10('dpo');
-    expect(screen.getByText(new RegExp(assinaturaDoFeed('dpo', sha256)))).toBeInTheDocument();
+    expect(screen.getByText(/\/v1\/calendario\/dpo\.\d+\.[0-9a-f]{64}\.ics/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Ver o feed de dpo/ }));
     const texto = screen.getByText(/BEGIN:VCALENDAR/).textContent ?? '';
     expect(texto).toContain('BEGIN:VEVENT');
@@ -3377,7 +3438,7 @@ describe('PR 10 · T10 na tela', () => {
 
   it('T10 entra no trilho ao lado da fila, no grupo Trabalho', () => {
     limparBancosDaSessao();
-    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    useSessao.setState({ papel: 'dpo', banco: novoBanco('banco'), versao: 0, avisos: [] });
     render(<MemoryRouter initialEntries={['/t10']}><Casca /></MemoryRouter>);
     expect(screen.getByRole('heading', { level: 1, name: 'Calendário do ano' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /T10 Calendário do ano/ })).toBeInTheDocument();
@@ -3877,7 +3938,7 @@ describe('PR 12 · conformidade — o documento corresponde ao código?', () => 
   it('os arquivos de processo não carregam dado de cenário', () => {
     const arquivos = [...ARTEFATOS.map((a) => `${a}.bpmn`),
       ...TABELAS_IDS.flatMap((id) => TABELAS[id].versoes.map((v) => `${id}.v${v.versao}.dmn`))];
-    const banco = new BancoMock('banco');
+    const banco = novoBanco('banco');
     const proibidos = [
       ...banco.cenario.titulares.map((t) => t.cpfHash),
       ...banco.cenario.solicitacoes.flatMap((s) => [s.protocolo, s.titularPseudonimo]),
@@ -3954,7 +4015,7 @@ describe('PR 12 · a página "Como funciona" é referência, não operação', (
 
   it('não renderiza dado de titular, e não tem como: ela não lê o banco', () => {
     limparBancosDaSessao();
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     useSessao.setState({ papel: 'dpo', banco: b, versao: 0, avisos: [] });
     const { container } = render(<MemoryRouter><ComoFunciona /></MemoryRouter>);
     const texto = container.textContent ?? '';
@@ -3992,7 +4053,7 @@ describe('PR 12 · a página "Como funciona" é referência, não operação', (
   it('fica fora do trilho de telas e é alcançável por link direto', () => {
     expect(TELAS.map((t) => t.rota)).not.toContain('/como-funciona');
     limparBancosDaSessao();
-    useSessao.setState({ papel: 'auditor', banco: new BancoMock('banco'), versao: 0, avisos: [] });
+    useSessao.setState({ papel: 'auditor', banco: novoBanco('banco'), versao: 0, avisos: [] });
     render(<MemoryRouter initialEntries={['/como-funciona']}><Casca /></MemoryRouter>);
     expect(screen.getByRole('heading', { level: 1, name: 'Como funciona' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Como funciona/ })).toBeInTheDocument();
@@ -4009,7 +4070,7 @@ describe('PR 13 · declarado × derivado, travado como invariante', () => {
     // alcança. Se algum dia entrar um campo de dono escrito à mão no caminho do
     // artefato, este teste acusa, porque os dois conjuntos deixam de coincidir.
     for (const id of cenarios) {
-      const todos = derivarFila(new BancoMock(id).cenario, Date.now());
+      const todos = derivarFila(novoBanco(id).cenario, Date.now());
       const deArtefato = todos.filter((i) => i.artefato !== 'obrigacao');
       expect(deArtefato.length, id).toBeGreaterThan(0);
 
@@ -4035,7 +4096,7 @@ describe('PR 13 · declarado × derivado, travado como invariante', () => {
 
   it('item de obrigação herda o responsável declarado, e só ele vê', () => {
     for (const id of cenarios) {
-      const b = new BancoMock(id);
+      const b = novoBanco(id);
       // Traz todas para dentro da antecedência: o teste é de titularidade, não
       // de relógio, e uma varredura com uma obrigação só provaria pouco.
       b.cenario.obrigacoes.forEach((o) => { o.antecedenciaDias = 400; delete o.cumpridaEm; });
@@ -4053,7 +4114,7 @@ describe('PR 13 · declarado × derivado, travado como invariante', () => {
 
   it('toda obrigação promovível declara responsável — nenhuma cai por omissão', () => {
     for (const id of cenarios) {
-      for (const o of new BancoMock(id).cenario.obrigacoes) {
+      for (const o of novoBanco(id).cenario.obrigacoes) {
         expect(o.responsavel, `${id} · ${o.codigo}: responsável vazio`).toBeTruthy();
         expect(PAPEIS_TODOS, `${id} · ${o.codigo}: papel desconhecido`).toContain(o.responsavel);
       }
@@ -4061,7 +4122,7 @@ describe('PR 13 · declarado × derivado, travado como invariante', () => {
   });
 
   it('as três de condução saíram de escrever para o dono nomeado', () => {
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     const de = (curto: string) => b.cenario.obrigacoes.find((o) => o.curto === curto)!;
     expect(de('Diagnóstico AS-IS').responsavel).toBe('engenharia');
     expect(de('Trilha técnica').responsavel).toBe('engenharia');
@@ -4244,7 +4305,7 @@ describe('PR 14 · validação — o que o documento enuncia é o que a LGPD exi
   const tabela = README.slice(README.indexOf('## As exigências de conteúdo'));
 
   const semExigencia = (artefato: string, id: string, de: string, para: string) => {
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     const artefatos: Record<string, () => void> = {
       parecer: () => { b.cenario.pareceres[0].status = de as never; },
       ripd: () => { b.cenario.ripds[0].status = de as never; },
@@ -4289,7 +4350,7 @@ describe('PR 14 · validação — o que o documento enuncia é o que a LGPD exi
     expect(tabela).toContain('redator');
 
     // E as duas são comportamento, não promessa.
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     b.cenario.riscos[0].status = 'em_tratamento';
     b.simularFalhaDeLog = true;
     const res = request(b, {
@@ -4309,7 +4370,7 @@ describe('PR 15 · o ciclo do achado — verificação separada de validação',
 
   beforeEach(() => {
     limparBancosDaSessao();
-    banco = new BancoMock('banco');
+    banco = novoBanco('banco');
   });
 
   /**
@@ -4513,7 +4574,7 @@ describe('PR 15 · o ciclo do achado — verificação separada de validação',
 describe('PR 15 · T11 na tela — a fila chega em algum lugar que opera', () => {
   const montar = (papel: Papel, ajustar: (b: BancoMock) => void = () => {}) => {
     limparBancosDaSessao();
-    const b = new BancoMock('banco');
+    const b = novoBanco('banco');
     ajustar(b);
     useSessao.setState({ papel, banco: b, versao: 0, avisos: [], recusas: {} });
     return b;
@@ -4981,7 +5042,7 @@ describe('PR 16 · atendimento parcial — retidos[] com base legal e data, item
 
   it('parcial sem retidos[] é recusado com 422', () => {
     const res = chamar('dpo', {
-      metodo: 'POST', caminho: `/v1/requests/${emAnalise().id}/concluir`,
+      metodo: 'POST', caminho: `/v1/requests/${emAnalise().id}/concluir`, purpose: 'atendimento',
       body: { desfecho: 'atendido_parcialmente', evidencia: 'Parte dos dados fica retida por lei.' },
     });
     expect(res.status).toBe(422);
@@ -4989,7 +5050,7 @@ describe('PR 16 · atendimento parcial — retidos[] com base legal e data, item
 
   it('retido sem base legal, ou sem data, também é 422', () => {
     const semBase = chamar('dpo', {
-      metodo: 'POST', caminho: `/v1/requests/${emAnalise().id}/concluir`,
+      metodo: 'POST', caminho: `/v1/requests/${emAnalise().id}/concluir`, purpose: 'atendimento',
       body: {
         desfecho: 'atendido_parcialmente', evidencia: 'Parte dos dados fica retida por lei.',
         retidos: [{ item: 'Notas fiscais', retencao_ate: '2031-07-29' }],
@@ -4998,7 +5059,7 @@ describe('PR 16 · atendimento parcial — retidos[] com base legal e data, item
     expect(semBase.status).toBe(422);
 
     const semData = chamar('dpo', {
-      metodo: 'POST', caminho: `/v1/requests/${emAnalise().id}/concluir`,
+      metodo: 'POST', caminho: `/v1/requests/${emAnalise().id}/concluir`, purpose: 'atendimento',
       body: {
         desfecho: 'atendido_parcialmente', evidencia: 'Parte dos dados fica retida por lei.',
         retidos: [{ item: 'Notas fiscais', base_legal: 'obrigacao_legal' }],
@@ -5013,7 +5074,7 @@ describe('PR 16 · atendimento parcial — retidos[] com base legal e data, item
       (s) => s.status === 'em_analise' && s.titularId === banco.cenario.titulares[0].id,
     )!;
     const conclusao = chamar('dpo', {
-      metodo: 'POST', caminho: `/v1/requests/${alvo.id}/concluir`,
+      metodo: 'POST', caminho: `/v1/requests/${alvo.id}/concluir`, purpose: 'atendimento',
       body: {
         desfecho: 'atendido_parcialmente',
         evidencia: 'Cadastro apagado; notas fiscais retidas por obrigação fiscal.',
@@ -5056,7 +5117,7 @@ describe('PR 16 · revogação — cascata registrada, propagação consultável
     });
   };
 
-  beforeEach(() => { varejo = new BancoMock('varejo'); });
+  beforeEach(() => { varejo = novoBanco('varejo'); });
 
   it('a cascata cobre os três sistemas: quem trata, quem recebeu e o que já foi coletado', () => {
     const res = revogar();
@@ -5275,7 +5336,7 @@ describe('PR 16 · T4 na tela — o balcão consegue responder o que o portal mo
   const montarT4 = () => {
     limparBancosDaSessao();
     useSessao.setState({
-      papel: 'dpo', banco: new BancoMock('banco'), versao: 0,
+      papel: 'dpo', banco: novoBanco('banco'), versao: 0,
       avisos: [], recusas: {}, protocoloSelecionado: '2026-0731',
     });
     return render(<MemoryRouter><T4 /></MemoryRouter>);
@@ -5373,7 +5434,7 @@ describe('PR 17 · verificação — a rota existe no caminho que a LIA anuncia'
 
   it('a tela da LIA lê o canal do registro, e não de uma string própria', () => {
     limparBancosDaSessao();
-    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [], recusas: {} });
+    useSessao.setState({ papel: 'dpo', banco: novoBanco('banco'), versao: 0, avisos: [], recusas: {} });
     render(<MemoryRouter><T8 /></MemoryRouter>);
     expect(screen.getByText(canalDeOposicao('LIA-SCORING-001').replace('POST ', 'POST ')))
       .toBeInTheDocument();
@@ -5463,7 +5524,7 @@ describe('PR 17 · validação — o titular consegue se opor, e o tratamento pa
       metodo: 'POST', caminho: `/v1/estados/solicitacao/${protocolo}`, body: { para: 'em_analise' },
     });
     const conclusao = chamar('dpo', {
-      metodo: 'POST', caminho: `/v1/requests/${solicitacao.id}/concluir`,
+      metodo: 'POST', caminho: `/v1/requests/${solicitacao.id}/concluir`, purpose: 'atendimento',
       body: {
         desfecho: 'recusado_com_fundamento',
         evidencia: 'Prevalece a prevenção à fraude no crédito, com a LIA rebalanceada em 29/07 e comunicada.',
@@ -5643,7 +5704,7 @@ describe('PR 18 · unidade — a chave de idempotência não depende do estado',
 describe('PR 18 · integração — o executor elimina, prova e não repete', () => {
   const HOJE = () => new Date().toISOString().slice(0, 10);
   const rodar = (body: Record<string, unknown> = {}) =>
-    chamar<any>('dpo', { metodo: 'POST', caminho: '/v1/purge/executar', body });
+    chamar<any>('dpo', { metodo: 'POST', caminho: '/v1/purge/executar', purpose: 'auditoria', body });
 
   it('o campo vencido é eliminado em lotes, com par pré/pós no trail', () => {
     const antes = banco.cenario.campos.find((c) => c.id === 'b-hist')!.registrosEstimados!;
@@ -5836,7 +5897,7 @@ describe('PR 18 · sistema — prazo vencido vira achado, e não pendência sile
     // Campo sem fato gerador declarado não tem prazo derivável — e o diz.
     expect(porCampo['clientes.nome_completo'].estado).toBe('sem_prazo');
 
-    chamar('dpo', { metodo: 'POST', caminho: '/v1/purge/executar', body: { limite: 2_000_000 } });
+    chamar('dpo', { metodo: 'POST', caminho: '/v1/purge/executar', purpose: 'auditoria', body: { limite: 2_000_000 } });
     const depois = chamar<any>('dpo', { metodo: 'GET', caminho: '/v1/retencao' });
     const hist = depois.body.campos.find((c: any) => c.campo === 'clientes.historico_compras');
     expect(hist.estado).toBe('expurgo_comprovado');
@@ -5848,7 +5909,7 @@ describe('PR 18 · sistema — prazo vencido vira achado, e não pendência sile
 describe('PR 18 · T6 na tela — os três estados do desenho, e o quarto que ele não previa', () => {
   const montarT6 = () => {
     limparBancosDaSessao();
-    useSessao.setState({ papel: 'dpo', banco: new BancoMock('banco'), versao: 0, avisos: [], recusas: {} });
+    useSessao.setState({ papel: 'dpo', banco: novoBanco('banco'), versao: 0, avisos: [], recusas: {} });
     return render(<MemoryRouter><T6 /></MemoryRouter>);
   };
 
@@ -5875,7 +5936,7 @@ describe('PR 18 · T6 na tela — os três estados do desenho, e o quarto que el
 
   it('papel sem rodar_expurgo não recebe o botão no DOM', () => {
     limparBancosDaSessao();
-    useSessao.setState({ papel: 'produto', banco: new BancoMock('banco'), versao: 0, avisos: [], recusas: {} });
+    useSessao.setState({ papel: 'produto', banco: novoBanco('banco'), versao: 0, avisos: [], recusas: {} });
     render(<MemoryRouter><T6 /></MemoryRouter>);
     expect(screen.queryByRole('button', { name: /executar expurgo do dia/i })).toBeNull();
   });
@@ -5968,7 +6029,7 @@ describe('PR 20 · integração — revogado e expirado cessam igual, e dizem co
       },
     });
 
-  beforeEach(() => { varejo = new BancoMock('varejo'); });
+  beforeEach(() => { varejo = novoBanco('varejo'); });
 
   it('Beatriz revoga pelo portal → o telefone dela dá 422; o de Marina, não', () => {
     const beatriz = varejo.cenario.titulares[2];
@@ -6056,9 +6117,9 @@ describe('PR 20 · integração — revogado e expirado cessam igual, e dizem co
 
 describe('PR 20 · sistema — o console mostra o mesmo estado que o banco', () => {
   it('GET /v1/consentimentos traz a contagem somada, e nenhum contador', () => {
-    const varejo = new BancoMock('varejo');
+    const varejo = novoBanco('varejo');
     const res = request<any[]>(varejo, {
-      papel: 'dpo', ator: 'teste', metodo: 'GET', caminho: '/v1/consentimentos',
+      papel: 'dpo', ator: 'teste', metodo: 'GET', caminho: '/v1/consentimentos', purpose: 'atendimento',
     });
     expect(res.status).toBe(200);
     const tel = res.body.find((c) => c.campoId === 'v-tel');
@@ -6070,17 +6131,17 @@ describe('PR 20 · sistema — o console mostra o mesmo estado que o banco', () 
     // Revogar move a contagem — e ela é somada, não decrementada.
     request(varejo, {
       papel: 'dpo', ator: 'teste', metodo: 'POST',
-      caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: 'x'.repeat(30) },
+      caminho: '/v1/consentimentos/v-tel/revogar', purpose: 'atendimento', body: { motivo: 'x'.repeat(30) },
     });
     const depois = request<any[]>(varejo, {
-      papel: 'dpo', ator: 'teste', metodo: 'GET', caminho: '/v1/consentimentos',
+      papel: 'dpo', ator: 'teste', metodo: 'GET', caminho: '/v1/consentimentos', purpose: 'atendimento',
     });
     expect(depois.body.find((c) => c.campoId === 'v-tel').titularesAtivos).toBe(0);
   });
 
   it('a T2 mostra a contagem derivada, e o campo perde a base quando ninguém sustenta', () => {
     limparBancosDaSessao();
-    const varejo = new BancoMock('varejo');
+    const varejo = novoBanco('varejo');
     useSessao.setState({ papel: 'dpo', banco: varejo, versao: 0, avisos: [], recusas: {} });
     const { unmount } = render(<MemoryRouter><T2 /></MemoryRouter>);
     expect(screen.getAllByText(/ativo · 2 titulares/).length).toBeGreaterThan(0);
@@ -6088,7 +6149,7 @@ describe('PR 20 · sistema — o console mostra o mesmo estado que o banco', () 
 
     request(varejo, {
       papel: 'dpo', ator: 'teste', metodo: 'POST',
-      caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: 'x'.repeat(30) },
+      caminho: '/v1/consentimentos/v-tel/revogar', purpose: 'atendimento', body: { motivo: 'x'.repeat(30) },
     });
     useSessao.setState({ versao: 1 });
     render(<MemoryRouter><T2 /></MemoryRouter>);
@@ -6136,7 +6197,7 @@ describe('PR 20 · aceitação — a migração é completa, não parcial', () =
 
   it('o vocabulário da entidade é o mesmo dos três lados: tipo, cenário e banco', () => {
     for (const id of ['banco', 'varejo', 'midia']) {
-      const b = new BancoMock(id);
+      const b = novoBanco(id);
       expect(b.cenario.consentimentoTextos.length, id).toBeGreaterThan(0);
       expect(b.cenario.consentimentos.length, id).toBeGreaterThan(0);
       for (const aceite of b.cenario.consentimentos) {
@@ -6179,7 +6240,7 @@ describe('PR 20 · sistema — a cascata pendente é vigiada, não só exibida',
     }
   };
 
-  beforeEach(() => { varejo = new BancoMock('varejo'); revogar(); });
+  beforeEach(() => { varejo = novoBanco('varejo'); revogar(); });
 
   it('pendente há 25 h abre achado com código determinístico', () => {
     envelhecer(25);
@@ -6286,7 +6347,7 @@ describe('PR 21 · integração — a varredura pega o que o trigger não alcan�
   const HOJE = () => new Date().toISOString().slice(0, 10);
   const emDias = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 
-  beforeEach(() => { varejo = new BancoMock('varejo'); });
+  beforeEach(() => { varejo = novoBanco('varejo'); });
 
   it('os cinco sem contrato aparecem como o que são, e abrem achado', () => {
     // Modelar a ausência, e não inventar contrato: Meta Ads, Transportadora
@@ -6335,7 +6396,7 @@ describe('PR 21 · integração — a varredura pega o que o trigger não alcan�
   });
 
   it('o contrato que vence DEPOIS da escrita: a varredura pega, e reabre se já fechara', () => {
-    const banco2 = new BancoMock('banco');
+    const banco2 = novoBanco('banco');
     // SendGrid vence em 2026-09-30 — data do próprio cenário, nada forjado.
     const sendgrid = banco2.cenario.fornecedores.find((f) => f.slug === 'sendgrid')!;
     expect(sendgrid.dpaExpiraEm).toBe('2026-09-30');
@@ -6372,7 +6433,7 @@ describe('PR 21 · integração — a varredura pega o que o trigger não alcan�
 describe('PR 21 · sistema — a entidade chega às telas e à cascata', () => {
   it('a T2 mostra o contrato de cada parceiro, e nomeia o que não tem', () => {
     limparBancosDaSessao();
-    useSessao.setState({ papel: 'dpo', banco: new BancoMock('varejo'), versao: 0, avisos: [], recusas: {} });
+    useSessao.setState({ papel: 'dpo', banco: novoBanco('varejo'), versao: 0, avisos: [], recusas: {} });
     render(<MemoryRouter><T2 /></MemoryRouter>);
     expect(screen.getByText('Fornecedores e contratos')).toBeInTheDocument();
     expect(screen.getAllByText('sem DPA assinado').length).toBe(3);
@@ -6380,7 +6441,7 @@ describe('PR 21 · sistema — a entidade chega às telas e à cascata', () => {
   });
 
   it('a cascata da revogação notifica por entidade, e diz quando o parceiro não tem DPA', () => {
-    const varejo = new BancoMock('varejo');
+    const varejo = novoBanco('varejo');
     const { token } = sessaoDoPortal(varejo, 'revogacao', 2);
     const res = requestPortal<any>(varejo, {
       metodo: 'POST', caminho: '/v1/me/consentimentos/v-tel/revogacao', sessao: token,
@@ -6392,7 +6453,7 @@ describe('PR 21 · sistema — a entidade chega às telas e à cascata', () => {
 
   it('nenhum destino em texto livre sobrou no modelo', () => {
     for (const id of ['banco', 'varejo', 'midia']) {
-      const b = new BancoMock(id);
+      const b = novoBanco(id);
       expect(b.cenario.fornecedores.length, id).toBeGreaterThan(0);
       for (const campo of b.cenario.campos) {
         for (const c of campo.compartilhamentos) {
@@ -6638,7 +6699,7 @@ describe('PR 22 · integração — a varredura cobre o repositório, e a de cam
 
 describe('PR 22 · unidade — a cadeia cobre a base legal, e o selo cobre o texto', () => {
   let banco: BancoMock;
-  beforeEach(() => { banco = new BancoMock('banco'); });
+  beforeEach(() => { banco = novoBanco('banco'); });
 
   const append = (extra: Partial<Parameters<BancoMock['auditAppend']>[0]> = {}) => banco.auditAppend({
     ator: 'dpo', atorPapel: 'dpo', acao: 'RIPD_APROVADO', recursoTipo: 'ripd', recursoId: 'RIPD-1',
@@ -6653,8 +6714,8 @@ describe('PR 22 · unidade — a cadeia cobre a base legal, e o selo cobre o tex
   });
 
   it('duas linhas idênticas com bases legais diferentes têm hashes diferentes', () => {
-    const a = new BancoMock('banco');
-    const b = new BancoMock('banco');
+    const a = novoBanco('banco');
+    const b = novoBanco('banco');
     const l1 = a.auditAppend({
       ator: 'dpo', atorPapel: 'dpo', acao: 'X', recursoTipo: 'y', recursoId: 'z',
       baseLegal: 'consentimento',
@@ -6703,7 +6764,7 @@ describe('PR 22 · unidade — a cadeia cobre a base legal, e o selo cobre o tex
 
 describe('PR 22 · sistema — o expurgo dos 30 dias continua preservando a cadeia', () => {
   it('o texto some, a PII do operador some junto, e a verificação continua fechando', () => {
-    const banco = new BancoMock('banco');
+    const banco = novoBanco('banco');
     banco.auditAppend({
       ator: 'dpo', atorPapel: 'dpo', acao: 'CAMPO_REVELADO', recursoTipo: 'campo', recursoId: 'cpf',
       finalidade: 'atendimento', baseLegal: 'obrigacao_legal', campos: ['cpf'],
@@ -6826,5 +6887,453 @@ describe('PR 22 · aceitação — o gate olha o repositório inteiro, e a catra
     expect(sql).toContain('a cadeia sozinha não acusaria');
     // E a regressão do PR 2 continua no arquivo.
     expect(sql).toContain('cadeia íntegra DEPOIS do expurgo de PII');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 23 · Risco-011 e Risco-036 — instrumentar as promessas
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('PR 23 · unidade — a janela do step-up, na fronteira do segundo', () => {
+  const sessao = { ator: 'dpo', fator: 'totp' as const, confirmadoEmMs: 1_000_000 };
+  const JANELA = 10;
+  const fim = sessao.confirmadoEmMs + JANELA * 60_000;
+
+  it('vale no último instante da janela e não vale no seguinte', () => {
+    expect(stepUpVigente(sessao, fim - 1, JANELA)).toBe(true);
+    // O limite cobre o instante do vencimento, como o DPA cobre o último dia.
+    expect(stepUpVigente(sessao, fim, JANELA)).toBe(true);
+    expect(stepUpVigente(sessao, fim + 1, JANELA)).toBe(false);
+    // Vencido por um segundo é vencido: prazo testado só no meio não é prazo.
+    expect(stepUpVigente(sessao, fim + 1000, JANELA)).toBe(false);
+  });
+
+  it('sem confirmação nenhuma não vale — ausência não é validade', () => {
+    expect(stepUpVigente(undefined, 0, JANELA)).toBe(false);
+  });
+
+  it('a recusa diz o que falta e por quanto tempo a confirmação vale', () => {
+    const nunca = motivoDaFaltaDeStepUp(undefined, fim, JANELA)!;
+    expect(nunca).toContain('exige confirmação de identidade');
+    expect(nunca).toContain('10 minutos');
+
+    const vencida = motivoDaFaltaDeStepUp(sessao, fim + 4 * 60_000, JANELA)!;
+    // "há 14 minutos, e esta operação exige uma dos últimos 10" — a pessoa
+    // precisa saber que é uma janela, não um capricho.
+    expect(vencida).toContain('14 minuto(s)');
+    expect(vencida).toContain('últimos 10');
+
+    expect(motivoDaFaltaDeStepUp(sessao, fim, JANELA)).toBeNull();
+  });
+});
+
+describe('PR 23 · unidade — a finalidade, por uma função só', () => {
+  const campo = (finalidades: Finalidade[], sensivel = false) => ({
+    id: 'c1', nome: 'renda', finalidadesCompativeis: finalidades, sensivel,
+  } as unknown as Parameters<typeof recusaDeFinalidade>[1]);
+
+  it('sem finalidade é 403, e a mensagem cita o cabeçalho', () => {
+    const r = recusaDeFinalidade(undefined, campo(['atendimento']))!;
+    expect(r.status).toBe(403);
+    expect(r.mensagem).toContain('X-Purpose');
+    expect(r.motivoNoTrail).toBe('sem X-Purpose');
+  });
+
+  it('finalidade fora do catálogo é 422 e nomeia as registradas', () => {
+    const r = recusaDeFinalidade('cobranca', campo(['atendimento', 'auditoria']))!;
+    expect(r.status).toBe(422);
+    expect(r.mensagem).toContain('atendimento, auditoria');
+  });
+
+  it('lista vazia significa não acessável, jamais "qualquer uma" (C-03)', () => {
+    expect(recusaDeFinalidade('atendimento', campo([]))!.status).toBe(422);
+    expect(recusaDeFinalidade('atendimento', campo([]))!.mensagem)
+      .toContain('não tem nenhuma finalidade de acesso registrada');
+  });
+
+  it('campo compatível passa, e campo sensível passa adiante para o Art. 11', () => {
+    expect(recusaDeFinalidade('atendimento', campo(['atendimento']))).toBeNull();
+    // Sensível não tem finalidade compatível nenhuma. Se esta função respondesse
+    // primeiro, a pessoa receberia "registre a finalidade e volte" — e não há
+    // caminho de volta: dado sensível não é revelável em tela alguma.
+    expect(recusaDeFinalidade('atendimento', campo([], true))).toBeNull();
+  });
+
+  it('rota sem campo alcançado exige a declaração e não confere compatibilidade', () => {
+    expect(recusaDeFinalidade('cobranca', null)).toBeNull();
+    expect(recusaDeFinalidade(undefined, null)!.status).toBe(403);
+  });
+});
+
+describe('PR 23 · unidade — cada rota declara se exige finalidade, e por quê', () => {
+  it('todas declaram, e nenhuma dispensa sem motivo com substância', () => {
+    for (const p of POLITICAS) {
+      const onde = `${p.metodo} ${p.caminho.source}`;
+      expect(['exigida', 'dispensada'], onde).toContain(p.finalidade);
+      if (p.finalidade === 'dispensada') {
+        // Isenção sem motivo é isenção sem revisor. O teste cobra substância,
+        // não a existência do campo.
+        expect(p.motivoDaDispensa ?? '', onde).toMatch(/\S/);
+        expect((p.motivoDaDispensa ?? '').length, onde).toBeGreaterThan(60);
+      } else {
+        expect(p.motivoDaDispensa, onde).toBeUndefined();
+      }
+    }
+  });
+
+  it('a rota não declarada exige finalidade — o padrão fecha, não abre', () => {
+    // Se dispensasse, esquecer de declarar seria o caminho mais curto para
+    // escapar do Art. 37, e o padrão premiaria o esquecimento.
+    expect(POLITICA_PADRAO.finalidade).toBe('exigida');
+  });
+
+  it('o step-up está só onde o repositório já o prometia', () => {
+    const comStepUp = POLITICAS.filter((p) => p.stepUp).map((p) => `${p.metodo} ${p.caminho.source}`);
+    expect(comStepUp.sort()).toEqual([
+      'POST ^audit\\/exportar$',
+      'POST ^pseudonyms\\/resolve$',
+      'POST ^purge\\/executar$',
+      'POST ^requests\\/[^/]+\\/concluir$',
+    ].sort());
+    for (const p of POLITICAS) {
+      if (p.stepUp) expect(p.stepUp.janelaMin, p.caminho.source).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('PR 23 · unidade — o token do feed ICS', () => {
+  const SEGREDO = 'a'.repeat(64);
+  const agora = 1_000_000;
+
+  it('devolve o papel quando vale, e null para tudo mais — uma recusa só', () => {
+    const bom = tokenDoFeed(SEGREDO, 'dpo', agora + 60_000, sha256);
+    expect(papelDoTokenDeFeed(SEGREDO, bom, agora, sha256)).toBe('dpo');
+
+    const vencido = tokenDoFeed(SEGREDO, 'dpo', agora - 1, sha256);
+    expect(papelDoTokenDeFeed(SEGREDO, vencido, agora, sha256)).toBeNull();
+    // Vence exatamente agora: já não vale. Feed é leitura contínua, e o
+    // milissegundo de folga só existiria para esconder a fronteira.
+    expect(papelDoTokenDeFeed(SEGREDO, tokenDoFeed(SEGREDO, 'dpo', agora, sha256), agora, sha256)).toBeNull();
+
+    // Outro segredo — a rotação revoga tudo o que foi emitido antes.
+    expect(papelDoTokenDeFeed('b'.repeat(64), bom, agora, sha256)).toBeNull();
+    expect(papelDoTokenDeFeed(SEGREDO, 'nada', agora, sha256)).toBeNull();
+    expect(papelDoTokenDeFeed(SEGREDO, 'dpo.abc.def', agora, sha256)).toBeNull();
+  });
+
+  it('a assinatura é o digest inteiro, não um pedaço dele', () => {
+    const t = tokenDoFeed(SEGREDO, 'dpo', agora + 60_000, sha256);
+    // 64 bits truncados eram a diferença entre "assinado" e "assinado o
+    // suficiente para quem não tem paciência".
+    expect(t.split('.')[2]).toHaveLength(64);
+    expect(VALIDADE_DO_FEED_MS).toBe(30 * 24 * 60 * 60_000);
+  });
+
+  it('dois bancos têm segredos diferentes: recarregar revoga os feeds emitidos', () => {
+    const a = new BancoMock('banco');
+    const b = new BancoMock('banco');
+    expect(a.segredoDoFeed).not.toBe(b.segredoDoFeed);
+    expect(a.segredoDoFeed).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('PR 23 · integração — a guarda cobra a finalidade, e a ausência fica registrada', () => {
+  it('mais de uma rota de PII recusa sem X-Purpose, e todas gravam a tentativa', () => {
+    // Mais de uma de propósito: se fosse só uma, o teste não distinguiria a
+    // guarda de uma checagem que voltou para dentro de uma rota.
+    const rotas: { metodo: 'GET' | 'POST'; caminho: string }[] = [
+      { metodo: 'GET', caminho: '/v1/audit' },
+      { metodo: 'GET', caminho: '/v1/requests' },
+      { metodo: 'GET', caminho: '/v1/consentimentos' },
+      { metodo: 'POST', caminho: '/v1/pseudonyms/resolve' },
+    ];
+    for (const r of rotas) {
+      const antes = banco.auditoria.length;
+      const res = chamar('dpo', { ...r, body: {} });
+      expect(res.status, r.caminho).toBe(403);
+      expect((res.body as { erro: string }).erro).toContain('X-Purpose');
+      const linha = banco.auditoria.at(-1)!;
+      expect(banco.auditoria.length, r.caminho).toBe(antes + 1);
+      expect(linha.acao, r.caminho).toBe('ACESSO_SEM_FINALIDADE');
+      expect(linha.resultado).toBe('negado');
+      expect(linha.recursoId).toContain(r.caminho.replace('/v1/', ''));
+    }
+    // E a cadeia continua fechando com as negativas dentro dela.
+    expect(banco.auditVerificar().integro).toBe(true);
+  });
+
+  it('com finalidade declarada as mesmas rotas respondem', () => {
+    // A contraprova: sem ela, o teste acima passaria com o dispatcher quebrado.
+    expect(chamar('dpo', { metodo: 'GET', caminho: '/v1/audit', purpose: 'auditoria' }).status).toBe(200);
+    expect(chamar('dpo', { metodo: 'GET', caminho: '/v1/requests', purpose: 'atendimento' }).status).toBe(200);
+  });
+
+  it('finalidade fora do catálogo do campo é 422, e não 403', () => {
+    const res = chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/pseudonyms/resolve', purpose: 'seguranca',
+      body: {
+        titularId: 't1', campo: 'cpf', protocolo: '2026-0731',
+        justificativa: 'Confirmação de identidade para o atendimento do protocolo 2026-0731.',
+      },
+    });
+    expect(res.status).toBe(422);
+    // 403 e 422 mandam a pessoa para conversas diferentes: uma se resolve
+    // mandando o cabeçalho, a outra exige rever o inventário.
+    expect((res.body as { erro: string }).erro).toContain('não consta no catálogo');
+  });
+
+  it('rota dispensada responde sem finalidade — a isenção é real, não decorativa', () => {
+    expect(chamar('auditor', { metodo: 'POST', caminho: '/v1/audit/verificar' }).status).toBe(200);
+    expect(chamar('dpo', { metodo: 'GET', caminho: '/v1/catalog/fields' }).status).toBe(200);
+  });
+});
+
+describe('PR 23 · integração — o step-up pela rota, nos dois lados da fronteira', () => {
+  let b: BancoMock;
+  const chamarB = <T = unknown,>(req: Partial<Parameters<typeof request>[1]> & { metodo: 'GET' | 'POST' | 'PATCH' | 'DELETE'; caminho: string }) =>
+    request<T>(b, { papel: 'dpo', ator: 'teste', ...req });
+  const exportar = () => chamarB({ metodo: 'POST', caminho: '/v1/audit/exportar', purpose: 'auditoria', body: {} });
+
+  beforeEach(() => { b = new BancoMock('banco'); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('sem confirmação nenhuma, a operação sensível é recusada e a recusa fica registrada', () => {
+    const res = exportar();
+    expect(res.status).toBe(403);
+    expect((res.body as { erro: string }).erro).toContain('confirmação de identidade');
+    expect(b.auditoria.at(-1)!.acao).toBe('STEP_UP_EXIGIDO');
+  });
+
+  it('confirmado, passa; vencido por um segundo, recusa; renovado, passa de novo', () => {
+    const t0 = new Date('2026-07-29T10:00:00Z').getTime();
+    vi.useFakeTimers();
+    vi.setSystemTime(t0);
+
+    const desafio = chamarB<{ id: string }>({ metodo: 'POST', caminho: '/v1/step-up', body: { fator: 'totp' } });
+    expect(desafio.status).toBe(201);
+    // O código não volta na resposta: vai pelo canal.
+    expect(JSON.stringify(desafio.body)).not.toContain(b.codigoDoDesafio(desafio.body.id));
+
+    expect(chamarB({
+      metodo: 'POST', caminho: `/v1/step-up/${desafio.body.id}/confirmar`,
+      body: { codigo: b.codigoDoDesafio(desafio.body.id) },
+    }).status).toBe(200);
+
+    expect(exportar().status).toBe(200);
+
+    // Último instante da janela de 10 minutos: ainda vale.
+    vi.setSystemTime(t0 + 10 * 60_000);
+    expect(exportar().status).toBe(200);
+
+    // Um segundo depois: não vale mais, e a recusa diz há quanto tempo foi.
+    vi.setSystemTime(t0 + 10 * 60_000 + 1000);
+    const vencido = exportar();
+    expect(vencido.status).toBe(403);
+    expect((vencido.body as { erro: string }).erro).toContain('últimos 10');
+
+    // Renovar reabre a janela — a exigência é de recência, não de cerimônia.
+    const novo = chamarB<{ id: string }>({ metodo: 'POST', caminho: '/v1/step-up', body: { fator: 'totp' } });
+    chamarB({
+      metodo: 'POST', caminho: `/v1/step-up/${novo.body.id}/confirmar`,
+      body: { codigo: b.codigoDoDesafio(novo.body.id) },
+    });
+    expect(exportar().status).toBe(200);
+  });
+
+  it('a janela é da operação: o expurgo exige cinco minutos, e a exportação dez', () => {
+    const t0 = new Date('2026-07-29T10:00:00Z').getTime();
+    vi.useFakeTimers();
+    vi.setSystemTime(t0);
+    b.confirmarStepUp('teste', 'totp', t0);
+
+    // Sete minutos depois: a exportação (10 min) ainda passa, o expurgo (5) não.
+    vi.setSystemTime(t0 + 7 * 60_000);
+    expect(exportar().status).toBe(200);
+    const purge = chamarB({ metodo: 'POST', caminho: '/v1/purge/executar', purpose: 'auditoria', body: {} });
+    expect(purge.status).toBe(403);
+    expect((purge.body as { erro: string }).erro).toContain('últimos 5');
+  });
+
+  it('a recusa do desafio é uma só: código errado, vencido, alheio e inexistente', () => {
+    const d = chamarB<{ id: string }>({ metodo: 'POST', caminho: '/v1/step-up', body: { fator: 'totp' } });
+    const errado = chamarB({
+      metodo: 'POST', caminho: `/v1/step-up/${d.body.id}/confirmar`, body: { codigo: '000000' },
+    });
+    const inexistente = chamarB({
+      metodo: 'POST', caminho: '/v1/step-up/nao-existe/confirmar', body: { codigo: '000000' },
+    });
+    // Desafio de outra pessoa, com o código certo.
+    const alheio = request(b, {
+      papel: 'dpo', ator: 'outra-pessoa', metodo: 'POST',
+      caminho: `/v1/step-up/${d.body.id}/confirmar`, body: { codigo: b.codigoDoDesafio(d.body.id) },
+    });
+    for (const r of [errado, inexistente, alheio]) {
+      expect(r.status).toBe(401);
+      expect((r.body as { erro: string }).erro).toBe('Não foi possível confirmar a identidade.');
+    }
+    // E nenhum deles abriu janela nenhuma.
+    expect(exportar().status).toBe(403);
+  });
+
+  it('três tentativas e o desafio morre — código de seis dígitos sem limite é senha fraca', () => {
+    const d = chamarB<{ id: string }>({ metodo: 'POST', caminho: '/v1/step-up', body: { fator: 'totp' } });
+    for (let i = 0; i < TENTATIVAS_MAXIMAS; i += 1) {
+      chamarB({ metodo: 'POST', caminho: `/v1/step-up/${d.body.id}/confirmar`, body: { codigo: '000000' } });
+    }
+    // Agora nem o código certo abre.
+    expect(chamarB({
+      metodo: 'POST', caminho: `/v1/step-up/${d.body.id}/confirmar`,
+      body: { codigo: b.codigoDoDesafio(d.body.id) },
+    }).status).toBe(401);
+  });
+
+  it('fator desconhecido é 422, e o vocabulário real está lá de propósito', () => {
+    const res = chamarB({ metodo: 'POST', caminho: '/v1/step-up', body: { fator: 'sms' } });
+    expect(res.status).toBe(422);
+    expect((res.body as { erro: string }).erro).toContain('totp, webauthn');
+  });
+});
+
+describe('PR 23 · sistema — a catraca comportamental do Risco-011', () => {
+  it('nenhuma rota que revela dado de titular está declarada como dispensada', () => {
+    /**
+     * O invariante que não se degrada sozinho.
+     *
+     * Uma declaração se estraga em silêncio: alguém marca `dispensada` e o teste
+     * de "todas declaram" continua verde. Este aqui lê o que a rota **fez** —
+     * se ela gravou uma linha de ação de PII com resultado diferente de negado,
+     * então a política dela tem de exigir finalidade. É a mesma disciplina da
+     * não-vacuidade do PR 1: a tabela não vale sozinha, o comportamento vale.
+     */
+    const ACOES_DE_PII = ['CAMPO_REVELADO', 'TITULAR_CONSULTADO', 'PSEUDONIMO_RESOLVIDO'];
+    const violacoes: string[] = [];
+
+    for (const op of OPERACOES) {
+      if (!op.mock) continue;
+      const b = novoBanco('banco');
+      const antes = b.auditoria.length;
+      const caminho = op.mock.replace(/^\/v1\//, '').split('?')[0];
+      try {
+        request(b, {
+          papel: op.papel ?? 'dpo', ator: 'teste', metodo: op.metodo as 'GET',
+          caminho: op.mock, purpose: 'atendimento', body: {},
+        });
+      } catch { /* rota que estoura não revelou nada */ }
+      const novas = b.auditoria.slice(antes);
+      const revelou = novas.some((l) => ACOES_DE_PII.includes(l.acao) && l.resultado !== 'negado');
+      if (!revelou) continue;
+      const politica = politicaDe(op.metodo as 'GET', caminho);
+      if (politica?.finalidade !== 'exigida') {
+        violacoes.push(`${op.metodo} ${op.contrato} gravou ação de PII sob política ${politica?.finalidade ?? '(nenhuma)'}`);
+      }
+    }
+    expect(violacoes).toEqual([]);
+  });
+
+  it('toda operação servida pelo mock tem política própria — nenhuma cai no padrão', () => {
+    // É o que permite a guarda de finalidade consultar a política declarada em
+    // vez do padrão, sem abrir buraco: caminho sem política é caminho que não
+    // existe, e a resposta dele é 404.
+    const semPolitica = OPERACOES
+      .filter((op) => op.mock)
+      .filter((op) => !politicaDe(op.metodo as 'GET', op.mock!.replace(/^\/v1\//, '').split('?')[0]))
+      .map((op) => `${op.metodo} ${op.contrato}`);
+    expect(semPolitica).toEqual([]);
+  });
+
+  it('caminho que não existe continua respondendo 404, e não "declare a finalidade"', () => {
+    // O recorte silencioso que o PR 9 fechou não pode voltar por esta porta.
+    expect(chamar('dpo', { metodo: 'GET', caminho: '/v1/fila/dpo' }).status).toBe(404);
+    expect(chamar('dpo', { metodo: 'GET', caminho: '/v1/nao-existe' }).status).toBe(404);
+  });
+});
+
+describe('PR 23 · aceitação — contrato e política dizem a mesma coisa', () => {
+  const contrato = parseYaml(readFileSync('../api/openapi.yaml', 'utf8')) as {
+    paths: Record<string, Record<string, { parameters?: unknown[] }>>;
+  };
+  const exigeNoContrato = (metodo: string, caminho: string): boolean => {
+    const op = contrato.paths[caminho]?.[metodo.toLowerCase()];
+    const ps = [...((contrato.paths[caminho] as { parameters?: unknown[] }).parameters ?? []),
+      ...(op?.parameters ?? [])];
+    return ps.some((p) => JSON.stringify(p).includes('Purpose'));
+  };
+
+  it('as operações que declaram X-Purpose são exatamente as que a política exige', () => {
+    const divergencias: string[] = [];
+    for (const op of OPERACOES) {
+      if (op.superficie === 'portal' && !op.mock) continue;
+      const caminho = (op.mock ?? '').replace(/^\/v1\//, '').split('?')[0];
+      const politica = caminho ? politicaDe(op.metodo as 'GET', caminho) : null;
+      if (!politica) continue;
+      const noContrato = exigeNoContrato(op.metodo, op.contrato);
+      const naPolitica = politica.finalidade === 'exigida';
+      // `/requests/{id}/mensagens` é a única de superfície dupla: no contrato o
+      // cabeçalho é opcional, porque no portal quem escreve é o próprio titular.
+      if (op.contrato === '/requests/{id}/mensagens') {
+        expect(noContrato, op.contrato).toBe(true);
+        continue;
+      }
+      if (noContrato !== naPolitica) {
+        divergencias.push(`${op.metodo} ${op.contrato}: contrato=${noContrato}, política=${naPolitica}`);
+      }
+    }
+    expect(divergencias).toEqual([]);
+  });
+
+  it('a catraca do Risco-011: a cobertura não pode encolher', () => {
+    const exigidas = POLITICAS.filter((p) => p.finalidade === 'exigida');
+    // Quando o PR 5 mediu, o contrato tinha 68 operações e **duas** exigiam
+    // finalidade no código. Se este número voltar a encolher, é este teste que
+    // morre, com o motivo escrito.
+    expect(exigidas.length, 'Risco-011: a exigência de finalidade encolheu')
+      .toBeGreaterThanOrEqual(12);
+    // E as quatro do step-up continuam de pé.
+    expect(POLITICAS.filter((p) => p.stepUp)).toHaveLength(4);
+  });
+
+  it('a janela do step-up nunca vem do pedido — o servidor deriva, o cliente não alega', () => {
+    const fonte = readFileSync('src/mock/api.ts', 'utf8');
+    const trecho = fonte.slice(fonte.indexOf('politicaDeclarada?.stepUp'), fonte.indexOf('switch (`${metodo}'));
+    expect(trecho).toContain('politicaDeclarada.stepUp.janelaMin');
+    // Nada de `body.janela`, `req.janela` ou cabeçalho: quem executa a operação
+    // não escolhe o próprio rigor.
+    expect(trecho).not.toMatch(/body\.\w*janela/i);
+    expect(trecho).not.toMatch(/req\.\w*janela/i);
+  });
+
+  it('nenhum segredo estático no fonte do aplicativo', () => {
+    const achados = varrerFonte(resolve('src'));
+    expect(achados.map((a) => `${a.arquivo}:${a.linha} ${a.mensagem}`)).toEqual([]);
+  });
+
+  it('a varredura de segredo pega o que ela promete pegar', () => {
+    // Não-vacuidade: sem isto, o teste acima passaria com a regra quebrada.
+    const raiz = mkdtempSync(join(tmpdir(), 'segredos-'));
+    mkdirSync(join(raiz, 'sub'), { recursive: true });
+    writeFileSync(join(raiz, 'sub', 'x.ts'), "const SEGREDO_DO_FEED = 'algum-valor';\n");
+    writeFileSync(join(raiz, 'sub', 'ok.ts'), 'export const x = 1;\n');
+    const achados = varrerFonte(raiz);
+    expect(achados).toHaveLength(1);
+    expect(achados[0].arquivo).toBe('sub/x.ts');
+    expect(achados[0].linha).toBe(1);
+    // E o valor não é reimpresso no relatório: o log do CI é um sistema como outro.
+    expect(achados[0].mensagem).not.toContain('algum-valor');
+
+    const dist = mkdtempSync(join(tmpdir(), 'dist-'));
+    writeFileSync(join(dist, 'app.js'), `const s="${SEGREDOS_HISTORICOS[0]}";\n`);
+    expect(varrerBundle(dist)).toHaveLength(1);
+    writeFileSync(join(dist, 'app.js'), 'const s="outro";\n');
+    expect(varrerBundle(dist)).toEqual([]);
+    rmSync(raiz, { recursive: true, force: true });
+    rmSync(dist, { recursive: true, force: true });
+  });
+
+  it('o workflow roda a varredura depois do build, e não tolera falha', () => {
+    const yml = readFileSync('../.github/workflows/privacy-ci-gate.yml', 'utf8');
+    expect(yml).not.toContain('continue-on-error');
+    expect(yml).toContain('npm run varredura:segredos');
+    // Depois do build: metade da prova só existe no artefato construído.
+    expect(yml.indexOf('npm run build')).toBeLessThan(yml.indexOf('npm run varredura:segredos'));
   });
 });
