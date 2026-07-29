@@ -15,10 +15,11 @@ import {
 } from './calendario';
 import { redigir } from '../lib/redator';
 import { hashEncadeado, sha256 } from '../lib/sha256';
-import { BASES_PARA_SENSIVEL } from './types';
+import { BASES_LEGAIS, BASES_PARA_SENSIVEL } from './types';
 import type {
   BaseLegal, Campo, Categoria, DecisaoIncidente, DesfechoSolicitacao, EstadoIncidente,
-  Finalidade, GatilhoDeReabertura, Incidente, Mecanismo, Papel, ResultadoRevisao, TipoArmazenado,
+  Finalidade, GatilhoDeReabertura, Incidente, ItemRetido, Mecanismo, Papel, ResultadoRevisao,
+  TipoArmazenado,
 } from './types';
 
 export interface Req {
@@ -208,6 +209,22 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         registrarNegativa(banco, ator, papel, campo, 'consentimento revogado');
         return erro(422, `O consentimento de ${catalogado.nome} foi revogado: o campo não é mais tratável.`,
           'Art. 8º, §5º e Art. 18, VIII: revogado o consentimento, cessa o tratamento que dependia dele.') as Res<T>;
+      }
+
+      /**
+       * A revogação feita pelo titular **no portal** propaga até aqui, e é por
+       * titular — não pelo campo inteiro.
+       *
+       * A checagem acima derruba o campo para todo mundo quando o registro
+       * agregado é revogado; esta derruba só para quem revogou. Sem ela, o botão
+       * do portal mudaria um estado que nenhuma leitura consulta, que é a
+       * definição de revogação de fachada. (A entidade de consentimento por
+       * titular no schema de produção continua sendo o Risco-002.)
+       */
+      if (catalogado.baseLegal === 'consentimento' && banco.revogacaoDe(titularId, catalogado.id)) {
+        registrarNegativa(banco, ator, papel, campo, 'consentimento revogado pelo titular');
+        return erro(422, `Este titular retirou a autorização de ${catalogado.nome}: o campo não é mais tratável para ele.`,
+          'Art. 8º, §5º e Art. 18, VIII: a revogação é individual, e cessa o tratamento que dependia dela.') as Res<T>;
       }
 
       if (!justificativa || justificativa.trim().length < 20) {
@@ -846,6 +863,25 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
             'Art. 18, §4º: a negativa é comunicada com a razão — sem ela o titular não tem o que contestar.') as Res<T>;
         }
 
+        /**
+         * Parcial e recusa exigem `retidos[]` item a item, com base legal e data.
+         *
+         * "Parte foi retida por obrigação legal" é a frase que o titular recebe
+         * hoje e não tem como contestar: não diz o quê, nem por qual lei, nem
+         * até quando. A tela 07 do portal é a mais importante justamente porque
+         * separa apagado de retido — e ela só tem o que mostrar se a conclusão
+         * for obrigada a produzir a lista aqui.
+         */
+        const retidos = normalizarRetidos(body.retidos);
+        if (desfecho !== 'atendido') {
+          const problema = problemaNosRetidos(retidos);
+          if (problema) {
+            return erro(422, problema,
+              'Art. 18, §4º c/c Art. 16: reter é decisão que se justifica item a item, com a lei que a '
+              + 'sustenta e a data em que o resíduo é eliminado.') as Res<T>;
+          }
+        }
+
         const fundamento = redigir(evidencia).texto;
         try {
           banco.auditAppend({
@@ -862,6 +898,8 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         s.status = desfecho === 'recusado_com_fundamento' ? 'recusada_com_fundamento' : 'concluida';
         s.desfecho = desfecho;
         s.fundamento = fundamento;
+        s.apagados = Array.isArray(body.apagados) ? body.apagados.map(String) : [];
+        s.retidos = retidos;
         s.concluidaEmMs = agora;
         s.concluidaEm = new Date(agora).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
         return ok({ protocolo: s.protocolo, status: s.status, dentroDoPrazo: agora <= s.prazoLimiteMs }) as Res<T>;
@@ -890,6 +928,45 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
   }
 
   return erro(404, `Rota não encontrada: ${metodo} ${caminho}`) as Res<T>;
+}
+
+/**
+ * Aceita as duas grafias do item retido.
+ *
+ * O contrato escreve `base_legal`/`retencao_ate`, o modelo interno escreve
+ * `baseLegal`/`retencaoAte`, e a fronteira entre os dois é aqui — em um lugar
+ * só. Espalhar a conversão pelas rotas é como um campo acaba gravado com a
+ * grafia errada e some da tela sem ninguém errar nada visível.
+ */
+function normalizarRetidos(bruto: unknown): ItemRetido[] {
+  if (!Array.isArray(bruto)) return [];
+  return bruto.map((r) => {
+    const o = (r ?? {}) as Record<string, unknown>;
+    return {
+      item: String(o.item ?? ''),
+      baseLegal: (o.baseLegal ?? o.base_legal) as BaseLegal,
+      artigo: o.artigo ? String(o.artigo) : undefined,
+      retencaoAte: String(o.retencaoAte ?? o.retencao_ate ?? ''),
+      motivo: o.motivo ? String(o.motivo) : undefined,
+    };
+  });
+}
+
+/** A primeira coisa errada com a lista, em linguagem de gente — ou `null`. */
+function problemaNosRetidos(retidos: ItemRetido[]): string | null {
+  if (retidos.length === 0) {
+    return 'Atendimento parcial e recusa exigem a lista do que ficou retido.';
+  }
+  for (const r of retidos) {
+    if (!r.item.trim()) return 'Cada item retido precisa dizer o que é, em linguagem de pessoa.';
+    if (!BASES_LEGAIS.includes(r.baseLegal)) {
+      return `"${r.item}" está sem base legal válida — reter sem nomear a lei não é resposta.`;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(r.retencaoAte)) {
+      return `"${r.item}" está sem data de eliminação (AAAA-MM-DD). Prazo é data, nunca "conforme a lei".`;
+    }
+  }
+  return null;
 }
 
 /**

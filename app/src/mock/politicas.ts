@@ -1,4 +1,5 @@
 import type { Acao } from './permissoes';
+import type { Superficie } from './rotas';
 
 export type Metodo = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
@@ -17,7 +18,16 @@ export type Metodo = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 export interface PoliticaRota {
   metodo: Metodo;
   caminho: RegExp;
-  /** `escrita` exige a ação `escrever`; `leitura` não. */
+  /**
+   * Em qual superfície a rota vive. Ausente é `console` — as quarenta e poucas
+   * rotas do balcão não precisam repetir o padrão.
+   *
+   * A separação não é cosmética: `GET requests/2026-0731` existe nas duas, e
+   * significa coisas diferentes. No console é a fila do DPO; no portal é o
+   * pedido de uma pessoa, que só ela pode ver.
+   */
+  superficie?: Superficie;
+  /** `escrita` exige a ação `escrever`; `leitura` não. Só se aplica ao console. */
   tipo: 'leitura' | 'escrita';
   /**
    * Como a rota responde a quem não pode alcançá-la.
@@ -26,15 +36,99 @@ export interface PoliticaRota {
    * ali diria "existe, você é que não pode" — o oráculo que a Regra 5 fecha.
    * `403` para recusa sobre a capacidade do ator, que não revela nada sobre
    * quem está do outro lado.
+   * `401_uniforme` é a do portal: sem confirmação de identidade não há resposta,
+   * e a recusa é a mesma para "não confirmou", "confirmou outro direito" e
+   * "esse protocolo é de outra pessoa".
    */
-  foraDeEscopo: '404_uniforme' | '403';
-  /** Permissão adicional, além do que `tipo` exige. */
+  foraDeEscopo: '404_uniforme' | '403' | '401_uniforme';
+  /** Permissão adicional, além do que `tipo` exige. Só se aplica ao console. */
   acao?: Acao;
+  /**
+   * Portal: a rota exige sessão de verificação confirmada?
+   *
+   * Só `GET /me/direitos` dispensa — é o cardápio, e não carrega dado de
+   * titular. Perguntar quem é a pessoa antes de dizer o que ela pode pedir
+   * inverte a ordem: o portal não pergunta nada antes de oferecer.
+   */
+  exigeSessao?: boolean;
   /** Descrição curta, para a mensagem de recusa e para quem lê a tabela. */
   nota: string;
 }
 
 export const POLITICAS: PoliticaRota[] = [
+  // ══ PORTAL DO TITULAR (Risco-001) ═════════════════════════════════════════
+  //
+  // Nenhuma delas tem `acao`: o titular não tem papel, e inventar um papel
+  // "titular" faria a matriz interna decidir sobre alguém que não é ator da
+  // organização. O que autoriza aqui é a verificação — e o nível dela vem do
+  // direito, nunca do cliente.
+  {
+    metodo: 'GET', caminho: /^me\/direitos$/, superficie: 'portal',
+    tipo: 'leitura', foraDeEscopo: '401_uniforme', exigeSessao: false,
+    nota: 'O cardápio dos dez direitos, com nível e prazo. Não carrega dado de titular, e por isso '
+      + 'é a única do portal que responde antes de qualquer verificação.',
+  },
+  {
+    metodo: 'POST', caminho: /^me\/verificacao$/, superficie: 'portal',
+    tipo: 'escrita', foraDeEscopo: '401_uniforme', exigeSessao: false,
+    nota: 'Abre a verificação no nível que o direito exige. Responde 201 mesmo sem cadastro: '
+      + 'um 404 aqui seria oráculo de existência operável em lote.',
+  },
+  {
+    metodo: 'POST', caminho: /^me\/verificacao\/[^/]+\/codigo$/, superficie: 'portal',
+    tipo: 'escrita', foraDeEscopo: '401_uniforme', exigeSessao: false,
+    nota: 'Confirma e emite a sessão. A recusa é uma só, idêntica para código errado, fator errado '
+      + 'e identificador sem cadastro.',
+  },
+  {
+    metodo: 'POST', caminho: /^requests$/, superficie: 'portal',
+    tipo: 'escrita', foraDeEscopo: '401_uniforme', exigeSessao: true,
+    nota: 'Abre a solicitação. Calcula o prazo pelo direito e grava antes de responder — falha de '
+      + 'log derruba o protocolo inteiro.',
+  },
+  {
+    metodo: 'GET', caminho: /^requests\/[^/]+\/pacote$/, superficie: 'portal',
+    tipo: 'leitura', foraDeEscopo: '401_uniforme', exigeSessao: true,
+    nota: 'O pacote de resposta, por link assinado de 24 h — com a frase que justifica a validade curta.',
+  },
+  {
+    metodo: 'POST', caminho: /^requests\/[^/]+\/mensagens$/, superficie: 'portal',
+    tipo: 'escrita', foraDeEscopo: '401_uniforme', exigeSessao: true,
+    nota: 'A ponta do titular no mesmo canal da T4. Passa pelo redator antes do append.',
+  },
+  {
+    metodo: 'GET', caminho: /^requests\/[^/]+$/, superficie: 'portal',
+    tipo: 'leitura', foraDeEscopo: '401_uniforme', exigeSessao: true,
+    nota: 'O próprio pedido: estado, prazo, apagados e retidos. Protocolo de outra pessoa responde '
+      + 'igual a não confirmado.',
+  },
+  {
+    metodo: 'GET', caminho: /^me\/consentimentos$/, superficie: 'portal',
+    tipo: 'leitura', foraDeEscopo: '401_uniforme', exigeSessao: true,
+    nota: 'O texto consentido na versão aceita, com data e canal — a prova do Art. 8º, §2º.',
+  },
+  {
+    metodo: 'POST', caminho: /^me\/consentimentos\/[^/]+\/revogacao$/, superficie: 'portal',
+    tipo: 'escrita', foraDeEscopo: '401_uniforme', exigeSessao: true,
+    nota: 'Revogação do titular da sessão, e não do campo inteiro. Dispara a cascata e a registra.',
+  },
+  {
+    metodo: 'GET', caminho: /^me\/consentimentos\/[^/]+\/propagacao$/, superficie: 'portal',
+    tipo: 'leitura', foraDeEscopo: '401_uniforme', exigeSessao: true,
+    nota: 'Onde a revogação já chegou. Pendência acima de 24 h levanta alerta — visível ao titular.',
+  },
+  {
+    metodo: 'POST', caminho: /^me\/decisoes\/[^/]+\/revisao$/, superficie: 'portal',
+    tipo: 'escrita', foraDeEscopo: '401_uniforme', exigeSessao: true,
+    nota: 'A contestação do Art. 20. É o pedido; o ato de rever é do console.',
+  },
+  {
+    metodo: 'GET', caminho: /^me\/decisoes\/[^/]+$/, superficie: 'portal',
+    tipo: 'leitura', foraDeEscopo: '401_uniforme', exigeSessao: true,
+    nota: 'Os fatores da decisão automatizada, em linguagem de pessoa (Art. 20, §1º).',
+  },
+
+  // ══ CONSOLE INTERNO ═══════════════════════════════════════════════════════
   // ── Auditoria ─────────────────────────────────────────────────────────────
   {
     metodo: 'POST', caminho: /^audit\/verificar$/,
@@ -235,6 +329,29 @@ export const POLITICA_PADRAO: PoliticaRota = {
   nota: 'Rota sem política declarada.',
 };
 
-export function politicaDe(metodo: Metodo, caminhoSemPrefixo: string): PoliticaRota | null {
-  return POLITICAS.find((p) => p.metodo === metodo && p.caminho.test(caminhoSemPrefixo)) ?? null;
+/**
+ * O padrão do portal fecha ainda mais: sem política declarada, exige sessão e
+ * responde a recusa uniforme. Rota nova no portal que ninguém declarou não
+ * vaza — some.
+ */
+export const POLITICA_PADRAO_PORTAL: PoliticaRota = {
+  metodo: 'POST', caminho: /.*/, superficie: 'portal',
+  tipo: 'escrita', foraDeEscopo: '401_uniforme', exigeSessao: true,
+  nota: 'Rota do portal sem política declarada.',
+};
+
+/**
+ * A superfície faz parte da chave.
+ *
+ * Sem ela, `GET requests/2026-0731` do portal casaria com a política da fila do
+ * DPO — e a rota do titular herdaria a recusa do console, que é `403` e conta
+ * o que não devia. O padrão é `console` para que as políticas já escritas
+ * continuem valendo sem repetir o campo.
+ */
+export function politicaDe(
+  metodo: Metodo, caminhoSemPrefixo: string, superficie: Superficie = 'console',
+): PoliticaRota | null {
+  return POLITICAS.find((p) => p.metodo === metodo
+    && (p.superficie ?? 'console') === superficie
+    && p.caminho.test(caminhoSemPrefixo)) ?? null;
 }

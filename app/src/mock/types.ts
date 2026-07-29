@@ -40,6 +40,12 @@ export type BaseLegal =
   | 'execucao_contrato' | 'exercicio_direitos' | 'protecao_vida' | 'tutela_saude'
   | 'legitimo_interesse' | 'protecao_credito';
 
+/** As dez bases do Art. 7º, em runtime — para quem precisa validar o que chegou de fora. */
+export const BASES_LEGAIS: BaseLegal[] = [
+  'consentimento', 'obrigacao_legal', 'politica_publica', 'pesquisa', 'execucao_contrato',
+  'exercicio_direitos', 'protecao_vida', 'tutela_saude', 'legitimo_interesse', 'protecao_credito',
+];
+
 /** Art. 11 — rol exaustivo para dado sensível. Legítimo interesse não está aqui. */
 export const BASES_PARA_SENSIVEL: BaseLegal[] = [
   'consentimento', 'obrigacao_legal', 'protecao_vida', 'tutela_saude', 'politica_publica', 'pesquisa',
@@ -341,6 +347,25 @@ export interface RevisaoRegistrada {
   quando: string;
 }
 
+/**
+ * Um resíduo que ficou, e a razão pela qual ficou.
+ *
+ * "Parte foi retida por obrigação legal" sem dizer o quê, por qual lei e até
+ * quando não é resposta — é reticência. A tela mais importante do portal é a do
+ * atendimento parcial, e ela só existe porque este tipo existe: separa apagado
+ * de retido, nomeia a lei de cada retenção e dá a **data** de eliminação de
+ * cada resíduo.
+ */
+export interface ItemRetido {
+  /** O que ficou, em linguagem de pessoa. */
+  item: string;
+  baseLegal: BaseLegal;
+  artigo?: string;
+  /** Data absoluta da eliminação do resíduo. Prazo é data, nunca "conforme a lei". */
+  retencaoAte: string;
+  motivo?: string;
+}
+
 export interface Solicitacao {
   id: string;
   protocolo: string;
@@ -348,7 +373,19 @@ export interface Solicitacao {
   titularPseudonimo: string;
   direito: Direito;
   status: EstadoSolicitacao;
+  /**
+   * **Derivado do direito, no servidor** (`mock/direitos.ts`). Nunca lido do
+   * corpo da requisição: se fosse, bastaria pedir eliminação com nível 1.
+   */
   nivelVerificacao: 1 | 2 | 3;
+  /** Aberta pelo próprio titular no portal, ou registrada pelo balcão. */
+  origem?: 'portal' | 'balcao';
+  /** Texto livre do titular, **já redigido**. Opcional: o direito não depende de justificativa. */
+  detalhe?: string;
+  /** O que foi efetivamente apagado, para a tela do atendimento parcial. */
+  apagados?: string[];
+  /** O que ficou, com base legal e data — exigido em recusa e atendimento parcial. */
+  retidos?: ItemRetido[];
   sistemas: string[];
   recebidaEm: string;
   prazoLimiteMs: number;
@@ -412,7 +449,12 @@ export interface AuditLinha {
   id: number;
   ocorridoEm: string;
   ator: string;
-  atorPapel: Papel | 'system';
+  /**
+   * `titular` é o autor do próprio pedido, feito pelo portal. Não é papel da
+   * matriz interna — é a outra ponta do balcão, e o trail precisa saber
+   * distinguir "o DPO abriu por ela" de "ela abriu sozinha".
+   */
+  atorPapel: Papel | 'system' | 'titular';
   acao: string;
   recursoTipo: string;
   recursoId: string;
@@ -553,6 +595,76 @@ export interface Consentimento {
   estado: 'ativo' | 'revogado' | 'expirado';
   revogadoEm?: string;
   titulares: number;
+}
+
+// ── Portal do titular · Risco-001 ───────────────────────────────────────────
+
+/**
+ * Uma verificação em curso.
+ *
+ * `titularId` é `null` quando o identificador não corresponde a cadastro algum —
+ * e a verificação **é criada mesmo assim**, com código e tudo. É o que torna a
+ * recusa indistinguível: não existe caminho em que a ausência de cadastro
+ * produza uma resposta diferente da de um código errado.
+ */
+export interface VerificacaoTitular {
+  id: string;
+  direito: Direito;
+  /** Derivado do direito. Não há setter. */
+  nivelExigido: 1 | 2 | 3;
+  canal: 'email' | 'sms';
+  identificadorHash: string;
+  /** Nunca sai numa resposta: vai pelo canal, como na vida real. */
+  codigo: string;
+  titularId: string | null;
+  criadaEmMs: number;
+  expiraEmMs: number;
+  tentativas: number;
+  confirmadaEmMs?: number;
+  /**
+   * Só a impressão do documento, e só quando o nível 3 a exige. A imagem não
+   * entra no cadastro; o que fica é esta marca e a data do descarte.
+   */
+  documentoImpressao?: string;
+  documentoDescartaEmMs?: number;
+}
+
+/** A credencial do portal — presa ao direito e ao nível da verificação que a produziu. */
+export interface SessaoTitular {
+  token: string;
+  verificacaoId: string;
+  titularId: string;
+  direito: Direito;
+  nivelAtingido: 1 | 2 | 3;
+  expiraEmMs: number;
+}
+
+export type TipoDaCascata = 'cessacao' | 'notificacao' | 'expurgo';
+
+export interface ItemDaCascata {
+  alvo: string;
+  tipo: TipoDaCascata;
+  /** O que acontece ali, sem jargão — inclusive o cripto-shredding. */
+  efeito: string;
+  estado: 'propagado' | 'pendente';
+  iniciadaEmMs: number;
+  confirmadaEmMs?: number;
+}
+
+/**
+ * A revogação **de um titular**, não do campo inteiro.
+ *
+ * Retirar a autorização de uma pessoa não pode derrubar a base legal das
+ * outras — o defeito que o Risco-002 descreve. O registro agregado por campo
+ * (`Consentimento`) continua onde estava; a entidade de consentimento por
+ * titular no schema de produção é o próximo bloco.
+ */
+export interface RevogacaoTitular {
+  id: string;
+  titularId: string;
+  campoId: string;
+  revogadoEmMs: number;
+  cascata: ItemDaCascata[];
 }
 
 export interface Cenario {

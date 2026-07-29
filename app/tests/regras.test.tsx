@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
+import { parse as parseYaml } from 'yaml';
 import { dirname, join, resolve } from 'path';
 import { tmpdir } from 'os';
 import { render, screen, fireEvent, act, cleanup, within } from '@testing-library/react';
@@ -22,7 +23,7 @@ import {
 } from '../src/mock/decisoes';
 import { requestPortal } from '../src/mock/portal';
 import { DIREITOS, REGIME, nivelExigido } from '../src/mock/direitos';
-import { OPERACOES, RAIZES_DO_MOCK, operacaoDe } from '../src/mock/rotas';
+import { OPERACOES, RAIZES_DO_MOCK, ROTAS_APENAS_DEMO } from '../src/mock/rotas';
 import { REGRAS, derivarFila, eDe, minhaFila } from '../src/mock/fila';
 import type { ContadoresDaFila, ItemDaFila } from '../src/mock/fila';
 import {
@@ -718,9 +719,24 @@ describe('T4-02 — concluir o atendimento', () => {
     expect(semRazao.status).toBe(422);
     expect(banco.cenario.solicitacoes.find((x) => x.id === 's1')!.status).toBe('em_analise');
 
-    const comRazao = chamar('dpo', {
+    // PR 16 — fundamento continua obrigatório, e agora a recusa também nomeia o
+    // que ficou: item, lei e data. Sem a lista, 422 mesmo com a razão escrita.
+    const semRetidos = chamar('dpo', {
       metodo: 'POST', caminho: '/v1/requests/s1/concluir',
       body: { desfecho: 'recusado_com_fundamento', evidencia: 'Guarda fiscal obrigatória de 5 anos impede a eliminação agora.' },
+    });
+    expect(semRetidos.status).toBe(422);
+
+    const comRazao = chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/requests/s1/concluir',
+      body: {
+        desfecho: 'recusado_com_fundamento',
+        evidencia: 'Guarda fiscal obrigatória de 5 anos impede a eliminação agora.',
+        retidos: [{
+          item: 'Notas fiscais das suas compras', base_legal: 'obrigacao_legal',
+          artigo: 'Art. 16, I', retencao_ate: '2031-07-29',
+        }],
+      },
     });
     expect(comRazao.status).toBe(200);
     // PR 7 — o estado passou a se chamar como no MAPA.
@@ -4765,5 +4781,465 @@ describe('PR 16 · invariante — o 401 não diz se o cadastro existe', () => {
       expect(corpo).not.toContain(segredo);
     }
     expect(Object.keys(semSessao.body)).toEqual(['erro']);
+  });
+});
+
+describe('PR 16 · as doze rotas — verificação: existem e respondem o contrato?', () => {
+  it('as doze do portal estão declaradas no contrato e têm política própria', () => {
+    const portal = OPERACOES.filter((o) => o.superficie === 'portal');
+    expect(portal).toHaveLength(12);
+    for (const op of portal) {
+      const caminho = op.contrato.replace(/\{[^}]+\}/g, 'x').replace(/^\//, '');
+      const politica = POLITICAS.find((p) => p.superficie === 'portal'
+        && p.metodo === op.metodo && p.caminho.test(caminho));
+      expect(politica, `${op.metodo} ${op.contrato} sem política declarada em politicas.ts`).toBeTruthy();
+    }
+  });
+
+  it('cada uma responde algo que não é o 404 terminal do dispatcher', () => {
+    // Verificação, não validação: a pergunta é se a rota existe, não se o
+    // titular consegue exercer o direito por ela.
+    const { token } = sessaoDoPortal(banco, 'revogacao');
+    const chamadas: [ 'GET' | 'POST', string ][] = [
+      ['GET', '/v1/me/direitos'],
+      ['POST', '/v1/me/verificacao'],
+      ['POST', '/v1/me/verificacao/xx/codigo'],
+      ['POST', '/v1/requests'],
+      ['GET', '/v1/requests/xx'],
+      ['POST', '/v1/requests/xx/mensagens'],
+      ['GET', '/v1/requests/xx/pacote'],
+      ['GET', '/v1/me/consentimentos'],
+      ['POST', '/v1/me/consentimentos/xx/revogacao'],
+      ['GET', '/v1/me/consentimentos/xx/propagacao'],
+      ['GET', '/v1/me/decisoes/xx'],
+      ['POST', '/v1/me/decisoes/xx/revisao'],
+    ];
+    expect(chamadas).toHaveLength(12);
+    for (const [metodo, caminho] of chamadas) {
+      const res = requestPortal<{ erro?: string }>(banco, { metodo, caminho, sessao: token, body: {} });
+      expect(String(res.body?.erro ?? ''), `${metodo} ${caminho} caiu no 404 terminal`)
+        .not.toContain('Rota não encontrada');
+    }
+  });
+
+  it('GET /me/direitos devolve os dez, com nível e prazo, e nenhum dado de titular', () => {
+    const res = requestPortal<{ direitos: any[] }>(banco, { metodo: 'GET', caminho: '/v1/me/direitos' });
+    expect(res.status).toBe(200);
+    expect(res.body.direitos).toHaveLength(10);
+    expect(res.body.direitos.find((d) => d.direito === 'eliminacao').nivel).toBe(3);
+    expect(res.body.direitos.find((d) => d.direito === 'revisao_decisao').prazo_dias).toBe(5);
+    const corpo = JSON.stringify(res.body);
+    for (const t of banco.cenario.titulares) {
+      for (const segredo of Object.values(t.segredos)) expect(corpo).not.toContain(segredo);
+    }
+  });
+});
+
+describe('PR 16 · POST /requests — prazo derivado do direito, gravado antes da resposta', () => {
+  const DIA = 24 * 60 * 60 * 1000;
+
+  it('calcula 15 dias para o acesso e 5 para a revisão do Art. 20', () => {
+    const antes = Date.now();
+    const acesso = requestPortal<{ prazo_limite: string; prazo_dias: number }>(banco, {
+      metodo: 'POST', caminho: '/v1/requests', sessao: sessaoDoPortal(banco, 'acesso').token,
+      body: { direito: 'acesso' },
+    });
+    expect(acesso.status).toBe(201);
+    expect(acesso.body.prazo_dias).toBe(15);
+    expect(Date.parse(acesso.body.prazo_limite) - antes).toBeGreaterThanOrEqual(15 * DIA - 5000);
+    expect(Date.parse(acesso.body.prazo_limite) - antes).toBeLessThan(15 * DIA + 5000);
+
+    const decisao = banco.cenario.titulares[0].decisao!;
+    const revisao = requestPortal<{ prazo_limite: string; prazo_dias: number }>(banco, {
+      metodo: 'POST', caminho: `/v1/me/decisoes/${decisao.id}/revisao`,
+      sessao: sessaoDoPortal(banco, 'revisao_decisao').token,
+      body: { fundamento: 'Não reconheço a recusa; meu emprego é estável há sete anos.' },
+    });
+    expect(revisao.status).toBe(201);
+    expect(revisao.body.prazo_dias).toBe(5);
+    expect(Date.parse(revisao.body.prazo_limite) - antes).toBeLessThan(5 * DIA + 5000);
+  });
+
+  it('o prazo está gravado na solicitação antes de a resposta sair', () => {
+    const res = requestPortal<{ protocolo: string; prazo_limite: string }>(banco, {
+      metodo: 'POST', caminho: '/v1/requests', sessao: sessaoDoPortal(banco, 'acesso').token,
+      body: { direito: 'acesso' },
+    });
+    const gravada = banco.cenario.solicitacoes.find((s) => s.protocolo === res.body.protocolo)!;
+    expect(new Date(gravada.prazoLimiteMs).toISOString()).toBe(res.body.prazo_limite);
+    // E a linha do trail saiu antes: ela já carrega o prazo.
+    const linha = banco.auditoria.find((l) => l.acao === 'SOLICITACAO_ABERTA' && l.protocolo === res.body.protocolo)!;
+    expect(linha.campos.some((c) => c.startsWith('prazo_limite='))).toBe(true);
+  });
+
+  it('o pedido não exige justificativa, e o texto livre passa pelo redator', () => {
+    const semTexto = requestPortal(banco, {
+      metodo: 'POST', caminho: '/v1/requests', sessao: sessaoDoPortal(banco, 'acesso').token,
+      body: { direito: 'acesso' },
+    });
+    expect(semTexto.status).toBe(201);
+
+    const comCpf = requestPortal<{ protocolo: string }>(banco, {
+      metodo: 'POST', caminho: '/v1/requests', sessao: sessaoDoPortal(banco, 'acesso', 1).token,
+      body: { direito: 'acesso', texto: 'Meu CPF é 529.982.247-25, confiram por favor.' },
+    });
+    expect(comCpf.status).toBe(201);
+    const gravada = banco.cenario.solicitacoes.find((s) => s.protocolo === comCpf.body.protocolo)!;
+    expect(gravada.detalhe).toContain('[CPF removido]');
+    expect(gravada.detalhe).not.toContain('529.982.247-25');
+    const linha = banco.auditoria.find((l) => l.protocolo === comCpf.body.protocolo)!;
+    expect(linha.justificativa).not.toContain('529.982.247-25');
+  });
+
+  it('falha de log ao abrir derruba a solicitação inteira: 503 e nenhum protocolo criado', () => {
+    const token = sessaoDoPortal(banco, 'acesso').token;
+    const antes = banco.cenario.solicitacoes.length;
+    banco.simularFalhaDeLog = true;
+    const res = requestPortal<{ erro: string }>(banco, {
+      metodo: 'POST', caminho: '/v1/requests', sessao: token, body: { direito: 'acesso' },
+    });
+    expect(res.status).toBe(503);
+    expect(banco.cenario.solicitacoes).toHaveLength(antes);
+    expect(banco.cenario.solicitacoes.some((s) => s.origem === 'portal')).toBe(false);
+  });
+});
+
+describe('PR 16 · atendimento parcial — retidos[] com base legal e data, item a item', () => {
+  const emAnalise = () => banco.cenario.solicitacoes.find((s) => s.status === 'em_analise')!;
+
+  it('parcial sem retidos[] é recusado com 422', () => {
+    const res = chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/requests/${emAnalise().id}/concluir`,
+      body: { desfecho: 'atendido_parcialmente', evidencia: 'Parte dos dados fica retida por lei.' },
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('retido sem base legal, ou sem data, também é 422', () => {
+    const semBase = chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/requests/${emAnalise().id}/concluir`,
+      body: {
+        desfecho: 'atendido_parcialmente', evidencia: 'Parte dos dados fica retida por lei.',
+        retidos: [{ item: 'Notas fiscais', retencao_ate: '2031-07-29' }],
+      },
+    });
+    expect(semBase.status).toBe(422);
+
+    const semData = chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/requests/${emAnalise().id}/concluir`,
+      body: {
+        desfecho: 'atendido_parcialmente', evidencia: 'Parte dos dados fica retida por lei.',
+        retidos: [{ item: 'Notas fiscais', base_legal: 'obrigacao_legal' }],
+      },
+    });
+    expect(semData.status).toBe(422);
+    expect(String(semData.body && (semData.body as any).erro)).toContain('data de eliminação');
+  });
+
+  it('concluído em parte, o titular vê o que foi apagado e o que ficou — com a lei e a data', () => {
+    const alvo = banco.cenario.solicitacoes.find(
+      (s) => s.status === 'em_analise' && s.titularId === banco.cenario.titulares[0].id,
+    )!;
+    const conclusao = chamar('dpo', {
+      metodo: 'POST', caminho: `/v1/requests/${alvo.id}/concluir`,
+      body: {
+        desfecho: 'atendido_parcialmente',
+        evidencia: 'Cadastro apagado; notas fiscais retidas por obrigação fiscal.',
+        apagados: ['Perfil de navegação', 'Telefone de contato'],
+        retidos: [{
+          item: 'Notas fiscais das suas compras', base_legal: 'obrigacao_legal',
+          artigo: 'Art. 16, I', retencao_ate: '2031-07-29',
+          motivo: 'A legislação fiscal obriga a guardar a nota por cinco anos.',
+        }],
+      },
+    });
+    expect(conclusao.status).toBe(200);
+
+    const { token } = sessaoDoPortal(banco, alvo.direito, 0);
+    const vista = requestPortal<any>(banco, {
+      metodo: 'GET', caminho: `/v1/requests/${alvo.protocolo}`, sessao: token,
+    });
+    expect(vista.status).toBe(200);
+    expect(vista.body.apagados).toHaveLength(2);
+    expect(vista.body.retidos).toEqual([expect.objectContaining({
+      item: 'Notas fiscais das suas compras',
+      base_legal: 'obrigacao_legal',
+      retencao_ate: '2031-07-29',
+    })]);
+    // Recusa e retenção nunca aparecem sem o caminho da autoridade ao lado.
+    expect(vista.body.caminho_da_anpd).toContain('ANPD');
+  });
+});
+
+describe('PR 16 · revogação — cascata registrada, propagação consultável, alerta de 24 h', () => {
+  let varejo: BancoMock;
+  /** Beatriz tem telefone sob consentimento (v-tel), que não é sensível e é revelável. */
+  const TITULAR = 2;
+  const CAMPO = 'v-tel';
+
+  const revogar = () => {
+    const { token } = sessaoDoPortal(varejo, 'revogacao', TITULAR);
+    return requestPortal<any>(varejo, {
+      metodo: 'POST', caminho: `/v1/me/consentimentos/${CAMPO}/revogacao`, sessao: token,
+    });
+  };
+
+  beforeEach(() => { varejo = new BancoMock('varejo'); });
+
+  it('a cascata cobre os três sistemas: quem trata, quem recebeu e o que já foi coletado', () => {
+    const res = revogar();
+    expect(res.status).toBe(200);
+    expect(res.body.cascata).toHaveLength(3);
+    expect(res.body.cascata.map((c: any) => c.tipo).sort())
+      .toEqual(['cessacao', 'expurgo', 'notificacao']);
+    expect(res.body.cascata.find((c: any) => c.tipo === 'notificacao').alvo).toBe('Zenvia');
+    // O expurgo nasce pendente: o executor é externo (Risco-006), e fingir que
+    // concluiu seria a promessa sem instrumento que a auditoria enumerou.
+    expect(res.body.cascata.find((c: any) => c.tipo === 'expurgo').estado).toBe('pendente');
+    expect(varejo.auditoria.some((l) => l.acao === 'CONSENTIMENTO_REVOGADO')).toBe(true);
+  });
+
+  it('o tratamento a jusante é bloqueado com 422 — para quem revogou, e só para ele', () => {
+    revogar();
+    const revelar = (indice: number) => chamar('dpo', {
+      metodo: 'POST', caminho: '/v1/pseudonyms/resolve', purpose: 'atendimento',
+      body: {
+        titularId: varejo.cenario.titulares[indice].id,
+        campo: 'telefone',
+        justificativa: 'Confirmação de contato para o atendimento do protocolo em curso.',
+        protocolo: varejo.cenario.solicitacoes.find((s) => s.titularId === varejo.cenario.titulares[indice].id)?.protocolo,
+      },
+    });
+    // O banco do `chamar` é o `banco` do beforeEach global; aqui a chamada
+    // precisa ir ao cenário de varejo.
+    const bloqueado = request(varejo, {
+      papel: 'dpo', ator: 'teste', metodo: 'POST', caminho: '/v1/pseudonyms/resolve',
+      purpose: 'atendimento',
+      body: {
+        titularId: varejo.cenario.titulares[TITULAR].id, campo: 'telefone',
+        justificativa: 'Confirmação de contato para o atendimento do protocolo em curso.',
+        protocolo: varejo.cenario.solicitacoes.find((s) => s.titularId === varejo.cenario.titulares[TITULAR].id)!.protocolo,
+      },
+    });
+    expect(bloqueado.status).toBe(422);
+    expect(String((bloqueado.body as any).erro)).toContain('retirou a autorização');
+    void revelar;
+
+    // Marina (t1) também tem v-tel e não revogou: a base legal dela continua de pé.
+    const outra = request(varejo, {
+      papel: 'dpo', ator: 'teste', metodo: 'POST', caminho: '/v1/pseudonyms/resolve',
+      purpose: 'atendimento',
+      body: {
+        titularId: varejo.cenario.titulares[0].id, campo: 'telefone',
+        justificativa: 'Confirmação de contato para o atendimento do protocolo em curso.',
+        protocolo: varejo.cenario.solicitacoes.find((s) => s.titularId === varejo.cenario.titulares[0].id)!.protocolo,
+      },
+    });
+    expect(outra.status).toBe(200);
+  });
+
+  it('a propagação é consultável, e revogar duas vezes é 409', () => {
+    revogar();
+    const { token } = sessaoDoPortal(varejo, 'revogacao', TITULAR);
+    const p = requestPortal<any>(varejo, {
+      metodo: 'GET', caminho: `/v1/me/consentimentos/${CAMPO}/propagacao`, sessao: token,
+    });
+    expect(p.status).toBe(200);
+    expect(p.body.itens).toHaveLength(3);
+    expect(p.body.pendentes).toBe(1);
+    expect(p.body.alerta).toBe(false);
+
+    const denovo = requestPortal(varejo, {
+      metodo: 'POST', caminho: `/v1/me/consentimentos/${CAMPO}/revogacao`, sessao: token,
+    });
+    expect(denovo.status).toBe(409);
+  });
+
+  it('pendência acima de 24 h levanta alerta — e o alerta é visível ao titular', () => {
+    revogar();
+    const pendente = varejo.revogacoesTitular[0].cascata.find((c) => c.estado === 'pendente')!;
+    pendente.iniciadaEmMs -= 25 * 60 * 60 * 1000;
+
+    const { token } = sessaoDoPortal(varejo, 'revogacao', TITULAR);
+    const p = requestPortal<any>(varejo, {
+      metodo: 'GET', caminho: `/v1/me/consentimentos/${CAMPO}/propagacao`, sessao: token,
+    });
+    expect(p.body.alerta).toBe(true);
+    expect(p.body.alerta_desde).toBeTruthy();
+    expect(p.body.alerta_texto).toContain('24 h');
+  });
+
+  it('minhas autorizações mostram o texto na versão aceita, e o que se perde ao retirar', () => {
+    const { token } = sessaoDoPortal(varejo, 'revogacao', TITULAR);
+    const res = requestPortal<any>(varejo, {
+      metodo: 'GET', caminho: '/v1/me/consentimentos', sessao: token,
+    });
+    expect(res.status).toBe(200);
+    const tel = res.body.consentimentos.find((c: any) => c.id === CAMPO);
+    expect(tel.versao).toBe('v2');
+    expect(tel.canal).toBe('checkout web');
+    expect(tel.estado).toBe('ativo');
+    expect(tel.o_que_voce_perde.join(' ')).toContain('Zenvia');
+  });
+});
+
+describe('PR 16 · invariante de paridade — contrato e mock, nos dois sentidos (Risco-034)', () => {
+  const CONTRATO = (() => {
+    const doc = parseYaml(readFileSync(join('..', 'api', 'openapi.yaml'), 'utf8')) as any;
+    const ops: string[] = [];
+    for (const [caminho, item] of Object.entries<any>(doc.paths)) {
+      for (const m of ['get', 'post', 'patch', 'delete', 'put']) {
+        if (item[m]) ops.push(`${m.toUpperCase()} ${caminho}`);
+      }
+    }
+    return ops;
+  })();
+
+  it('toda operação do contrato está declarada em rotas.ts', () => {
+    expect(CONTRATO.length).toBeGreaterThan(50);
+    const declaradas = new Set(OPERACOES.map((o) => `${o.metodo} ${o.contrato}`));
+    const orfas = CONTRATO.filter((c) => !declaradas.has(c));
+    expect(orfas, 'operação no contrato sem linha em mock/rotas.ts').toEqual([]);
+  });
+
+  it('toda linha de rotas.ts existe no contrato — o mock nunca vai à frente dele', () => {
+    const noContrato = new Set(CONTRATO);
+    const orfas = OPERACOES
+      .map((o) => `${o.metodo} ${o.contrato}`)
+      .filter((c) => !noContrato.has(c));
+    expect(orfas, 'rota declarada que o contrato não tem').toEqual([]);
+    // E nenhuma linha duplicada: duas declarações da mesma operação escondem
+    // divergência entre elas.
+    expect(new Set(OPERACOES.map((o) => `${o.metodo} ${o.contrato}`)).size).toBe(OPERACOES.length);
+  });
+
+  it('a tabela não é decorativa: toda rota servida responde de verdade', () => {
+    const servidas = OPERACOES.filter((o) => o.mock);
+    expect(servidas.length).toBeGreaterThan(30);
+    for (const op of servidas) {
+      if (op.superficie === 'portal' && op.contrato !== '/requests/{id}/mensagens') continue;
+      const res = request<{ erro?: string }>(banco, {
+        metodo: op.metodo as 'GET' | 'POST' | 'PATCH' | 'DELETE',
+        caminho: op.mock!,
+        papel: op.papel ?? 'dpo',
+        ator: 'teste',
+        body: {},
+      });
+      expect(String(res.body?.erro ?? ''), `${op.metodo} ${op.mock} caiu no 404 terminal do switch`)
+        .not.toContain('Rota não encontrada');
+    }
+  });
+
+  it('quem não é servida diz por quê, e a única razão admitida é ingestão de CI', () => {
+    const semMock = OPERACOES.filter((o) => !o.mock && o.superficie === 'console');
+    for (const op of semMock) {
+      expect(op.motivo, `${op.metodo} ${op.contrato} sem mock e sem motivo`).toBe('ingestao_ci');
+    }
+    // A lista é fechada. Crescer aqui é decisão visível no diff, não omissão.
+    expect(semMock.map((o) => `${o.metodo} ${o.contrato}`).sort()).toEqual([
+      'GET /threat-models/{repo}',
+      'POST /catalog/inventories',
+      'POST /gates/runs',
+      'POST /kms/rotations/{id}/steps',
+      'POST /metrics/snapshots',
+      'POST /purge/runs',
+      'POST /ripds/triage',
+      'POST /telemetry/redaction',
+      'PUT /threat-models/{repo}',
+    ].sort());
+  });
+
+  it('toda raiz que o switch de api.ts atende está declarada — nada entra pela porta dos fundos', () => {
+    const fonte = readFileSync(join('src', 'mock', 'api.ts'), 'utf8');
+    const raizes = [...fonte.matchAll(/case '(GET|POST|PATCH|DELETE) ([a-z.]+)':/g)]
+      .map((m) => `${m[1]} ${m[2]}`);
+    expect(raizes.length, 'sem raiz extraída a varredura não prova nada').toBeGreaterThan(20);
+    const naoDeclaradas = raizes.filter((r) => !RAIZES_DO_MOCK.has(r));
+    expect(naoDeclaradas, 'raiz atendida pelo mock e ausente de mock/rotas.ts').toEqual([]);
+  });
+
+  it('a rota de forja fica fora do contrato — declarada, e sozinha', () => {
+    expect(ROTAS_APENAS_DEMO).toHaveLength(1);
+    expect(ROTAS_APENAS_DEMO[0].mock).toBe('/v1/audit/forjar');
+    expect(CONTRATO.some((c) => c.includes('forjar'))).toBe(false);
+    // E ela continua exigindo o modo demonstração.
+    banco.modoDemo = false;
+    expect(chamar('dpo', { metodo: 'POST', caminho: '/v1/audit/forjar', body: { id: 2 } }).status).toBe(404);
+  });
+
+  it('o contrato declara a superfície separada do portal e o esquema próprio do titular', () => {
+    const doc = parseYaml(readFileSync(join('..', 'api', 'openapi.yaml'), 'utf8')) as any;
+    expect(doc.components.securitySchemes.sessaoTitular).toBeTruthy();
+    for (const op of OPERACOES.filter((o) => o.superficie === 'portal')) {
+      const item = doc.paths[op.contrato];
+      const operacao = item[op.metodo.toLowerCase()];
+      const seguranca = operacao.security ?? doc.security;
+      const esquemas = seguranca.flatMap((s: any) => Object.keys(s));
+
+      if (op.contrato === '/requests/{id}/mensagens') {
+        // A única das doze que vive nas duas superfícies: é a mesma conversa,
+        // das duas pontas. Por isso aceita os dois esquemas, e não um servidor
+        // só — e é justamente por aceitar os dois que precisa dizê-lo.
+        expect(esquemas.sort()).toEqual(['oidc', 'sessaoTitular']);
+        continue;
+      }
+      const servidor = operacao.servers ?? item.servers;
+      expect(servidor?.[0]?.url, `${op.contrato} sem servidor de portal declarado`)
+        .toContain('portal.lastro');
+      // E nenhuma delas aceita o SSO interno: o console não entra pelo portal.
+      expect(esquemas).not.toContain('oidc');
+    }
+  });
+
+  it('nenhuma rota do portal empresta permissão da matriz interna', () => {
+    for (const p of POLITICAS.filter((x) => x.superficie === 'portal')) {
+      expect(p.acao, `${p.caminho} declara ação de papel interno`).toBeUndefined();
+      expect(p.foraDeEscopo).toBe('401_uniforme');
+    }
+  });
+});
+
+describe('PR 16 · T4 na tela — o balcão consegue responder o que o portal mostra', () => {
+  const montarT4 = () => {
+    limparBancosDaSessao();
+    useSessao.setState({
+      papel: 'dpo', banco: new BancoMock('banco'), versao: 0,
+      avisos: [], recusas: {}, protocoloSelecionado: '2026-0731',
+    });
+    return render(<MemoryRouter><T4 /></MemoryRouter>);
+  };
+
+  it('a lista de retidos só aparece quando o desfecho a exige', () => {
+    montarT4();
+    expect(screen.queryByText(/o que ficou retido/i)).toBeNull();
+    fireEvent.change(screen.getByLabelText(/desfecho/i), { target: { value: 'atendido_parcialmente' } });
+    expect(screen.getByText(/o que ficou retido/i)).toBeInTheDocument();
+  });
+
+  /**
+   * O ponto do teste não é o formulário: é que a regra nova não pode existir
+   * apenas como 422. Botão que só sabe recusar transforma a exigência em
+   * obstáculo, e obstáculo é o que faz alguém procurar o caminho de fora.
+   */
+  it('sem item completo o botão não deixa concluir; com item completo, conclui', () => {
+    montarT4();
+    fireEvent.change(screen.getByLabelText(/desfecho/i), { target: { value: 'atendido_parcialmente' } });
+    const concluir = screen.getByRole('button', { name: /registrar conclusão/i });
+    expect(concluir).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '+ item retido' }));
+    expect(concluir).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/item retido 1/i), { target: { value: 'Notas fiscais' } });
+    expect(concluir).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/retenção até, item 1/i), { target: { value: '2031-07-29' } });
+    expect(concluir).not.toBeDisabled();
+
+    fireEvent.click(concluir);
+    const s = useSessao.getState().banco.cenario.solicitacoes.find((x) => x.protocolo === '2026-0731')!;
+    expect(s.desfecho).toBe('atendido_parcialmente');
+    expect(s.retidos).toEqual([expect.objectContaining({
+      item: 'Notas fiscais', baseLegal: 'obrigacao_legal', retencaoAte: '2031-07-29',
+    })]);
   });
 });

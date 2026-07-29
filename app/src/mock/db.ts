@@ -1,10 +1,13 @@
 import { sha256 } from '../lib/sha256';
 import { CENARIOS } from './scenarios';
-import type { AuditLinha, Cenario, Finalidade, Papel, Reclassificacao } from './types';
+import type {
+  AuditLinha, Cenario, Finalidade, Papel, Reclassificacao,
+  RevogacaoTitular, SessaoTitular, VerificacaoTitular,
+} from './types';
 
 export interface EntradaAudit {
   ator: string;
-  atorPapel: Papel | 'system';
+  atorPapel: Papel | 'system' | 'titular';
   acao: string;
   recursoTipo: string;
   recursoId: string;
@@ -54,6 +57,65 @@ export class BancoMock {
 
   /** Carimbos de busca por ator, para o limite de taxa. Busca em rajada é enumeração. */
   private buscasPorAtor = new Map<string, number[]>();
+
+  // ── Portal do titular ────────────────────────────────────────────────────
+
+  /**
+   * Verificações em curso, cadastradas ou não.
+   *
+   * `private` de propósito: o único caminho para o código é `codigoDaVerificacao`,
+   * que existe para o teste e para a demonstração — na vida real o código sai
+   * pelo canal e nunca por uma leitura de memória. Deixá-lo acessível pela
+   * estrutura convidaria alguma tela a "só conferir" e o segredo viraria dado.
+   */
+  private verificacoes = new Map<string, VerificacaoTitular>();
+
+  private sessoesTitular = new Map<string, SessaoTitular>();
+
+  /** Revogações por titular, com a cascata de cada uma. */
+  revogacoesTitular: RevogacaoTitular[] = [];
+
+  private proximoIdPortal = 1;
+
+  /** Identificador sequencial do portal. Separado do `proximoId` do trail de propósito. */
+  proximoProtocoloPortal(): string {
+    return `P-${String(this.proximoIdPortal++).padStart(4, '0')}`;
+  }
+
+  registrarVerificacao(v: VerificacaoTitular): void {
+    this.verificacoes.set(v.id, v);
+  }
+
+  verificacao(id: string): VerificacaoTitular | undefined {
+    return this.verificacoes.get(id);
+  }
+
+  /**
+   * O código, para teste e demonstração — nunca para uma resposta HTTP.
+   *
+   * Devolve string vazia para verificação inexistente, e não `undefined`: quem
+   * chamar com id inventado recebe algo que nunca confere, em vez de um erro
+   * que diferencia "não existe" de "não confere".
+   */
+  codigoDaVerificacao(id: string): string {
+    return this.verificacoes.get(id)?.codigo ?? '';
+  }
+
+  abrirSessaoTitular(s: SessaoTitular): void {
+    this.sessoesTitular.set(s.token, s);
+  }
+
+  sessaoTitular(token: string | undefined, agoraMs = Date.now()): SessaoTitular | null {
+    if (!token) return null;
+    const s = this.sessoesTitular.get(token);
+    if (!s || s.expiraEmMs <= agoraMs) return null;
+    return s;
+  }
+
+  /** A revogação deste titular para este campo, se houver. */
+  revogacaoDe(titularId: string, campoId: string): RevogacaoTitular | undefined {
+    return this.revogacoesTitular.find((r) => r.titularId === titularId && r.campoId === campoId);
+  }
 
   constructor(cenarioId: string) {
     /**
