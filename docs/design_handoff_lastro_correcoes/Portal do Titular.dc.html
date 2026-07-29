@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  body { margin: 0; background: #DDE3E4; }
+  a { color: #0B5F66; }
+  a:hover { color: #0F7E86; }
+  :focus-visible { outline: 2px solid #0F7E86; outline-offset: 2px; border-radius: 4px; }
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:#DDE3E4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#0E1719;display:flex;flex-wrap:wrap;align-items:stretch">
+
+  <nav aria-label="Telas do portal" style="flex:0 1 262px;min-width:238px;background:#FFFFFF;border-right:1px solid #C9D4D5;padding:20px 12px 24px;display:flex;flex-direction:column;gap:3px">
+    <div style="padding:4px 10px 18px;display:flex;flex-direction:column;gap:3px">
+      <span style="font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;font-size:21px;letter-spacing:-.02em">Portal do Titular</span>
+      <span style="font-size:12.5px;color:#6E8184;letter-spacing:.07em;text-transform:uppercase">Lastro · lado de fora</span>
+    </div>
+    <sc-for list="{{ telas }}" as="t" hint-placeholder-count="11">
+      <button type="button" style="{{ t.estilo }}" onClick="{{ t.ir }}"><span style="{{ t.estiloNum }}">{{ t.num }}</span> {{ t.rot }}</button>
+    </sc-for>
+    <div style="margin-top:auto;padding:16px 10px 0;border-top:1px solid #C9D4D5;display:flex;flex-direction:column;gap:8px">
+      <button type="button" onClick="{{ alternarNotas }}" style="text-align:left;border:1px solid #C9D4D5;background:#FFFFFF;border-radius:6px;padding:8px 11px;cursor:pointer;font:inherit;font-size:13px">{{ rotuloNotas }}</button>
+      <span style="font-size:12.5px;color:#6E8184;line-height:1.5">Fecha o P0 (Risco-001) e os Riscos 002 e 009 — o lado do titular que o contrato de produção não tinha.</span>
+    </div>
+  </nav>
+
+  <main style="flex:1 1 560px;min-width:0;display:flex;flex-wrap:wrap;gap:28px;padding:32px;align-items:flex-start;justify-content:center">
+
+    <div style="flex:0 0 auto;display:flex;flex-direction:column;gap:14px;align-items:center">
+      <div style="width:420px;max-width:100%;background:#FFFFFF;border:1px solid #C9D4D5;border-radius:26px;box-shadow:0 22px 48px -26px rgba(14,23,25,.5);overflow:hidden;display:flex;flex-direction:column">
+
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px 8px;font-size:12.5px;color:#6E8184">
+          <span>9:41</span>
+          <span style="font-size:12.5px">privacidade.creditoia.com.br</span>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:12px;padding:8px 20px 14px;border-bottom:1px solid #E4EAEB">
+          <sc-if value="{{ temVoltar }}">
+            <button type="button" onClick="{{ voltar }}" aria-label="Voltar" style="border:1px solid #C9D4D5;background:#FFFFFF;border-radius:8px;width:44px;height:44px;cursor:pointer;font:inherit;font-size:17px;color:#0B5F66;display:grid;place-items:center">←</button>
+          </sc-if>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+            <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:17px;line-height:1.2">{{ tituloTela }}</span>
+            <span style="font-size:12.5px;color:#6E8184">{{ subtituloTela }}</span>
+          </div>
+        </div>
+
+        <div style="padding:20px;display:flex;flex-direction:column;gap:18px;min-height:600px">
+
+          <sc-if value="{{ eInicio }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <p style="margin:0;font-size:16px;line-height:1.6;color:#3E4A4C;text-wrap:pretty">Você decide o que fazemos com os seus dados. Escolha o que quer pedir — a gente responde por escrito, com prazo.</p>
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <sc-for list="{{ direitos }}" as="d" hint-placeholder-count="10">
+                  <button type="button" onClick="{{ d.escolher }}" style="display:flex;align-items:center;gap:12px;text-align:left;width:100%;min-height:56px;padding:13px 15px;border:1px solid #C9D4D5;border-radius:10px;background:#FFFFFF;cursor:pointer;font:inherit">
+                    <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+                      <span style="font-size:15.5px;line-height:1.35">{{ d.rot }}</span>
+                      <span style="font-size:12.5px;color:#6E8184">{{ d.legal }} · resposta em {{ d.prazoRot }}</span>
+                    </span>
+                    <span style="font-size:17px;color:#0B5F66">→</span>
+                  </button>
+                </sc-for>
+              </div>
+              <div style="padding:14px 16px;background:#F2F6F6;border:1px solid #DAE3E4;border-radius:10px;display:flex;flex-direction:column;gap:8px">
+                <span style="font-size:14.5px;font-weight:600">Já tenho um pedido aberto</span>
+                <button type="button" onClick="{{ irAcompanhar }}" style="align-self:flex-start;min-height:44px;border:1px solid #0B5F66;background:#FFFFFF;color:#0B5F66;border-radius:8px;padding:10px 16px;cursor:pointer;font:inherit;font-size:14.5px">Acompanhar pelo protocolo</button>
+              </div>
+              <p style="margin:0;font-size:12.5px;color:#6E8184;line-height:1.6">Pedir não custa nada e não muda a sua relação com a empresa. Se a gente não puder atender, explicamos por escrito qual lei impede.</p>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ eIdentificacao }}">
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <div style="padding:14px 16px;background:#DCEAEA;border:1px solid #0B5F6633;border-radius:10px;display:flex;flex-direction:column;gap:4px">
+                <span style="font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:#495A5D">Seu pedido</span>
+                <span style="font-size:15.5px;line-height:1.35">{{ direitoEscolhido.rot }}</span>
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <span style="font-size:14.5px;font-weight:600">Por que pedimos confirmação</span>
+                <p style="margin:0;font-size:14.5px;line-height:1.6;color:#3E4A4C;text-wrap:pretty">{{ textoNivel }}</p>
+                <div style="display:flex;gap:6px;align-items:center">
+                  <sc-for list="{{ escadaNivel }}" as="n" hint-placeholder-count="3">
+                    <span style="{{ n.estilo }}">{{ n.rot }}</span>
+                  </sc-for>
+                </div>
+                <span style="font-size:12.5px;color:#6E8184;line-height:1.55">Quanto mais definitivo o pedido, mais forte a confirmação. Apagar dados não se desfaz — por isso o nível mais alto.</span>
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:14px;border-top:1px solid #E4EAEB;padding-top:16px">
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <label for="pt-email" style="font-size:14px;font-weight:600">E-mail ou telefone que você usa com a gente</label>
+                  <input id="pt-email" type="email" autocomplete="email" placeholder="voce@exemplo.com" style="font:inherit;font-size:16px;min-height:48px;border:1px solid #C9D4D5;border-radius:8px;padding:10px 12px;background:#FFFFFF" />
+                  <span style="font-size:12.5px;color:#6E8184">Enviamos um código de 6 dígitos. Não pedimos senha.</span>
+                </div>
+
+                <sc-if value="{{ pedeCadastro }}">
+                  <div style="display:flex;flex-direction:column;gap:6px">
+                    <label for="pt-nasc" style="font-size:14px;font-weight:600">Data de nascimento</label>
+                    <input id="pt-nasc" type="text" inputMode="numeric" placeholder="dd/mm/aaaa" style="font:inherit;font-size:16px;min-height:48px;border:1px solid #C9D4D5;border-radius:8px;padding:10px 12px;background:#FFFFFF" />
+                    <span style="font-size:12.5px;color:#6E8184">Conferimos contra o que já temos — não guardamos esta tentativa.</span>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{ pedeDocumento }}">
+                  <div style="display:flex;flex-direction:column;gap:8px;padding:14px 16px;background:#F3E7CE;border:1px solid #8E5C0844;border-radius:10px">
+                    <span style="font-size:14px;font-weight:600">Documento com foto</span>
+                    <p style="margin:0;font-size:13.5px;line-height:1.55;color:#3E4A4C">Só para pedidos que não se desfazem. A imagem é usada uma vez para conferir, não entra no seu cadastro e é descartada em 30 dias — com registro da eliminação.</p>
+                    <button type="button" style="align-self:flex-start;min-height:44px;border:1px dashed #8E5C08;background:#FFFFFF;color:#8E5C08;border-radius:8px;padding:10px 16px;cursor:pointer;font:inherit;font-size:14px">Enviar foto do documento</button>
+                  </div>
+                </sc-if>
+
+                <button type="button" onClick="{{ enviarCodigo }}" style="min-height:52px;border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:10px;padding:14px;cursor:pointer;font:inherit;font-size:16px;font-weight:600">Enviar código de confirmação</button>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ ePedido }}">
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <div style="padding:12px 14px;background:#DDEBE0;border:1px solid #2F6E4544;border-radius:10px;font-size:14px;color:#1F4433">Identidade confirmada no nível {{ nivelAtual }}.</div>
+
+              <sc-if value="{{ ePedidoRevisao }}">
+                <div style="display:flex;flex-direction:column;gap:14px">
+                  <div style="padding:14px 16px;border:1px solid #C9D4D5;border-radius:10px;display:flex;flex-direction:column;gap:8px">
+                    <span style="font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:#6E8184">Decisão que você está contestando</span>
+                    <span style="font-size:15.5px;line-height:1.4">Crédito recusado em 22/07/2026</span>
+                    <span style="font-size:13.5px;color:#495A5D;line-height:1.55">Foi uma decisão automática. Os fatores que mais pesaram: histórico de pagamento (44%), tempo de relacionamento (28%), renda declarada (18%).</span>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:6px">
+                    <label for="pt-contest" style="font-size:14px;font-weight:600">O que você quer que a gente reveja</label>
+                    <textarea id="pt-contest" value="{{ texto }}" onChange="{{ setTexto }}" placeholder="Ex.: quitei a dívida em junho e tenho o comprovante." style="font:inherit;font-size:16px;min-height:112px;border:1px solid #C9D4D5;border-radius:8px;padding:10px 12px;background:#FFFFFF;resize:vertical"></textarea>
+                    <span style="font-size:12.5px;color:#6E8184">Uma pessoa vai analisar — não é o mesmo sistema decidindo de novo. Você recebe a resposta e o motivo.</span>
+                  </div>
+                  <button type="button" style="align-self:flex-start;min-height:44px;border:1px dashed #C9D4D5;background:#FFFFFF;border-radius:8px;padding:10px 16px;cursor:pointer;font:inherit;font-size:14px;color:#0B5F66">Anexar comprovante (opcional)</button>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ ePedidoComum }}">
+                <div style="display:flex;flex-direction:column;gap:14px">
+                  <div style="display:flex;flex-direction:column;gap:6px">
+                    <label for="pt-obs" style="font-size:14px;font-weight:600">Quer contar mais alguma coisa? <span style="font-weight:400;color:#6E8184">(opcional)</span></label>
+                    <textarea id="pt-obs" value="{{ texto }}" onChange="{{ setTexto }}" placeholder="Se houver algo específico, escreva aqui." style="font:inherit;font-size:16px;min-height:96px;border:1px solid #C9D4D5;border-radius:8px;padding:10px 12px;background:#FFFFFF;resize:vertical"></textarea>
+                    <span style="font-size:12.5px;color:#6E8184">Não precisa justificar o pedido — o direito é seu. Não escreva número de documento aqui; se escrever, removemos antes de guardar.</span>
+                  </div>
+                  <sc-if value="{{ ePedidoEliminacao }}">
+                    <div style="padding:14px 16px;background:#F5DEDF;border:1px solid #9E1F2644;border-radius:10px;display:flex;flex-direction:column;gap:6px">
+                      <span style="font-size:14px;font-weight:600">O que apagar significa</span>
+                      <p style="margin:0;font-size:13.5px;line-height:1.55;color:#3E4A4C">Alguns dados a lei nos obriga a guardar por prazo definido — dados de cobrança, por exemplo. Vamos apagar tudo que for possível e listar, na resposta, o que ficou e por qual lei.</p>
+                    </div>
+                  </sc-if>
+                </div>
+              </sc-if>
+
+              <div style="display:flex;flex-direction:column;gap:10px;border-top:1px solid #E4EAEB;padding-top:16px">
+                <div style="display:flex;justify-content:space-between;gap:12px;font-size:14px">
+                  <span style="color:#6E8184">Prazo de resposta</span>
+                  <span style="font-weight:600">{{ direitoEscolhido.prazoRot }}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:12px;font-size:14px">
+                  <span style="color:#6E8184">Base na lei</span>
+                  <span style="font-weight:600">{{ direitoEscolhido.legal }}</span>
+                </div>
+                <button type="button" onClick="{{ abrirPedido }}" style="min-height:52px;border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:10px;padding:14px;cursor:pointer;font:inherit;font-size:16px;font-weight:600;margin-top:6px">Enviar pedido</button>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ eProtocolo }}">
+            <div style="display:flex;flex-direction:column;gap:20px">
+              <div style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">
+                <span style="display:inline-flex;padding:5px 12px;border-radius:999px;white-space:nowrap;font-size:13px;font-weight:600;background:#DDEBE0;color:#1F4433;border:1px solid #2F6E4544">Pedido recebido</span>
+                <p style="margin:0;font-size:16px;line-height:1.6;color:#3E4A4C">Guardamos o seu pedido e o prazo já está correndo. Enviamos este número para o seu e-mail.</p>
+              </div>
+              <div style="padding:18px;border:1px solid #C9D4D5;border-radius:12px;display:flex;flex-direction:column;gap:14px">
+                <div style="display:flex;flex-direction:column;gap:3px">
+                  <span style="font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:#6E8184">Protocolo</span>
+                  <span style="font-family:ui-monospace,Menlo,monospace;font-size:19px;font-weight:600">{{ protocolo }}</span>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:3px">
+                  <span style="font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:#6E8184">Resposta até</span>
+                  <span style="font-size:16px">{{ prazoData }} <span style="color:#6E8184">({{ direitoEscolhido.prazoRot }})</span></span>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <span style="font-size:14.5px;font-weight:600">O que acontece agora</span>
+                <sc-for list="{{ etapas }}" as="e" hint-placeholder-count="3">
+                  <div style="display:grid;grid-template-columns:26px minmax(0,1fr);gap:12px;align-items:start">
+                    <span style="{{ e.estiloNum }}">{{ e.n }}</span>
+                    <div style="display:flex;flex-direction:column;gap:2px">
+                      <span style="font-size:14.5px;line-height:1.4">{{ e.rot }}</span>
+                      <span style="font-size:12.5px;color:#6E8184;line-height:1.5">{{ e.det }}</span>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+              <button type="button" onClick="{{ irAcompanhar }}" style="min-height:52px;border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:10px;padding:14px;cursor:pointer;font:inherit;font-size:16px;font-weight:600">Acompanhar este pedido</button>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ eAcompanhar }}">
+            <div style="display:flex;flex-direction:column;gap:20px">
+              <div style="padding:16px;border:1px solid #C9D4D5;border-radius:12px;display:flex;flex-direction:column;gap:10px">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;flex-wrap:wrap">
+                  <span style="font-family:ui-monospace,Menlo,monospace;font-size:15px;font-weight:600">{{ protocolo }}</span>
+                  <span style="display:inline-flex;padding:4px 11px;border-radius:999px;white-space:nowrap;font-size:12.5px;font-weight:600;background:#DCEAEA;color:#0B5F66;border:1px solid #0B5F6640">em análise</span>
+                </div>
+                <span style="font-size:14.5px;line-height:1.4">{{ direitoEscolhido.rot }}</span>
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <div style="height:6px;border-radius:3px;background:#E4EAEB;overflow:hidden"><i style="display:block;height:100%;width:34%;background:#0B5F66"></i></div>
+                  <span style="font-size:13px;color:#8E5C08;font-weight:600">Faltam 9 dias · resposta até {{ prazoData }}</span>
+                </div>
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <span style="font-size:14.5px;font-weight:600">Andamento</span>
+                <sc-for list="{{ andamento }}" as="a" hint-placeholder-count="3">
+                  <div style="display:grid;grid-template-columns:76px minmax(0,1fr);gap:12px;padding-bottom:12px;border-bottom:1px solid #E4EAEB">
+                    <span style="font-size:12.5px;color:#6E8184">{{ a.q }}</span>
+                    <span style="font-size:14px;line-height:1.5">{{ a.t }}</span>
+                  </div>
+                </sc-for>
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:10px;border-top:1px solid #E4EAEB;padding-top:16px">
+                <span style="font-size:14.5px;font-weight:600">Falar sobre este pedido</span>
+                <textarea value="{{ texto }}" onChange="{{ setTexto }}" placeholder="Escreva aqui se quiser acrescentar algo." style="font:inherit;font-size:16px;min-height:88px;border:1px solid #C9D4D5;border-radius:8px;padding:10px 12px;background:#FFFFFF;resize:vertical"></textarea>
+                <button type="button" style="align-self:flex-start;min-height:44px;border:1px solid #0B5F66;background:#FFFFFF;color:#0B5F66;border-radius:8px;padding:10px 18px;cursor:pointer;font:inherit;font-size:14.5px">Enviar mensagem</button>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ eResposta }}">
+            <div style="display:flex;flex-direction:column;gap:20px">
+              <div style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">
+                <span style="display:inline-flex;padding:5px 12px;border-radius:999px;white-space:nowrap;font-size:13px;font-weight:600;background:#DDEBE0;color:#1F4433;border:1px solid #2F6E4544">Atendido em 6 dias</span>
+                <p style="margin:0;font-size:16px;line-height:1.6;color:#3E4A4C">Seus dados estão prontos. O arquivo é seu e o link vale por 24 horas — depois disso, pede de novo aqui, sem custo.</p>
+              </div>
+              <div style="padding:18px;border:1px solid #C9D4D5;border-radius:12px;display:flex;flex-direction:column;gap:14px">
+                <div style="display:flex;flex-direction:column;gap:4px">
+                  <span style="font-size:15.5px;font-weight:600">Seus dados · {{ protocolo }}</span>
+                  <span style="font-size:13px;color:#6E8184">4 sistemas · 22 campos · assinado digitalmente</span>
+                </div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap">
+                  <button type="button" style="min-height:48px;border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:8px;padding:12px 18px;cursor:pointer;font:inherit;font-size:15px;font-weight:600">Baixar em PDF</button>
+                  <button type="button" style="min-height:48px;border:1px solid #C9D4D5;background:#FFFFFF;border-radius:8px;padding:12px 18px;cursor:pointer;font:inherit;font-size:15px">Baixar em JSON</button>
+                </div>
+                <span style="font-size:12.5px;color:#8E5C08">O link expira em 23 h 41 min. Ninguém além de você recebe este arquivo.</span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <span style="font-size:14.5px;font-weight:600">O que está no arquivo</span>
+                <sc-for list="{{ conteudoPacote }}" as="c" hint-placeholder-count="4">
+                  <div style="display:flex;justify-content:space-between;gap:12px;padding-bottom:10px;border-bottom:1px solid #E4EAEB">
+                    <span style="font-size:14px">{{ c.rot }}</span>
+                    <span style="font-size:13px;color:#6E8184">{{ c.det }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ eRecusa }}">
+            <div style="display:flex;flex-direction:column;gap:20px">
+              <div style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">
+                <span style="display:inline-flex;padding:5px 12px;border-radius:999px;white-space:nowrap;font-size:13px;font-weight:600;background:#F3E7CE;color:#7A4E06;border:1px solid #8E5C0844">Atendido em parte</span>
+                <p style="margin:0;font-size:16px;line-height:1.6;color:#3E4A4C">Apagamos o que era possível. Uma parte a lei nos obriga a manter — e você tem o direito de saber exatamente qual, e até quando.</p>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <span style="font-size:14.5px;font-weight:600">Apagado</span>
+                <div style="padding:14px 16px;background:#DDEBE0;border:1px solid #2F6E4544;border-radius:10px;display:flex;flex-direction:column;gap:6px">
+                  <span style="font-size:14px">Histórico de navegação, preferências de comunicação e dados de perfil comportamental.</span>
+                  <span style="font-size:12.5px;color:#1F4433">3 sistemas · confirmado com prova de eliminação em 28/07</span>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <span style="font-size:14.5px;font-weight:600">Mantido, e por quê</span>
+                <sc-for list="{{ retidos }}" as="r" hint-placeholder-count="2">
+                  <div style="padding:14px 16px;border:1px solid #C9D4D5;border-radius:10px;display:flex;flex-direction:column;gap:5px">
+                    <span style="font-size:14.5px;font-weight:600">{{ r.rot }}</span>
+                    <span style="font-size:13.5px;color:#495A5D;line-height:1.55">{{ r.motivo }}</span>
+                    <span style="font-size:12.5px;color:#8E5C08">Apagamos automaticamente em {{ r.ate }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="padding:16px;background:#F2F6F6;border:1px solid #DAE3E4;border-radius:10px;display:flex;flex-direction:column;gap:10px">
+                <span style="font-size:14px;font-weight:600">Não concorda com esta resposta?</span>
+                <p style="margin:0;font-size:13.5px;line-height:1.55;color:#3E4A4C">Você pode pedir revisão aqui, ou reclamar diretamente à ANPD — a autoridade nacional. Os dois caminhos são seus, e um não impede o outro.</p>
+                <div style="display:flex;gap:10px;flex-wrap:wrap">
+                  <button type="button" style="min-height:44px;border:1px solid #0B5F66;background:#FFFFFF;color:#0B5F66;border-radius:8px;padding:10px 16px;cursor:pointer;font:inherit;font-size:14.5px">Pedir revisão</button>
+                  <button type="button" style="min-height:44px;border:1px solid #C9D4D5;background:#FFFFFF;border-radius:8px;padding:10px 16px;cursor:pointer;font:inherit;font-size:14.5px">Como falar com a ANPD</button>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ eConsentimentos }}">
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <p style="margin:0;font-size:16px;line-height:1.6;color:#3E4A4C;text-wrap:pretty">Estas são as autorizações que você deu. Retirar é tão simples quanto dar — e vale a partir de agora.</p>
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <sc-for list="{{ consentimentos }}" as="c" hint-placeholder-count="3">
+                  <div style="padding:16px;border:1px solid #C9D4D5;border-radius:12px;display:flex;flex-direction:column;gap:10px">
+                    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+                      <span style="font-size:15.5px;font-weight:600;line-height:1.35;flex:1">{{ c.rot }}</span>
+                      <span style="{{ c.estiloEstado }}">{{ c.estadoRot }}</span>
+                    </div>
+                    <span style="font-size:13.5px;color:#495A5D;line-height:1.55">{{ c.texto }}</span>
+                    <span style="font-size:12.5px;color:#6E8184">{{ c.quando }}</span>
+                    <sc-if value="{{ c.ativo }}">
+                      <button type="button" onClick="{{ c.revogar }}" style="align-self:flex-start;min-height:44px;border:1px solid #9E1F26;background:#FFFFFF;color:#9E1F26;border-radius:8px;padding:10px 16px;cursor:pointer;font:inherit;font-size:14.5px">Retirar esta autorização</button>
+                    </sc-if>
+                    <sc-if value="{{ c.revogado }}">
+                      <span style="font-size:12.5px;color:#1F4433">Retirada por você em 29/07/2026 · 3 sistemas pararam de usar</span>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+              <p style="margin:0;font-size:12.5px;color:#6E8184;line-height:1.6">Retirar uma autorização não apaga o que já aconteceu antes — e não afeta o que a gente usa por outro motivo previsto em lei, como cobrança de um contrato. Quando for o caso, dizemos qual.</p>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ eRevogar }}">
+            <div style="display:flex;flex-direction:column;gap:20px">
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:21px;line-height:1.25">Retirar a autorização de {{ alvoRevogacao }}?</span>
+                <p style="margin:0;font-size:16px;line-height:1.6;color:#3E4A4C">Vale a partir de agora. Veja o que muda, para você não ser surpreendido depois.</p>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <span style="font-size:14.5px;font-weight:600">O que acontece</span>
+                <sc-for list="{{ cascata }}" as="c" hint-placeholder-count="4">
+                  <div style="display:grid;grid-template-columns:20px minmax(0,1fr);gap:12px;align-items:start">
+                    <span style="{{ c.estiloPonto }}"></span>
+                    <div style="display:flex;flex-direction:column;gap:2px">
+                      <span style="font-size:14.5px;line-height:1.45">{{ c.rot }}</span>
+                      <span style="font-size:12.5px;color:#6E8184;line-height:1.5">{{ c.det }}</span>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="padding:14px 16px;background:#F3E7CE;border:1px solid #8E5C0844;border-radius:10px;display:flex;flex-direction:column;gap:6px">
+                <span style="font-size:14px;font-weight:600">Você perde um recurso</span>
+                <p style="margin:0;font-size:13.5px;line-height:1.55;color:#3E4A4C">Sem a biometria, a entrada no app volta a ser por senha e código. Você pode autorizar de novo quando quiser.</p>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:10px;border-top:1px solid #E4EAEB;padding-top:16px">
+                <button type="button" onClick="{{ confirmarRevogacao }}" style="min-height:52px;border:1px solid #9E1F26;background:#9E1F26;color:#FFFFFF;border-radius:10px;padding:14px;cursor:pointer;font:inherit;font-size:16px;font-weight:600">Retirar autorização</button>
+                <button type="button" onClick="{{ irConsentimentos }}" style="min-height:48px;border:1px solid #C9D4D5;background:#FFFFFF;border-radius:10px;padding:12px;cursor:pointer;font:inherit;font-size:15px">Manter como está</button>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ eRevogado }}">
+            <div style="display:flex;flex-direction:column;gap:20px">
+              <div style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">
+                <span style="display:inline-flex;padding:5px 12px;border-radius:999px;white-space:nowrap;font-size:13px;font-weight:600;background:#DDEBE0;color:#1F4433;border:1px solid #2F6E4544">Autorização retirada</span>
+                <p style="margin:0;font-size:16px;line-height:1.6;color:#3E4A4C">Feito. Registramos com data e hora, e você recebeu o comprovante por e-mail.</p>
+              </div>
+              <div style="padding:18px;border:1px solid #C9D4D5;border-radius:12px;display:flex;flex-direction:column;gap:12px">
+                <span style="font-size:14.5px;font-weight:600">Onde já parou de valer</span>
+                <sc-for list="{{ propagacao }}" as="p" hint-placeholder-count="3">
+                  <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding-bottom:10px;border-bottom:1px solid #E4EAEB">
+                    <span style="font-size:14px">{{ p.rot }}</span>
+                    <span style="{{ p.estilo }}">{{ p.estado }}</span>
+                  </div>
+                </sc-for>
+                <span style="font-size:12.5px;color:#6E8184;line-height:1.55">Se algum sistema não confirmar em 24 h, abrimos um alerta interno e avisamos você — a pendência não fica invisível.</span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <span style="font-size:14.5px;font-weight:600">E os dados biométricos que já existiam?</span>
+                <p style="margin:0;font-size:14px;line-height:1.6;color:#3E4A4C">Foram eliminados junto — a chave que os protegia foi destruída, o que torna a leitura impossível. O comprovante está no seu e-mail.</p>
+              </div>
+              <button type="button" onClick="{{ irConsentimentos }}" style="min-height:48px;border:1px solid #C9D4D5;background:#FFFFFF;border-radius:10px;padding:12px;cursor:pointer;font:inherit;font-size:15px">Ver minhas autorizações</button>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ eFalha }}">
+            <div style="display:flex;flex-direction:column;gap:20px">
+              <div style="padding:16px;background:#F3E7CE;border:1px solid #8E5C0844;border-radius:10px;display:flex;flex-direction:column;gap:8px">
+                <span style="font-size:15.5px;font-weight:600">Não conseguimos confirmar que é você</span>
+                <p style="margin:0;font-size:14px;line-height:1.6;color:#3E4A4C">O código expirou ou os dados não coincidem. Isso protege você: sem confirmação, ninguém acessa nem apaga seus dados — nem nós.</p>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <span style="font-size:14.5px;font-weight:600">O que fazer agora</span>
+                <div style="display:flex;flex-direction:column;gap:10px">
+                  <button type="button" onClick="{{ enviarCodigo }}" style="min-height:48px;border:1px solid #0B5F66;background:#0B5F66;color:#FFFFFF;border-radius:10px;padding:12px;cursor:pointer;font:inherit;font-size:15px;font-weight:600">Enviar um novo código</button>
+                  <button type="button" style="min-height:48px;border:1px solid #C9D4D5;background:#FFFFFF;border-radius:10px;padding:12px;cursor:pointer;font:inherit;font-size:15px">Usar outro e-mail ou telefone</button>
+                  <button type="button" style="min-height:48px;border:1px solid #C9D4D5;background:#FFFFFF;border-radius:10px;padding:12px;cursor:pointer;font:inherit;font-size:15px">Falar com uma pessoa</button>
+                </div>
+              </div>
+              <p style="margin:0;font-size:12.5px;color:#6E8184;line-height:1.6">Tentativas não confirmadas não criam cadastro e são descartadas em 7 dias. Seu pedido continua guardado — nada foi perdido.</p>
+            </div>
+          </sc-if>
+
+        </div>
+      </div>
+      <span style="font-size:12.5px;color:#6E8184">420 × 812 · toque mínimo 44 px · corpo 16 px</span>
+    </div>
+
+    <sc-if value="{{ notas }}" hint-placeholder-val="{{ true }}">
+      <aside style="flex:1 1 320px;max-width:400px;min-width:280px;background:#FFFFFF;border:1px solid #C9D4D5;border-radius:12px;padding:20px 22px;display:flex;flex-direction:column;gap:18px">
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <span style="font-size:12.5px;letter-spacing:.1em;text-transform:uppercase;color:#6E8184">Nota de design</span>
+          <span style="font-family:'Iowan Old Style',Palatino,Georgia,serif;font-size:19px;line-height:1.25">{{ tituloTela }}</span>
+        </div>
+        <p style="margin:0;font-size:14px;line-height:1.65;color:#3E4A4C;text-wrap:pretty">{{ notaTela }}</p>
+        <div style="display:flex;flex-direction:column;gap:8px;border-top:1px solid #E4EAEB;padding-top:16px">
+          <span style="font-size:12.5px;letter-spacing:.1em;text-transform:uppercase;color:#6E8184">Fecha</span>
+          <span style="font-size:13.5px;line-height:1.5">{{ riscoTela }}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;border-top:1px solid #E4EAEB;padding-top:16px">
+          <span style="font-size:12.5px;letter-spacing:.1em;text-transform:uppercase;color:#6E8184">Contrato que esta tela exige</span>
+          <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.6;color:#0B5F66">{{ rotaTela }}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;border-top:1px solid #E4EAEB;padding-top:16px">
+          <span style="font-size:12.5px;letter-spacing:.1em;text-transform:uppercase;color:#6E8184">Regras que valem em todas</span>
+          <span style="font-size:13px;line-height:1.6;color:#3E4A4C">Nenhum dado do titular aparece antes da confirmação de identidade · o pedido nunca exige justificativa · recusa sempre nomeia a lei e oferece a ANPD · nada de jargão como rótulo primário · toque mínimo 44 px e corpo de 16 px, porque o titular pode ter qualquer idade e qualquer aparelho.</span>
+        </div>
+      </aside>
+    </sc-if>
+
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:980},&quot;mostrarNotas&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Revisão&quot;}}">
+class Component extends DCLogic {
+  direitos = [
+    { id: 'confirmacao', rot: 'Saber se vocês têm dados meus', legal: 'Art. 18, I', nivel: 1, prazoRot: '15 dias' },
+    { id: 'acesso', rot: 'Ver todos os dados que vocês têm sobre mim', legal: 'Art. 18, II', nivel: 2, prazoRot: '15 dias' },
+    { id: 'correcao', rot: 'Corrigir um dado errado', legal: 'Art. 18, III', nivel: 2, prazoRot: '15 dias' },
+    { id: 'compartilhamentos', rot: 'Saber com quem vocês compartilham', legal: 'Art. 18, VII', nivel: 1, prazoRot: '15 dias' },
+    { id: 'revisao', rot: 'Contestar uma decisão automática', legal: 'Art. 20', nivel: 2, prazoRot: '5 dias' },
+    { id: 'oposicao', rot: 'Me opor ao uso dos meus dados', legal: 'Art. 18, §2º', nivel: 2, prazoRot: '15 dias' },
+    { id: 'revogacao', rot: 'Retirar uma autorização que eu dei', legal: 'Art. 8º, §5º', nivel: 2, prazoRot: 'imediato' },
+    { id: 'portabilidade', rot: 'Levar meus dados para outra empresa', legal: 'Art. 18, V', nivel: 3, prazoRot: '15 dias' },
+    { id: 'anonimizacao', rot: 'Tornar meus dados anônimos', legal: 'Art. 18, IV', nivel: 3, prazoRot: '15 dias' },
+    { id: 'eliminacao', rot: 'Apagar meus dados', legal: 'Art. 18, VI', nivel: 3, prazoRot: '15 dias' },
+  ];
+
+  telasDef = [
+    { id: 'inicio', num: '01', rot: 'O que você pode pedir', tit: 'Seus dados, suas escolhas', sub: 'Crédito IA · Portal de privacidade',
+      nota: 'A entrada não pergunta nada antes de oferecer. Os dez direitos do Art. 18 aparecem em linguagem de pessoa — “Apagar meus dados”, não “Eliminação (Art. 18, VI)” — com o artigo como legenda, porque quem chega aqui sabe o que quer, não como a lei chama. A ordem é por leveza: o que confirma vem antes do que é definitivo.',
+      risco: 'Risco-001 (P0) · nenhum dos 10 direitos tinha rota de exercício.', rota: 'GET /me/direitos' },
+    { id: 'identificacao', num: '02', rot: 'Confirmar que é você', tit: 'Confirmar que é você', sub: 'Nível de confirmação conforme o pedido',
+      nota: 'O nível de verificação é derivado do direito, não fixo: confirmar tratamento pede o canal que já conhecemos; apagar pede documento com foto, porque não se desfaz. A escada fica visível para a exigência não parecer arbitrária — e o texto diz o destino do documento antes do envio, com prazo de descarte.',
+      risco: 'Risco-009 · o processo não tinha etapa de verificação nem ator titular.', rota: 'POST /me/verificacao · POST /me/verificacao/{id}/codigo' },
+    { id: 'pedido', num: '03', rot: 'Detalhar o pedido', tit: 'Seu pedido', sub: 'Só o que for necessário',
+      nota: 'O campo livre é opcional e o texto diz por quê: o direito não depende de justificativa. Em eliminação, a tela avisa antes do envio que parte pode ser retida por obrigação legal — expectativa alinhada aqui evita a sensação de recusa depois. O aviso de redação de documento é o mesmo redator do lado interno.',
+      risco: 'Risco-001 · abertura de solicitação. Risco-021 · redação de PII no texto livre.', rota: 'POST /requests' },
+    { id: 'protocolo', num: '04', rot: 'Pedido recebido', tit: 'Pedido recebido', sub: 'O prazo já está correndo',
+      nota: 'O prazo aparece como data, não como contagem abstrata, e o titular vê as três etapas seguintes antes de sair da tela. Prazo legal que só o DPO enxerga é prazo que só a empresa controla — aqui ele é do titular também.',
+      risco: 'Risco-001 · prazo_limite calculado e visível ao titular.', rota: 'POST /requests → 201 { protocolo, prazo_limite }' },
+    { id: 'acompanhar', num: '05', rot: 'Acompanhar', tit: 'Acompanhar pedido', sub: 'Protocolo P-2026-0788',
+      nota: 'Espelho do balcão interno, sem o vocabulário dele: o titular vê estado, prazo e histórico, e pode escrever. O canal é o mesmo da T4, com o mesmo redator — a conversa é uma, vista dos dois lados.',
+      risco: 'Risco-001 · acompanhamento pelo titular.', rota: 'GET /requests/{protocolo} · POST /requests/{id}/mensagens' },
+    { id: 'resposta', num: '06', rot: 'Resposta pronta', tit: 'Seus dados estão prontos', sub: 'Atendido em 6 dias',
+      nota: 'O pacote é assinado e o link expira em 24 h — dito na tela, com a garantia de que pedir de novo é grátis. Expiração sem essa frase parece punição; com ela, parece cuidado. O sumário do conteúdo evita que o titular precise abrir o arquivo para saber o que recebeu.',
+      risco: 'Risco-001 · portabilidade e acesso com pacote expirável.', rota: 'GET /requests/{id}/pacote (link assinado, TTL 24 h)' },
+    { id: 'recusa', num: '07', rot: 'Atendido em parte', tit: 'Atendido em parte', sub: 'O caso difícil, bem resolvido',
+      nota: 'A tela mais importante do portal. Separa o que foi apagado do que foi retido, nomeia a lei de cada retenção e diz a data em que cada dado será eliminado. Fecha oferecendo revisão e o caminho da ANPD, lado a lado — esconder a autoridade é o que transforma insatisfação em denúncia.',
+      risco: 'Risco-001 · recusa fundamentada (Art. 18 §4º). Risco-006 · retenção com data visível.', rota: 'GET /requests/{id} → { apagados[], retidos[{ base_legal, retencao_ate }] }' },
+    { id: 'consentimentos', num: '08', rot: 'Minhas autorizações', tit: 'Minhas autorizações', sub: 'O que você já autorizou',
+      nota: 'O texto consentido aparece na versão em que foi aceito, com data e canal — é a prova do Art. 8º §2º do lado de quem consentiu. Retirar é um botão no mesmo lugar em que se lê a autorização: simetria entre dar e retirar não é cortesia, é exigência legal.',
+      risco: 'Risco-002 · consentimento sem persistência por titular.', rota: 'GET /me/consentimentos' },
+    { id: 'revogar', num: '09', rot: 'Retirar autorização', tit: 'Retirar autorização', sub: 'A cascata, antes de confirmar',
+      nota: 'A confirmação mostra a cascata: quais sistemas param, o que acontece com o dado já coletado e o que o titular perde em funcionalidade. Consentimento revogável sem consequência declarada é revogação de fachada — e a perda de recurso dita antes evita o arrepender-se depois.',
+      risco: 'Risco-002 · revogação sem cascata de eliminação.', rota: 'POST /me/consentimentos/{id}/revogacao' },
+    { id: 'revogado', num: '10', rot: 'Autorização retirada', tit: 'Autorização retirada', sub: 'Com prova e propagação',
+      nota: 'A propagação é mostrada sistema por sistema, e a pendência de 24 h vira alerta interno visível ao titular. Cripto-shredding explicado sem o termo: “a chave que protegia foi destruída, o que torna a leitura impossível”.',
+      risco: 'Risco-002 · cascata verificável. Risco-006 · prova de eliminação.', rota: 'GET /me/consentimentos/{id}/propagacao' },
+    { id: 'falha', num: '11', rot: 'Confirmação falhou', tit: 'Confirmação falhou', sub: 'O erro que protege',
+      nota: 'A recusa é enquadrada como proteção, não como suspeita: “sem confirmação, ninguém acessa nem apaga seus dados — nem nós”. Três saídas, incluindo falar com uma pessoa. E a promessa de minimização: tentativa não confirmada não cria cadastro e é descartada em 7 dias.',
+      risco: 'Risco-009 · verificação escalonada com falha tratada.', rota: 'POST /me/verificacao/{id}/codigo → 401 + retentativa' },
+  ];
+
+  state = { tela: 'inicio', direito: 'acesso', notas: true, texto: '', alvo: 'biometria', anterior: [] };
+
+  ir(id) { this.setState((s) => ({ tela: id, anterior: [...s.anterior, s.tela] })); }
+
+  renderVals() {
+    const s = this.state;
+    const d = this.direitos.find((x) => x.id === s.direito) || this.direitos[1];
+    const def = this.telasDef.find((t) => t.id === s.tela) || this.telasDef[0];
+    const nivel = d.nivel;
+    const textoNivel = nivel === 1
+      ? 'Para este pedido basta confirmar um canal que já usamos com você. Enviamos um código e pronto.'
+      : nivel === 2
+        ? 'Este pedido dá acesso aos seus dados ou muda como os usamos. Confirmamos o código e um dado de cadastro que já temos.'
+        : 'Este pedido não se desfaz. Além do código, pedimos um documento com foto — usado uma vez, só para conferir.';
+
+    const cons = [
+      { id: 'biometria', rot: 'Reconhecimento facial para entrar no app', estado: 'ativo', texto: '“Autorizo o uso da minha imagem facial para verificação de identidade na abertura de conta e no acesso ao aplicativo.”', quando: 'Aceito em 14/03/2026 pelo app · versão 3 do texto' },
+      { id: 'marketing', rot: 'Ofertas por e-mail e WhatsApp', estado: 'ativo', texto: '“Autorizo o envio de ofertas e novidades por e-mail e mensagem.”', quando: 'Aceito em 02/01/2026 no site · versão 2 do texto' },
+      { id: 'parceiros', rot: 'Ofertas de empresas parceiras', estado: 'revogado', texto: '“Autorizo o compartilhamento dos meus dados de contato com parceiros selecionados.”', quando: 'Aceito em 02/01/2026 · retirado por você em 29/07/2026' },
+    ];
+    const alvoRot = { biometria: 'reconhecimento facial', marketing: 'ofertas por e-mail e WhatsApp', parceiros: 'ofertas de parceiros' }[s.alvo] || 'reconhecimento facial';
+
+    return {
+      notas: s.notas,
+      rotuloNotas: s.notas ? 'Ocultar notas de design' : 'Mostrar notas de design',
+      alternarNotas: () => this.setState({ notas: !s.notas }),
+      telas: this.telasDef.map((t) => ({
+        num: t.num, rot: t.rot,
+        ir: () => this.setState({ tela: t.id, anterior: [] }),
+        estilo: 'display:flex;align-items:baseline;gap:10px;width:100%;text-align:left;min-height:44px;padding:9px 10px;border:0;border-radius:6px;cursor:pointer;font:inherit;font-size:13.5px;line-height:1.35;'
+          + (s.tela === t.id ? 'background:#DCEAEA;color:#0E1719;font-weight:600' : 'background:none;color:#495A5D'),
+        estiloNum: 'font-family:ui-monospace,Menlo,monospace;font-size:12.5px;' + (s.tela === t.id ? 'color:#0B5F66' : 'color:#8E9EA1'),
+      })),
+      tituloTela: def.tit, subtituloTela: def.sub, notaTela: def.nota, riscoTela: def.risco, rotaTela: def.rota,
+      temVoltar: s.anterior.length > 0,
+      voltar: () => this.setState((p) => ({ tela: p.anterior[p.anterior.length - 1], anterior: p.anterior.slice(0, -1) })),
+
+      eInicio: s.tela === 'inicio', eIdentificacao: s.tela === 'identificacao', ePedido: s.tela === 'pedido',
+      eProtocolo: s.tela === 'protocolo', eAcompanhar: s.tela === 'acompanhar', eResposta: s.tela === 'resposta',
+      eRecusa: s.tela === 'recusa', eConsentimentos: s.tela === 'consentimentos', eRevogar: s.tela === 'revogar',
+      eRevogado: s.tela === 'revogado', eFalha: s.tela === 'falha',
+
+      direitos: this.direitos.map((x) => ({
+        ...x,
+        escolher: () => this.setState((p) => ({ direito: x.id, tela: 'identificacao', anterior: [...p.anterior, 'inicio'] })),
+      })),
+      direitoEscolhido: d,
+      nivelAtual: nivel,
+      textoNivel,
+      pedeCadastro: nivel >= 2,
+      pedeDocumento: nivel === 3,
+      escadaNivel: [1, 2, 3].map((n) => ({
+        rot: 'nível ' + n,
+        estilo: 'display:inline-flex;padding:4px 11px;border-radius:999px;white-space:nowrap;font-size:12.5px;border:1px solid '
+          + (n === nivel ? '#0B5F66;background:#DCEAEA;color:#0B5F66;font-weight:600' : '#DAE3E4;background:#F2F6F6;color:#8E9EA1'),
+      })),
+      enviarCodigo: () => this.ir('pedido'),
+
+      ePedidoRevisao: d.id === 'revisao',
+      ePedidoComum: d.id !== 'revisao',
+      ePedidoEliminacao: d.id === 'eliminacao' || d.id === 'anonimizacao',
+      texto: s.texto,
+      setTexto: (e) => this.setState({ texto: e.target.value }),
+      abrirPedido: () => this.ir('protocolo'),
+
+      protocolo: 'P-2026-0788',
+      prazoData: '13/08/2026',
+      etapas: [
+        { n: '1', rot: 'Confirmamos seu pedido', det: 'já feito — você recebeu o número por e-mail' },
+        { n: '2', rot: 'Buscamos em todos os sistemas', det: 'até 5 dias · você não precisa fazer nada' },
+        { n: '3', rot: 'Enviamos a resposta por escrito', det: 'com o que encontramos e o que a lei nos obriga a manter' },
+      ].map((e, i) => ({
+        ...e,
+        estiloNum: 'width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;'
+          + (i === 0 ? 'background:#0B5F66;color:#FFFFFF' : 'background:#F2F6F6;border:1px solid #DAE3E4;color:#6E8184'),
+      })),
+      andamento: [
+        { q: '29/07 09:12', t: 'Pedido recebido e identidade confirmada.' },
+        { q: '29/07 09:12', t: 'Busca iniciada em 4 sistemas.' },
+        { q: '30/07 14:40', t: 'Encontramos seus dados em 3 dos 4 sistemas. Preparando a resposta.' },
+      ],
+      conteudoPacote: [
+        { rot: 'Cadastro e contato', det: '8 campos' },
+        { rot: 'Histórico de pagamento', det: '36 meses' },
+        { rot: 'Decisões automáticas sobre você', det: '2 decisões, com os fatores' },
+        { rot: 'Com quem compartilhamos', det: '2 empresas, com a finalidade' },
+      ],
+      retidos: [
+        { rot: 'Dados de cobrança e notas fiscais', motivo: 'A legislação fiscal obriga a guardar por 5 anos após a última operação (Art. 16, I — obrigação legal).', ate: '12/2029' },
+        { rot: 'Registro deste próprio pedido', motivo: 'Guardamos a prova de que atendemos você, para poder comprovar a qualquer momento.', ate: '07/2031' },
+      ],
+
+      consentimentos: cons.map((c) => ({
+        ...c,
+        ativo: c.estado === 'ativo',
+        revogado: c.estado === 'revogado',
+        estadoRot: c.estado === 'ativo' ? 'autorizado' : 'retirado',
+        estiloEstado: 'display:inline-flex;padding:4px 11px;border-radius:999px;white-space:nowrap;font-size:12.5px;font-weight:600;border:1px solid '
+          + (c.estado === 'ativo' ? '#2F6E4544;background:#DDEBE0;color:#1F4433' : '#DAE3E4;background:#F2F6F6;color:#6E8184'),
+        revogar: () => this.setState((p) => ({ alvo: c.id, tela: 'revogar', anterior: [...p.anterior, 'consentimentos'] })),
+      })),
+      alvoRevogacao: alvoRot,
+      cascata: [
+        { rot: 'Paramos de usar agora', det: 'a partir da confirmação, nenhum novo uso acontece' },
+        { rot: 'Os dados já coletados são eliminados', det: 'a chave que os protege é destruída — em até 24 h, com comprovante' },
+        { rot: '3 sistemas são avisados', det: 'app, antifraude e verificação de identidade' },
+        { rot: 'Fica registrado que foi você', det: 'com data e hora, para você poder comprovar depois' },
+      ].map((c) => ({ ...c, estiloPonto: 'width:8px;height:8px;border-radius:50%;background:#0B5F66;margin-top:7px;display:inline-block' })),
+      confirmarRevogacao: () => this.ir('revogado'),
+      irConsentimentos: () => this.setState({ tela: 'consentimentos', anterior: [] }),
+      irAcompanhar: () => this.ir('acompanhar'),
+      propagacao: [
+        { rot: 'Aplicativo', estado: 'confirmado' },
+        { rot: 'Verificação de identidade', estado: 'confirmado' },
+        { rot: 'Antifraude', estado: 'em andamento' },
+      ].map((p) => ({
+        ...p,
+        estilo: 'display:inline-flex;padding:3px 10px;border-radius:999px;font-size:12.5px;font-weight:600;border:1px solid '
+          + (p.estado === 'confirmado' ? '#2F6E4544;background:#DDEBE0;color:#1F4433' : '#8E5C0844;background:#F3E7CE;color:#7A4E06'),
+      })),
+    };
+  }
+}
+</script>
+</body>
+</html>
