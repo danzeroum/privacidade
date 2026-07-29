@@ -200,6 +200,55 @@ export function executarExpurgo(
 }
 
 /**
+ * A cascata da revogação também é vigiada.
+ *
+ * O portal já mostra ao titular que uma frente está pendente há mais de 24 h.
+ * Mostrar não é vigiar: sem achado, o alerta some quando a pessoa fecha a aba,
+ * e a pendência vira exatamente a espera silenciosa que a revogação deveria
+ * acabar. O código é determinístico pelo mesmo motivo do vencimento — uma
+ * varredura por dia sobre a mesma pendência não pode abrir um achado por dia.
+ */
+export function varrerPropagacoes(banco: BancoMock, agoraMs: number): Achado[] {
+  const LIMITE_MS = 24 * 60 * 60 * 1000;
+  const tocados: Achado[] = [];
+
+  for (const revogacao of banco.revogacoesTitular) {
+    for (const item of revogacao.cascata) {
+      if (item.estado !== 'pendente') continue;
+      const horas = (agoraMs - item.iniciadaEmMs) / (60 * 60 * 1000);
+      if (agoraMs - item.iniciadaEmMs <= LIMITE_MS) continue;
+
+      const codigo = `PROP-${revogacao.campoId.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`
+        + `-${item.alvo.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
+      const descricao = `A revogação de ${revogacao.campoId} não propagou para "${item.alvo}" `
+        + `há ${horas.toFixed(0)} h. O titular já vê o atraso; falta alguém tratá-lo.`;
+
+      const existente = banco.cenario.achados.find((a) => a.codigo === codigo);
+      if (existente) {
+        existente.descricao = descricao;
+        // Passar de um dia é operação; passar de uma semana é processo.
+        existente.criticidade = horas > 168 ? 'alta' : 'media';
+        tocados.push(existente);
+        continue;
+      }
+      const novo: Achado = {
+        id: `ach_${sha256(codigo).slice(0, 10)}`,
+        codigo,
+        descricao,
+        origem: 'motor_de_retencao',
+        status: 'aberto',
+        criticidade: horas > 168 ? 'alta' : 'media',
+        reincidencias: 0,
+        evidencias: [],
+      };
+      banco.cenario.achados.push(novo);
+      tocados.push(novo);
+    }
+  }
+  return tocados;
+}
+
+/**
  * A varredura que transforma prazo vencido em achado.
  *
  * Prazo que não faz nada é rótulo. O código é determinístico, e a segunda

@@ -258,7 +258,7 @@ export function CampoPII({ titularId, chave, rotulo, mascara, sensivel }: {
    * revogou. Mesma disciplina do C-03.
    */
   const consentimentoVivo = catalogado?.baseLegal !== 'consentimento'
-    || banco.cenario.consentimentos.some((c) => c.campoId === catalogado?.id && c.estado === 'ativo');
+    || banco.consentimentoDe(titularId, catalogado.id)?.estado === 'ativo';
   const revelavel = finalidadesOfertadas.length > 0 && consentimentoVivo;
 
   const previa = redigir(justificativa);

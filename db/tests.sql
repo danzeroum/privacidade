@@ -322,6 +322,193 @@ SELECT assert_falha($$
           'indeterminado', current_date)
 $$, 'reter resíduo de titular sem data de eliminação');
 
+-- ---------------------------------------------------------------------
+-- Art. 8º — consentimento é entidade, e o aceite é imutável (Risco-002)
+-- ---------------------------------------------------------------------
+
+-- A regra que sustenta as outras: revogar cria fato novo, nunca edita o aceite.
+-- Se o aceite pudesse ser alterado, a organização perderia a prova de que houve
+-- consentimento enquanto houve tratamento — que é o que o §2º cobra, inclusive
+-- depois da revogação.
+SELECT assert_falha($$
+  UPDATE consentimento SET canal = 'presencial' WHERE id = 'cd000000-0000-4000-8000-000000000001'
+$$, 'UPDATE em consentimento');
+
+SELECT assert_falha($$
+  DELETE FROM consentimento WHERE id = 'cd000000-0000-4000-8000-000000000001'
+$$, 'DELETE em consentimento');
+
+SELECT assert_falha($$
+  UPDATE consentimento_texto SET texto = 'outro' WHERE id = 'cc000000-0000-4000-8000-000000000001'
+$$, 'UPDATE no texto consentido');
+
+SELECT assert_falha($$
+  INSERT INTO consentimento_revogacao (consentimento_id, canal)
+  VALUES ('cd000000-0000-4000-8000-000000000003','portal')
+$$, 'revogar duas vezes o mesmo aceite');
+
+-- Publicar versão nova com prazo maior não estende aceites já dados.
+SELECT assert_falha($$
+  INSERT INTO consentimento (tenant_id, titular_pseudonimo, texto_id, canal, coletado_em, prova_hash, validade)
+  VALUES ('11111111-1111-4111-8111-111111111111','hmac:novo',
+          'cc000000-0000-4000-8000-000000000002','app', current_date,'p','P5Y')
+$$, 'aceite com prazo diferente do texto aceito');
+
+SELECT assert_falha($$
+  INSERT INTO consentimento_texto (tenant_id, campo_id, versao, texto, texto_hash, validade)
+  VALUES ('11111111-1111-4111-8111-111111111111','77777777-7777-4777-8777-000000000006','v9',
+          'Sem prazo e sem razao','h','indeterminado')
+$$, 'texto com validade indeterminada e sem justificativa');
+
+SELECT assert_igual(
+  (SELECT estado FROM gov.consentimento_estado WHERE titular_pseudonimo = 'hmac:d20e…8f13'),
+  'revogado', 'revogado precede expirado');
+
+SELECT assert_igual(
+  (SELECT estado FROM gov.consentimento_estado WHERE titular_pseudonimo = 'hmac:3b81…cc02'),
+  'expirado', 'aceite vencido sem revogação está expirado');
+
+-- O aceite revogado continua legível: o fato histórico não some.
+SELECT assert_igual(
+  (SELECT count(*)::bigint FROM consentimento c
+    JOIN consentimento_revogacao r ON r.consentimento_id = c.id
+   WHERE c.prova_hash IS NOT NULL), 1::bigint,
+  'o aceite revogado segue legível como fato');
+
+-- O expurgo nasce do marco de revogação, derivado pela mesma função do ciclo.
+SELECT assert_igual(
+  (SELECT retencao_ate FROM consentimento_revogacao WHERE id = 'ce000000-0000-4000-8000-000000000001'),
+  ((now() - INTERVAL '26 hours' + INTERVAL '30 days')::date),
+  'expurgo da revogação derivado do marco, +30 dias de carência');
+
+-- A contagem de titulares é somada da entidade — não existe mais campo para ela.
+SELECT assert_igual(
+  (SELECT count(*)::bigint FROM gov.consentimento_estado WHERE estado = 'ativo'), 1::bigint,
+  'titulares ativos somados da entidade');
+
+-- Só a última versão publicada é a vigente, e isso é derivado.
+SELECT assert_igual(
+  (SELECT versao FROM gov.consentimento_texto_vigente
+    WHERE campo_id = '77777777-7777-4777-8777-000000000007'),
+  'v3', 'texto vigente é a última versão publicada');
+
+-- Propagação pendente acima de 24 h: é o que a varredura transforma em achado.
+SELECT assert_igual(
+  (SELECT count(*)::bigint FROM revogacao_propagacao
+    WHERE estado = 'pendente' AND iniciada_em < now() - INTERVAL '24 hours'), 1::bigint,
+  'uma frente da cascata pendente além do limite');
+
+SELECT assert_falha($$
+  INSERT INTO revogacao_propagacao (revogacao_id, alvo, tipo, efeito, estado)
+  VALUES ('ce000000-0000-4000-8000-000000000001','X','cessacao','y','propagado')
+$$, 'propagado sem data de confirmação');
+
+-- ---------------------------------------------------------------------
+-- Art. 39 — fornecedor é entidade, e o DPA recusa a escrita (Risco-008)
+-- ---------------------------------------------------------------------
+
+-- Um fornecedor sem DPA assinado, e outro com contrato vencido. São os dois
+-- casos que o trigger precisa barrar, e eles não existiam na massa: até aqui,
+-- `dpa_assinado` e `dpa_expira_em` nunca tinham sido exercitados por teste.
+INSERT INTO fornecedor (id, tenant_id, slug, nome, papel, pais, dpa_assinado, dpa_uri, dpa_expira_em) VALUES
+  ('f0000000-0000-4000-8000-0000000000ff','11111111-1111-4111-8111-111111111111',
+   'sem-contrato','Parceiro Sem Contrato','operador','Brasil', false,'s3://gov-docs/dpa/anexo.pdf', NULL),
+  ('f0000000-0000-4000-8000-0000000000fe','11111111-1111-4111-8111-111111111111',
+   'vencido','Parceiro Vencido','operador','Brasil', true, NULL, current_date - 1),
+  ('f0000000-0000-4000-8000-0000000000fd','11111111-1111-4111-8111-111111111111',
+   'vence-hoje','Parceiro Vence Hoje','operador','Brasil', true, NULL, current_date);
+
+-- Contrato assinado sem prazo não se vigia: não há o que vencer.
+SELECT assert_falha($$
+  INSERT INTO fornecedor (tenant_id, slug, nome, papel, dpa_assinado)
+  VALUES ('11111111-1111-4111-8111-111111111111','sem-prazo','X','operador', true)
+$$, 'DPA assinado sem prazo declarado');
+
+-- Evidência anexada NÃO é contrato firmado. Este parceiro tem dpa_uri.
+SELECT assert_falha($$
+  INSERT INTO compartilhamento (campo_id, fornecedor_id, finalidade)
+  VALUES ('77777777-7777-4777-8777-000000000003','f0000000-0000-4000-8000-0000000000ff','Teste')
+$$, 'transferência para fornecedor com anexo mas sem DPA assinado');
+
+-- Vencido ontem: recusado, e a mensagem carrega a data.
+SELECT assert_falha($$
+  INSERT INTO compartilhamento (campo_id, fornecedor_id, finalidade)
+  VALUES ('77777777-7777-4777-8777-000000000003','f0000000-0000-4000-8000-0000000000fe','Teste')
+$$, 'transferência com DPA vencido ontem');
+
+-- Vencendo hoje: aceito. O contrato cobre o último dia, não a véspera dele.
+DO $$
+BEGIN
+  INSERT INTO compartilhamento (campo_id, fornecedor_id, finalidade)
+  VALUES ('77777777-7777-4777-8777-000000000003','f0000000-0000-4000-8000-0000000000fd','Fronteira');
+  RAISE NOTICE 'OK   %  → aceito', rpad('transferência com DPA vencendo hoje', 52);
+END $$;
+
+SELECT assert_falha($$
+  INSERT INTO compartilhamento (campo_id, fornecedor_id, finalidade)
+  VALUES ('77777777-7777-4777-8777-000000000003','f0000000-0000-4000-8000-00000000dead','Teste')
+$$, 'transferência para fornecedor inexistente');
+
+/*
+ * A limitação, provada em vez de descrita.
+ *
+ * A linha abaixo entra com contrato válido. Envelhecer o contrato depois NÃO
+ * dispara trigger nenhum — ele só olha a linha que está sendo escrita. É por
+ * isso que a varredura existe, e é por isso que este repositório não escreve em
+ * lugar nenhum que o banco vigia o DPA.
+ */
+DO $$
+DECLARE v_id UUID;
+BEGIN
+  INSERT INTO compartilhamento (campo_id, fornecedor_id, finalidade)
+  VALUES ('77777777-7777-4777-8777-000000000003','f0000000-0000-4000-8000-000000000002','Envelhece depois')
+  RETURNING id INTO v_id;
+
+  UPDATE fornecedor SET dpa_expira_em = current_date - 10
+   WHERE id = 'f0000000-0000-4000-8000-000000000002';
+
+  IF NOT EXISTS (SELECT 1 FROM compartilhamento WHERE id = v_id) THEN
+    RAISE EXCEPTION 'FALHA: a transferência sumiu — o banco não deveria mexer no que já está gravado.';
+  END IF;
+  RAISE NOTICE 'OK   %  → segue gravada', rpad('DPA que vence DEPOIS da escrita', 52);
+END $$;
+
+-- E é a view que enxerga o que o trigger não alcança.
+-- Duas linhas, e não uma: o vencimento é do **contrato**, não da transferência.
+-- Um DPA vencido arrasta toda transferência para aquele parceiro — que é o
+-- ganho de ter entidade, e o que a string livre em `destino` não conseguia.
+SELECT assert_igual(
+  (SELECT count(*)::bigint FROM gov.transferencia_sem_dpa WHERE slug = 'serasa'), 2::bigint,
+  'o contrato vencido arrasta todas as transferências do parceiro');
+
+SELECT assert_igual(
+  (SELECT estado_dpa FROM gov.transferencia_sem_dpa WHERE slug = 'serasa' LIMIT 1),
+  'vencido', 'e o estado dela é vencido, com atraso contado');
+
+SELECT assert_igual(
+  (SELECT atraso_dias FROM gov.transferencia_sem_dpa WHERE slug = 'serasa' LIMIT 1),
+  10, 'dez dias de atraso, contados do vencimento');
+
+-- Renovar o contrato tira a transferência da varredura.
+UPDATE fornecedor SET dpa_expira_em = current_date + 365
+ WHERE id = 'f0000000-0000-4000-8000-000000000002';
+
+SELECT assert_igual(
+  (SELECT count(*)::bigint FROM gov.transferencia_sem_dpa WHERE slug = 'serasa'), 0::bigint,
+  'renovado o DPA, a transferência sai da varredura');
+
+-- O fornecedor não some por baixo da transferência.
+SELECT assert_falha($$
+  DELETE FROM fornecedor WHERE id = 'f0000000-0000-4000-8000-000000000001'
+$$, 'apagar fornecedor com transferência viva');
+
+-- Dois fornecedores com o mesmo slug no mesmo tenant: é o defeito que a
+-- entidade existe para acabar — "OpenAI" repetido em linhas independentes.
+SELECT assert_falha($$
+  INSERT INTO fornecedor (tenant_id, slug, nome, papel)
+  VALUES ('11111111-1111-4111-8111-111111111111','openai','OpenAI de novo','operador')
+$$, 'fornecedor duplicado no mesmo tenant');
+
 DO $$ BEGIN RAISE NOTICE '';
        RAISE NOTICE '=== Todas as invariantes verificadas ===';
 END $$;

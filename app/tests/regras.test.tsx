@@ -5,7 +5,18 @@ import { dirname, join, resolve } from 'path';
 import { tmpdir } from 'os';
 import { render, screen, fireEvent, act, cleanup, within } from '@testing-library/react';
 import { BancoMock, FalhaDeAuditoria } from '../src/mock/db';
-import { varrerVencimentos } from '../src/mock/expurgo';
+import { varrerPropagacoes, varrerVencimentos } from '../src/mock/expurgo';
+import {
+  codigoDoAchadoDeDpa, criticidadeDoDpa, dpaVigente, estadoDoDpa, motivoDaRecusaDeTransferencia,
+  varrerDpas,
+} from '../src/mock/fornecedor';
+import type { Fornecedor } from '../src/mock/fornecedor';
+import {
+  estadoDe, expiraEm, motivoDaCessacao, temProvaVersionada, titularesAtivos, validadeJustificada,
+} from '../src/mock/consentimento';
+import type {
+  Consentimento as ConsentimentoEntidade, TextoDeConsentimento,
+} from '../src/mock/consentimento';
 import { CENARIOS } from '../src/mock/scenarios';
 import { request } from '../src/mock/api';
 import { ACOES, pode } from '../src/mock/permissoes';
@@ -59,7 +70,7 @@ import T6 from '../src/screens/T6';
 import T11, { DESVIOS, trilhaDoAchado } from '../src/screens/T11';
 import { useSessao, limparBancosDaSessao } from '../src/store/sessao';
 import { sha256, hashCpf } from '../src/lib/sha256';
-import type { DecisaoRegistrada, Direito, EstadoIncidente, Papel } from '../src/mock/types';
+import type { DecisaoRegistrada, Direito, EstadoIncidente, Finalidade, Papel } from '../src/mock/types';
 
 let banco: BancoMock;
 beforeEach(() => {
@@ -1263,53 +1274,73 @@ describe('C-08 · consentimento como prova, e revogação que propaga', () => {
   let varejo: BancoMock;
   const chamarV = <T = unknown,>(papel: Papel, req: Partial<Parameters<typeof request>[1]> & { metodo: 'GET' | 'POST' | 'PATCH' | 'DELETE'; caminho: string }) =>
     request<T>(varejo, { papel, ator: 'teste', ...req });
+  const MOTIVO = 'Titular pediu a revogação pelo canal do programa de fidelidade.';
+  const revelarTelefone = (titularId: string) => chamarV('dpo', {
+    metodo: 'POST', caminho: '/v1/pseudonyms/resolve', purpose: 'atendimento',
+    body: {
+      titularId, campo: 'telefone', protocolo: '2026-0731',
+      justificativa: 'Contato para confirmar a solicitação do titular.',
+    },
+  });
 
   beforeEach(() => { varejo = new BancoMock('varejo'); });
 
-  it('contraprova: campo com consentimento ativo e finalidade compatível revela', () => {
-    const consent = varejo.cenario.consentimentos.find((c) => c.campoId === 'v-tel')!;
-    expect(consent.estado).toBe('ativo');
-    const res = chamarV('dpo', {
-      metodo: 'POST', caminho: '/v1/pseudonyms/resolve', purpose: 'atendimento',
-      body: { titularId: 't1', campo: 'telefone', protocolo: '2026-0731', justificativa: 'Contato para confirmar a solicitação do titular.' },
-    });
-    expect(res.status).toBe(200);
+  /*
+   * Bloco reescrito contra a entidade. As garantias que ele cobrava continuam
+   * as mesmas — prova versionada sustenta a base, revogação propaga até a
+   * revelação e até a tela, revogar é ato do DPO. O que mudou por baixo é que
+   * "consentimento" deixou de ser um rótulo por campo e passou a ser o aceite
+   * de uma pessoa a uma versão de texto.
+   */
+
+  it('contraprova: aceite vivo e finalidade compatível revelam', () => {
+    const registro = varejo.consentimentoDe('t1', 'v-tel')!;
+    expect(registro.estado).toBe('ativo');
+    expect(registro.texto.versao).toBe('v2');
+    expect(revelarTelefone('t1').status).toBe(200);
   });
 
   it('revogado, o mesmo campo deixa de ser revelável — 422 citando o artigo', () => {
-    chamarV('dpo', {
-      metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar',
-      body: { motivo: 'Titular pediu a revogação pelo canal do programa de fidelidade.' },
-    });
-    const res = chamarV('dpo', {
-      metodo: 'POST', caminho: '/v1/pseudonyms/resolve', purpose: 'atendimento',
-      body: { titularId: 't1', campo: 'telefone', protocolo: '2026-0731', justificativa: 'Contato para confirmar a solicitação do titular.' },
-    });
+    chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: MOTIVO } });
+    const res = revelarTelefone('t1');
     expect(res.status).toBe(422);
     expect(`${(res.body as { erro: string }).erro} ${res.regra ?? ''}`).toContain('Art. 8');
     expect(JSON.stringify(res.body)).not.toContain('98812');
   });
 
+  it('o aceite revogado segue legível como fato histórico', () => {
+    const antes = varejo.consentimentoDe('t1', 'v-tel')!.aceite;
+    chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: MOTIVO } });
+    const depois = varejo.consentimentoDe('t1', 'v-tel')!;
+    // Revogar cria fato novo; o aceite continua byte a byte o que era. É o que
+    // prova que houve consentimento enquanto houve tratamento (Art. 8º, §2º).
+    expect(depois.aceite).toEqual(antes);
+    expect(depois.texto.texto).toContain('SMS');
+    expect(depois.revogacao).toBeTruthy();
+    expect(depois.revogacao!.consentimentoId).toBe(antes.id);
+  });
+
   it('a revogação fica registrada e aciona o gate do repositório do campo', () => {
     const antes = varejo.auditoria.length;
-    const res = chamarV<{ gatesBloqueados: number }>('dpo', {
-      metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar',
-      body: { motivo: 'Titular pediu a revogação pelo canal do programa de fidelidade.' },
+    const res = chamarV<{ gatesBloqueados: number; aceitesRevogados: number }>('dpo', {
+      metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: MOTIVO },
     });
     expect(res.status).toBe(200);
+    // Um ato do balcão, um registro — e a contagem de aceites atingidos no trail.
     expect(varejo.auditoria.length).toBe(antes + 1);
     expect(varejo.auditoria.at(-1)!.acao).toBe('CONSENTIMENTO_REVOGADO');
+    expect(res.body.aceitesRevogados).toBe(2);
     expect(res.body.gatesBloqueados).toBeGreaterThan(0);
     expect(varejo.cenario.gates.some((g) => g.bloqueouMerge)).toBe(true);
   });
 
   it('revogar duas vezes é 409: a segunda não é revogação, é ruído no trail', () => {
-    const corpo = { motivo: 'Titular pediu a revogação pelo canal do programa de fidelidade.' };
+    const corpo = { motivo: MOTIVO };
     expect(chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: corpo }).status).toBe(200);
     expect(chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: corpo }).status).toBe(409);
   });
 
-  it('validar inventário recusa baseLegal consentimento sem registro vigente', () => {
+  it('validar inventário recusa baseLegal consentimento sem texto publicado vigente', () => {
     const semRegistro = chamarV('engenharia', {
       metodo: 'POST', caminho: '/v1/catalog/validar',
       body: { nome: 'novo', tipoArmazenado: 'bruto', categoria: 'pessoal', sensivel: false, baseLegal: 'consentimento', finalidadesCompativeis: ['atendimento'] },
@@ -1324,11 +1355,29 @@ describe('C-08 · consentimento como prova, e revogação que propaga', () => {
     expect(comRegistro.status).toBe(200);
   });
 
-  it('revogado, o inventário volta a recusar o mesmo campo', () => {
-    chamarV('dpo', {
-      metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar',
-      body: { motivo: 'Titular pediu a revogação pelo canal do programa de fidelidade.' },
+  /*
+   * Mudança de comportamento **deliberada**, e a razão dela.
+   *
+   * Antes, revogar derrubava o campo no inventário — porque o registro era do
+   * campo. Sob a entidade, revogar é de uma pessoa: o texto publicado continua
+   * sustentando a base legal para quem não revogou. Fazer o inventário recusar
+   * o campo inteiro seria justamente o defeito que o Risco-002 descreve — a
+   * revogação de um cessando o tratamento dos outros trinta mil.
+   */
+  it('revogado por um titular, o inventário segue aceitando o campo', () => {
+    chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: MOTIVO } });
+    const res = chamarV('engenharia', {
+      metodo: 'POST', caminho: '/v1/catalog/validar',
+      body: { campoId: 'v-tel', nome: 'telefone', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, baseLegal: 'consentimento', finalidadesCompativeis: ['atendimento'] },
     });
+    expect(res.status).toBe(200);
+    // O que muda é a revelação por titular, que é onde a revogação tem efeito.
+    expect(revelarTelefone('t1').status).toBe(422);
+  });
+
+  it('campo sem texto publicado nenhum é recusado pelo inventário', () => {
+    varejo.cenario.consentimentoTextos = varejo.cenario.consentimentoTextos
+      .filter((t) => t.campoId !== 'v-tel');
     const res = chamarV('engenharia', {
       metodo: 'POST', caminho: '/v1/catalog/validar',
       body: { campoId: 'v-tel', nome: 'telefone', tipoArmazenado: 'hmac', categoria: 'pseudonimizado', sensivel: false, baseLegal: 'consentimento', finalidadesCompativeis: ['atendimento'] },
@@ -1343,10 +1392,7 @@ describe('C-08 · consentimento como prova, e revogação que propaga', () => {
     expect(screen.getByRole('button', { name: /revelar/i })).toBeInTheDocument();
     unmount();
 
-    chamarV('dpo', {
-      metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar',
-      body: { motivo: 'Titular pediu a revogação pelo canal do programa de fidelidade.' },
-    });
+    chamarV('dpo', { metodo: 'POST', caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: MOTIVO } });
     useSessao.setState({ versao: 1 });
     render(<CampoPII titularId="t1" chave="telefone" rotulo="Telefone" mascara="(••) •••••-••••" sensivel={false} />);
     // Ausência em vez de desabilitado — e a razão fica visível no lugar.
@@ -1363,12 +1409,6 @@ describe('C-08 · consentimento como prova, e revogação que propaga', () => {
     }
   });
 });
-
-// ═════════════════════════════════════════════════════════════════════════════
-// PR 5 — Fidelidade do protótipo e mensagens
-// Unidade (store e primitivos) · integração (tela + API) · sistema (fluxo entre
-// telas) · aceitação (os quatro critérios do pedido).
-// ═════════════════════════════════════════════════════════════════════════════
 
 const montar = (tela: React.ReactNode) => render(<MemoryRouter>{tela}</MemoryRouter>);
 
@@ -5818,5 +5858,550 @@ describe('PR 18 · T6 na tela — os três estados do desenho, e o quarto que el
     useSessao.setState({ papel: 'produto', banco: new BancoMock('banco'), versao: 0, avisos: [], recusas: {} });
     render(<MemoryRouter><T6 /></MemoryRouter>);
     expect(screen.queryByRole('button', { name: /executar expurgo do dia/i })).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 19 · consentimento como entidade (Risco-002)
+//
+// A entidade e a imutabilidade do aceite primeiro, como no PR do ciclo de vida:
+// o que decide o desenho é a regra de que revogar cria fato novo, e ela precisa
+// existir antes de haver tabela para violá-la.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('PR 19 · unidade — o estado é derivado dos fatos, nos limites', () => {
+  const texto = (validade: string): TextoDeConsentimento => ({
+    id: 't1', campoId: 'v-tel', versao: 'v2', texto: 'Aceito receber SMS.',
+    hash: 'abc', publicadoEm: '2026-01-01', validade, vigente: true,
+  });
+  const aceite = (coletadoEm: string): ConsentimentoEntidade => ({
+    id: 'c1', titularId: 'tX', textoId: 't1', canal: 'checkout web',
+    coletadoEm, provaHash: 'def',
+  });
+
+  it('expira hoje ainda vale; expirou ontem, não', () => {
+    // O prazo é o último dia, não a véspera dele. Um dia de diferença aqui é um
+    // dia de tratamento sem base legal — ou um dia de serviço negado sem razão.
+    const t = texto('P2Y');
+    expect(estadoDe(t, aceite('2024-07-29'), undefined, '2026-07-29')).toBe('ativo');
+    expect(estadoDe(t, aceite('2024-07-29'), undefined, '2026-07-30')).toBe('expirado');
+    expect(estadoDe(t, aceite('2024-07-29'), undefined, '2026-07-28')).toBe('ativo');
+  });
+
+  it('revogado precede expirado — o ato do titular não some porque o relógio correu', () => {
+    const t = texto('P2Y');
+    const revogacao = { id: 'r1', consentimentoId: 'c1', revogadoEmMs: Date.parse('2024-08-01'), canal: 'portal' };
+    expect(estadoDe(t, aceite('2024-07-29'), revogacao, '2027-01-01')).toBe('revogado');
+  });
+
+  it('validade indeterminada não expira — e exige justificativa, como no ROPA', () => {
+    const t = texto('indeterminado');
+    expect(expiraEm(t, aceite('2019-01-01'))).toBeNull();
+    expect(estadoDe(t, aceite('2019-01-01'), undefined, '2026-07-29')).toBe('ativo');
+    expect(validadeJustificada(t)).toBe(false);
+    expect(validadeJustificada({ ...t, validadeFonte: 'Adesão ao programa, revogável a qualquer tempo' })).toBe(true);
+    expect(validadeJustificada(texto('P2Y'))).toBe(true);
+  });
+
+  it('o motivo distingue revogado de expirado, com a mesma consequência', () => {
+    expect(motivoDaCessacao('revogado', 'telefone', null)).toContain('retirou a autorização');
+    const expirado = motivoDaCessacao('expirado', 'telefone', '2026-07-28');
+    expect(expirado).toContain('expirou');
+    expect(expirado).toContain('2026-07-28');
+    expect(expirado).not.toContain('retirou');
+  });
+
+  it('a contagem de titulares é somada da entidade, nunca um campo', () => {
+    const t = texto('P2Y');
+    const cs = [aceite('2025-01-01'), { ...aceite('2025-01-01'), id: 'c2', titularId: 'tY' },
+      { ...aceite('2019-01-01'), id: 'c3', titularId: 'tZ' }];
+    const revs = [{ id: 'r1', consentimentoId: 'c2', revogadoEmMs: 0, canal: 'portal' }];
+    // tX ativo, tY revogado, tZ expirado → 1.
+    expect(titularesAtivos([t], cs, revs, 'v-tel', '2026-07-29')).toBe(1);
+    // E o tipo não tem por onde guardar um contador.
+    expect(Object.keys(t)).not.toContain('titulares');
+  });
+
+  it('prova versionada é sobre o texto publicado, não sobre quantos aceitaram', () => {
+    const t = texto('P2Y');
+    expect(temProvaVersionada([t], 'v-tel')).toBe(true);
+    expect(temProvaVersionada([t], 'v-email')).toBe(false);
+    // Campo cujo último titular revogou continua no ROPA: o tratamento dos
+    // demais é que cessou, e a base legal do campo não depende de contagem.
+    expect(temProvaVersionada([{ ...t, vigente: false }], 'v-tel')).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 20 · a migração do agregado para a entidade (Risco-002, segunda metade)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('PR 20 · integração — revogado e expirado cessam igual, e dizem coisas diferentes', () => {
+  let varejo: BancoMock;
+  const revelar = (titularId: string, campo: string, purpose = 'atendimento') =>
+    request<{ erro?: string }>(varejo, {
+      papel: 'dpo', ator: 'teste', metodo: 'POST', caminho: '/v1/pseudonyms/resolve',
+      purpose: purpose as Finalidade,
+      body: {
+        titularId, campo, protocolo: '2026-0731',
+        justificativa: 'Contato para confirmar a solicitação em atendimento neste protocolo.',
+      },
+    });
+
+  beforeEach(() => { varejo = new BancoMock('varejo'); });
+
+  it('Beatriz revoga pelo portal → o telefone dela dá 422; o de Marina, não', () => {
+    const beatriz = varejo.cenario.titulares[2];
+    expect(beatriz.id).toBe('t3');
+    const { token } = sessaoDoPortal(varejo, 'revogacao', 2);
+    const res = requestPortal(varejo, {
+      metodo: 'POST', caminho: '/v1/me/consentimentos/v-tel/revogacao', sessao: token,
+    });
+    expect(res.status).toBe(200);
+
+    const dela = revelar('t3', 'telefone');
+    expect(dela.status).toBe(422);
+    expect(dela.body.erro).toContain('retirou a autorização');
+    // A revogação é dela, e de mais ninguém: é isto que o agregado não conseguia.
+    expect(revelar('t1', 'telefone').status).toBe(200);
+  });
+
+  it('o aceite revogado segue legível — o fato histórico não some', () => {
+    const antes = varejo.consentimentoDe('t3', 'v-tel')!.aceite;
+    const { token } = sessaoDoPortal(varejo, 'revogacao', 2);
+    requestPortal(varejo, {
+      metodo: 'POST', caminho: '/v1/me/consentimentos/v-tel/revogacao', sessao: token,
+    });
+    const depois = varejo.consentimentoDe('t3', 'v-tel')!;
+    expect(depois.aceite).toEqual(antes);
+    expect(depois.estado).toBe('revogado');
+    expect(depois.texto.versao).toBe('v2');
+  });
+
+  it('expirado sem revogação dá o mesmo 422, com motivo distinto de revogado', () => {
+    // Rafael (t2) aceitou o e-mail há 400 dias, sob texto de validade P1Y, e
+    // não revogou nada: o aceite venceu sozinho.
+    const rafael = varejo.consentimentoDe('t2', 'v-email')!;
+    expect(rafael.estado).toBe('expirado');
+    expect(rafael.revogacao).toBeUndefined();
+
+    const res = revelar('t2', 'email');
+    expect(res.status).toBe(422);
+    expect(res.body.erro).toContain('expirou');
+    expect(res.body.erro).not.toContain('retirou');
+    // Marina aceitou há 30 dias: o dela vale.
+    expect(varejo.consentimentoDe('t1', 'v-email')!.estado).toBe('ativo');
+  });
+
+  it('expira hoje ainda vale; expirou ontem, não — pela rota, não só pela função', () => {
+    const aceite = varejo.cenario.consentimentos.find((c) => c.titularId === 't1' && c.textoId === 'ct-v-tel-v2')!;
+    const texto = varejo.cenario.consentimentoTextos.find((t) => t.id === aceite.textoId)!;
+    const hoje = new Date();
+    const menosAnos = (n: number, dias: number) => {
+      const d = new Date(hoje);
+      d.setUTCFullYear(d.getUTCFullYear() - n);
+      d.setUTCDate(d.getUTCDate() + dias);
+      return d.toISOString().slice(0, 10);
+    };
+    expect(texto.validade).toBe('P2Y');
+
+    aceite.coletadoEm = menosAnos(2, 0);   // vence exatamente hoje
+    expect(varejo.consentimentoDe('t1', 'v-tel')!.estado).toBe('ativo');
+    expect(revelar('t1', 'telefone').status).toBe(200);
+
+    aceite.coletadoEm = menosAnos(2, -1);  // venceu ontem
+    expect(varejo.consentimentoDe('t1', 'v-tel')!.estado).toBe('expirado');
+    expect(revelar('t1', 'telefone').status).toBe(422);
+  });
+
+  it('sem aceite nenhum, a recusa diz ausência — não vencimento nem retirada', () => {
+    varejo.cenario.consentimentos = varejo.cenario.consentimentos
+      .filter((c) => !(c.titularId === 't1' && c.textoId === 'ct-v-tel-v2'));
+    const res = revelar('t1', 'telefone');
+    expect(res.status).toBe(422);
+    expect(res.body.erro).toContain('Não há consentimento');
+  });
+
+  it('o portal mostra o texto na versão que a pessoa aceitou, e o estado dela', () => {
+    const { token } = sessaoDoPortal(varejo, 'revogacao', 2);
+    const res = requestPortal<any>(varejo, {
+      metodo: 'GET', caminho: '/v1/me/consentimentos', sessao: token,
+    });
+    const tel = res.body.consentimentos.find((c: any) => c.id === 'v-tel');
+    expect(tel.versao).toBe('v2');
+    expect(tel.estado).toBe('ativo');
+    expect(tel.expira_em).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('PR 20 · sistema — o console mostra o mesmo estado que o banco', () => {
+  it('GET /v1/consentimentos traz a contagem somada, e nenhum contador', () => {
+    const varejo = new BancoMock('varejo');
+    const res = request<any[]>(varejo, {
+      papel: 'dpo', ator: 'teste', metodo: 'GET', caminho: '/v1/consentimentos',
+    });
+    expect(res.status).toBe(200);
+    const tel = res.body.find((c) => c.campoId === 'v-tel');
+    expect(tel.titularesAtivos).toBe(2);
+    expect(tel.aceites).toBe(2);
+    expect(tel.vigente).toBe(true);
+    expect(Object.keys(tel)).not.toContain('titulares');
+
+    // Revogar move a contagem — e ela é somada, não decrementada.
+    request(varejo, {
+      papel: 'dpo', ator: 'teste', metodo: 'POST',
+      caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: 'x'.repeat(30) },
+    });
+    const depois = request<any[]>(varejo, {
+      papel: 'dpo', ator: 'teste', metodo: 'GET', caminho: '/v1/consentimentos',
+    });
+    expect(depois.body.find((c) => c.campoId === 'v-tel').titularesAtivos).toBe(0);
+  });
+
+  it('a T2 mostra a contagem derivada, e o campo perde a base quando ninguém sustenta', () => {
+    limparBancosDaSessao();
+    const varejo = new BancoMock('varejo');
+    useSessao.setState({ papel: 'dpo', banco: varejo, versao: 0, avisos: [], recusas: {} });
+    const { unmount } = render(<MemoryRouter><T2 /></MemoryRouter>);
+    expect(screen.getAllByText(/ativo · 2 titulares/).length).toBeGreaterThan(0);
+    unmount();
+
+    request(varejo, {
+      papel: 'dpo', ator: 'teste', metodo: 'POST',
+      caminho: '/v1/consentimentos/v-tel/revogar', body: { motivo: 'x'.repeat(30) },
+    });
+    useSessao.setState({ versao: 1 });
+    render(<MemoryRouter><T2 /></MemoryRouter>);
+    expect(screen.getAllByText('sem aceite vivo').length).toBeGreaterThan(0);
+  });
+
+  it('o gate reprova campo sob consentimento sem versão de texto declarada', () => {
+    const raiz = mkdtempSync(join(tmpdir(), 'gate-consent-'));
+    mkdirSync(join(raiz, '.privacy'), { recursive: true });
+    const inventario = (extra: string) => writeFileSync(
+      join(raiz, '.privacy', 'data-inventory.teste.yaml'),
+      `repositorio: t\ncampos:\n  - nome: telefone\n    categoria: pessoal\n    base_legal: consentimento\n${extra}`,
+    );
+
+    inventario('');
+    const sem = rodarGate(raiz);
+    expect(sem.achados.some((a) => a.regra === 'catalogo/consentimento-sem-prova')).toBe(true);
+    expect(sem.aprovado).toBe(false);
+
+    inventario('    consentimento_versao: v2\n');
+    const com = rodarGate(raiz);
+    expect(com.achados.some((a) => a.regra === 'catalogo/consentimento-sem-prova')).toBe(false);
+    rmSync(raiz, { recursive: true, force: true });
+  });
+});
+
+describe('PR 20 · aceitação — a migração é completa, não parcial', () => {
+  it('nenhum contador de titulares sobrevive em app/src', () => {
+    // O invariante da migração. Um agregado que continuasse existindo ao lado da
+    // entidade daria duas respostas possíveis para "quantas pessoas consentiram".
+    const arquivos = [
+      'src/mock/types.ts', 'src/mock/scenarios.ts', 'src/mock/api.ts',
+      'src/mock/portal.ts', 'src/screens/T2.tsx', 'src/ui/primitivos.tsx',
+    ];
+    for (const arq of arquivos) {
+      const fonte = readFileSync(join(arq), 'utf8');
+      const codigo = fonte.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+      // `titulares:` só é aceitável como a lista de titulares do cenário.
+      const suspeitas = codigo.split('\n')
+        .filter((l) => /\btitulares:/.test(l))
+        .filter((l) => !/titulares: Titular\[\]|titulares: \[/.test(l));
+      expect(suspeitas, `${arq} ainda tem contador de titulares`).toEqual([]);
+    }
+  });
+
+  it('o vocabulário da entidade é o mesmo dos três lados: tipo, cenário e banco', () => {
+    for (const id of ['banco', 'varejo', 'midia']) {
+      const b = new BancoMock(id);
+      expect(b.cenario.consentimentoTextos.length, id).toBeGreaterThan(0);
+      expect(b.cenario.consentimentos.length, id).toBeGreaterThan(0);
+      for (const aceite of b.cenario.consentimentos) {
+        const texto = b.cenario.consentimentoTextos.find((t) => t.id === aceite.textoId);
+        expect(texto, `${id}: aceite órfão ${aceite.id}`).toBeTruthy();
+      }
+      /*
+       * Todo campo sob consentimento tem texto publicado vigente — com **uma**
+       * exceção nomeada, e o nome importa.
+       *
+       * `m-menor` é o perfil infantil, que o catálogo declara sob consentimento
+       * sem nenhum registro: é o Art. 14 não modelado, que a auditoria já
+       * enumera como risco próprio. Publicar um texto para ele aqui seria
+       * inventar o aceite de um responsável que ninguém consultou — exatamente
+       * o defeito que este PR existe para fechar. A lista é fechada: crescer
+       * nela é decisão visível no diff.
+       */
+      const SEM_TEXTO_DECLARADO = ['m-menor'];
+      const semTexto = b.cenario.campos
+        .filter((c) => c.baseLegal === 'consentimento' && !b.textoVigenteDe(c.id))
+        .map((c) => c.id);
+      expect(semTexto.sort(), `${id}: campo sob consentimento sem texto`)
+        .toEqual(SEM_TEXTO_DECLARADO.filter((x) => b.cenario.campos.some((c) => c.id === x)));
+    }
+  });
+});
+
+describe('PR 20 · sistema — a cascata pendente é vigiada, não só exibida', () => {
+  let varejo: BancoMock;
+  const HORA = 60 * 60 * 1000;
+  const revogar = () => {
+    const { token } = sessaoDoPortal(varejo, 'revogacao', 2);
+    return requestPortal<any>(varejo, {
+      metodo: 'POST', caminho: '/v1/me/consentimentos/v-tel/revogacao', sessao: token,
+    });
+  };
+  const envelhecer = (horas: number) => {
+    for (const item of varejo.revogacoesTitular[0].cascata) {
+      if (item.estado === 'pendente') item.iniciadaEmMs = Date.now() - horas * HORA;
+    }
+  };
+
+  beforeEach(() => { varejo = new BancoMock('varejo'); revogar(); });
+
+  it('pendente há 25 h abre achado com código determinístico', () => {
+    envelhecer(25);
+    const antes = varejo.cenario.achados.length;
+    const abertos = varrerPropagacoes(varejo, Date.now());
+    expect(abertos).toHaveLength(1);
+    expect(abertos[0].codigo).toMatch(/^PROP-V_TEL-/);
+    expect(abertos[0].origem).toBe('motor_de_retencao');
+    expect(varejo.cenario.achados).toHaveLength(antes + 1);
+  });
+
+  it('pendente há 23 h não abre nada — o limite é 24, e 23 ainda é espera', () => {
+    envelhecer(23);
+    const antes = varejo.cenario.achados.length;
+    expect(varrerPropagacoes(varejo, Date.now())).toEqual([]);
+    expect(varejo.cenario.achados).toHaveLength(antes);
+  });
+
+  it('a segunda varredura atualiza, e continua sendo um achado só', () => {
+    envelhecer(25);
+    varrerPropagacoes(varejo, Date.now());
+    const depois = varejo.cenario.achados.filter((a) => a.codigo.startsWith('PROP-'));
+    expect(depois).toHaveLength(1);
+
+    envelhecer(200);
+    const segunda = varrerPropagacoes(varejo, Date.now());
+    expect(segunda).toHaveLength(1);
+    expect(varejo.cenario.achados.filter((a) => a.codigo.startsWith('PROP-'))).toHaveLength(1);
+    // Uma semana de atraso deixa de ser operação e vira processo.
+    expect(segunda[0].criticidade).toBe('alta');
+  });
+
+  it('o titular vê o mesmo atraso que o achado registra', () => {
+    envelhecer(25);
+    varrerPropagacoes(varejo, Date.now());
+    const { token } = sessaoDoPortal(varejo, 'revogacao', 2);
+    const p = requestPortal<any>(varejo, {
+      metodo: 'GET', caminho: '/v1/me/consentimentos/v-tel/propagacao', sessao: token,
+    });
+    expect(p.body.alerta).toBe(true);
+    expect(varejo.cenario.achados.some((a) => a.codigo.startsWith('PROP-'))).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 21 · fornecedor como entidade, DPA no banco (Risco-008)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('PR 21 · unidade — a vigência do DPA, na fronteira de um dia', () => {
+  const f = (extra: Partial<Fornecedor> = {}): Fornecedor => ({
+    id: 'f1', slug: 'sendgrid', nome: 'SendGrid', papel: 'operador', pais: 'EUA',
+    dpaAssinado: true, dpaExpiraEm: '2026-09-30', ...extra,
+  });
+
+  it('vence hoje ainda vale; venceu ontem, não', () => {
+    // O contrato cobre o último dia, não a véspera dele. Um dia de diferença
+    // aqui é um dia de transferência sem base contratual — ou um dia de
+    // integração derrubada sem razão.
+    expect(estadoDoDpa(f(), '2026-09-30')).toBe('vigente');
+    expect(estadoDoDpa(f(), '2026-10-01')).toBe('vencido');
+    expect(estadoDoDpa(f(), '2026-09-29')).toBe('vigente');
+  });
+
+  it('sem assinatura nunca vale — nem com prazo no futuro', () => {
+    expect(estadoDoDpa(f({ dpaAssinado: false, dpaExpiraEm: '2099-01-01' }), '2026-07-29'))
+      .toBe('nao_assinado');
+    expect(dpaVigente(f({ dpaAssinado: false, dpaExpiraEm: '2099-01-01' }), '2026-07-29')).toBe(false);
+  });
+
+  it('evidência anexada não é contrato firmado', () => {
+    const comPdf = f({ dpaAssinado: false, dpaUri: 'dpa/meta-scc.pdf', dpaExpiraEm: undefined });
+    expect(estadoDoDpa(comPdf, '2026-07-29')).toBe('nao_assinado');
+    // E a recusa diz isso, porque é a confusão que produz conformidade de papel.
+    expect(motivoDaRecusaDeTransferencia(comPdf, '2026-07-29')).toContain('evidência não é contrato');
+  });
+
+  it('assinado sem prazo não é vigente: contrato sem vencimento não se vigia', () => {
+    expect(estadoDoDpa(f({ dpaExpiraEm: undefined }), '2026-07-29')).toBe('sem_prazo');
+  });
+
+  it('a recusa carrega a data quando ela existe', () => {
+    const vencido = motivoDaRecusaDeTransferencia(f({ dpaExpiraEm: '2026-01-31' }), '2026-07-29');
+    expect(vencido).toContain('2026-01-31');
+    expect(motivoDaRecusaDeTransferencia(f(), '2026-09-30')).toBeNull();
+  });
+
+  it('sem contrato é crítico desde o primeiro dia; vencido escala com o tempo', () => {
+    expect(criticidadeDoDpa('vigente', 0)).toBeNull();
+    expect(criticidadeDoDpa('nao_assinado', 0)).toBe('critica');
+    expect(criticidadeDoDpa('vencido', 1)).toBe('baixa');
+    expect(criticidadeDoDpa('vencido', 7)).toBe('media');
+    expect(criticidadeDoDpa('vencido', 30)).toBe('alta');
+    expect(criticidadeDoDpa('vencido', 90)).toBe('critica');
+  });
+
+  it('o código do achado é determinístico e legível', () => {
+    expect(codigoDoAchadoDeDpa('meta-ads')).toBe('DPA-META_ADS');
+    expect(codigoDoAchadoDeDpa('transportadora norte')).toBe('DPA-TRANSPORTADORA_NORTE');
+  });
+});
+
+describe('PR 21 · integração — a varredura pega o que o trigger não alcança', () => {
+  let varejo: BancoMock;
+  const HOJE = () => new Date().toISOString().slice(0, 10);
+  const emDias = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+
+  beforeEach(() => { varejo = new BancoMock('varejo'); });
+
+  it('os cinco sem contrato aparecem como o que são, e abrem achado', () => {
+    // Modelar a ausência, e não inventar contrato: Meta Ads, Transportadora
+    // Norte e Zenvia recebem dado e não têm DPA assinado.
+    const semDpa = varejo.cenario.fornecedores.filter((f) => !f.dpaAssinado);
+    expect(semDpa).toHaveLength(3);
+
+    const abertos = varrerDpas(varejo, HOJE());
+    expect(abertos).toHaveLength(3);
+    expect(abertos.map((a) => a.codigo).sort())
+      .toEqual(['DPA-META_ADS', 'DPA-TRANSPORTADORA_NORTE', 'DPA-ZENVIA']);
+    // Sem contrato é crítico desde o primeiro dia: não há prazo correndo.
+    expect(abertos.every((a) => a.criticidade === 'critica')).toBe(true);
+  });
+
+  it('evidência anexada não salva ninguém: Meta Ads tem PDF e segue em achado', () => {
+    const meta = varejo.cenario.fornecedores.find((f) => f.slug === 'meta-ads')!;
+    expect(meta.dpaUri).toBeTruthy();
+    expect(meta.dpaAssinado).toBe(false);
+    const achado = varrerDpas(varejo, HOJE()).find((a) => a.codigo === 'DPA-META_ADS')!;
+    expect(achado.descricao).toContain('não é contrato');
+  });
+
+  it('a segunda varredura no mesmo vencimento continua sendo um achado só', () => {
+    varrerDpas(varejo, HOJE());
+    const antes = varejo.cenario.achados.filter((a) => a.codigo.startsWith('DPA-')).length;
+    varrerDpas(varejo, HOJE());
+    expect(varejo.cenario.achados.filter((a) => a.codigo.startsWith('DPA-'))).toHaveLength(antes);
+  });
+
+  it('renovar o DPA encerra o achado — com a data como evidência, não apagando', () => {
+    varrerDpas(varejo, HOJE());
+    const zenvia = varejo.cenario.fornecedores.find((f) => f.slug === 'zenvia')!;
+    zenvia.dpaAssinado = true;
+    zenvia.dpaExpiraEm = emDias(365);
+
+    const tocados = varrerDpas(varejo, HOJE());
+    const achado = tocados.find((a) => a.codigo === 'DPA-ZENVIA')!;
+    expect(achado.status).toBe('encerrado');
+    expect(achado.eficaciaAtingida).toBe(true);
+    // O achado não some: a prova de que houve período sem contrato é o que uma
+    // auditoria procura depois.
+    expect(varejo.cenario.achados.some((a) => a.codigo === 'DPA-ZENVIA')).toBe(true);
+    expect(achado.evidencias.at(-1)!.arquivo).toContain('dpa-renovado');
+    expect(achado.evidencias.at(-1)!.hash).toBeTruthy();
+  });
+
+  it('o contrato que vence DEPOIS da escrita: a varredura pega, e reabre se já fechara', () => {
+    const banco2 = new BancoMock('banco');
+    // SendGrid vence em 2026-09-30 — data do próprio cenário, nada forjado.
+    const sendgrid = banco2.cenario.fornecedores.find((f) => f.slug === 'sendgrid')!;
+    expect(sendgrid.dpaExpiraEm).toBe('2026-09-30');
+
+    // Antes do vencimento: nada a apontar.
+    expect(varrerDpas(banco2, '2026-09-30')).toEqual([]);
+    // No dia seguinte, a mesma transferência gravada vira achado.
+    const depois = varrerDpas(banco2, '2026-10-01');
+    expect(depois.map((a) => a.codigo)).toContain('DPA-SENDGRID');
+    expect(depois.find((a) => a.codigo === 'DPA-SENDGRID')!.criticidade).toBe('baixa');
+    // Noventa dias depois, o mesmo achado escala.
+    expect(varrerDpas(banco2, '2026-12-31').find((a) => a.codigo === 'DPA-SENDGRID')!.criticidade)
+      .toBe('critica');
+
+    // Renovado e depois irregular de novo: reabre e conta reincidência.
+    sendgrid.dpaExpiraEm = '2027-12-31';
+    expect(varrerDpas(banco2, '2026-12-31').find((a) => a.codigo === 'DPA-SENDGRID')!.status)
+      .toBe('encerrado');
+    sendgrid.dpaAssinado = false;
+    const reaberto = varrerDpas(banco2, '2026-12-31').find((a) => a.codigo === 'DPA-SENDGRID')!;
+    expect(reaberto.status).toBe('reaberto');
+    expect(reaberto.reincidencias).toBe(1);
+  });
+
+  it('parceiro cadastrado e sem uso não é achado — é cadastro', () => {
+    varejo.cenario.fornecedores.push({
+      id: 'fo-novo', slug: 'novo', nome: 'Parceiro Novo', papel: 'operador', dpaAssinado: false,
+    });
+    const abertos = varrerDpas(varejo, HOJE());
+    expect(abertos.map((a) => a.codigo)).not.toContain('DPA-NOVO');
+  });
+});
+
+describe('PR 21 · sistema — a entidade chega às telas e à cascata', () => {
+  it('a T2 mostra o contrato de cada parceiro, e nomeia o que não tem', () => {
+    limparBancosDaSessao();
+    useSessao.setState({ papel: 'dpo', banco: new BancoMock('varejo'), versao: 0, avisos: [], recusas: {} });
+    render(<MemoryRouter><T2 /></MemoryRouter>);
+    expect(screen.getByText('Fornecedores e contratos')).toBeInTheDocument();
+    expect(screen.getAllByText('sem DPA assinado').length).toBe(3);
+    expect(screen.getByText(/evidência não é contrato firmado/)).toBeInTheDocument();
+  });
+
+  it('a cascata da revogação notifica por entidade, e diz quando o parceiro não tem DPA', () => {
+    const varejo = new BancoMock('varejo');
+    const { token } = sessaoDoPortal(varejo, 'revogacao', 2);
+    const res = requestPortal<any>(varejo, {
+      metodo: 'POST', caminho: '/v1/me/consentimentos/v-tel/revogacao', sessao: token,
+    });
+    const notificacao = res.body.cascata.find((c: any) => c.tipo === 'notificacao');
+    expect(notificacao.alvo).toBe('Zenvia');
+    expect(notificacao.efeito).toContain('sem DPA assinado');
+  });
+
+  it('nenhum destino em texto livre sobrou no modelo', () => {
+    for (const id of ['banco', 'varejo', 'midia']) {
+      const b = new BancoMock(id);
+      expect(b.cenario.fornecedores.length, id).toBeGreaterThan(0);
+      for (const campo of b.cenario.campos) {
+        for (const c of campo.compartilhamentos) {
+          expect(b.fornecedor(c.fornecedorId), `${id}: ${campo.id} aponta para fornecedor inexistente`)
+            .toBeTruthy();
+        }
+      }
+      for (const t of b.cenario.titulares) {
+        for (const c of t.compartilhamentos) {
+          expect(b.fornecedor(c.fornecedorId), `${id}: titular ${t.id} com fornecedor órfão`).toBeTruthy();
+        }
+      }
+    }
+  });
+
+  it('o db/tests.sql deixou de ignorar o DPA', () => {
+    // O grep que voltava vazio. É o invariante do PR inteiro.
+    const sql = readFileSync(join('..', 'db', 'tests.sql'), 'utf8');
+    expect(/dpa/i.test(sql)).toBe(true);
+    expect(sql).toContain('transferência com DPA vencido ontem');
+    expect(sql).toContain('transferência com DPA vencendo hoje');
+    // E o schema declara, em prosa, o que o trigger NÃO faz. A asserção roda
+    // sobre o texto normalizado: o comentário quebra em 80 colunas, e reformatar
+    // o arquivo não pode quebrar o teste que protege a frase.
+    const schema = readFileSync(join('..', 'db', 'schema.sql'), 'utf8')
+      // Bloco de comentário quebra em 80 colunas com `*` de continuação: o
+      // marcador sai antes de colapsar o espaço, senão a frase nunca casa.
+      .replace(/^\s*\*/gm, '').replace(/\s+/g, ' ');
+    expect(schema).toContain('ele não vigia');
+    expect(schema).toContain('Quem pega o que envelhece é a varredura');
   });
 });

@@ -31,6 +31,9 @@ import type { MarcacaoPbd } from './pbd';
 export type { Obrigacao, Prorrogacao, Trilha, TipoObrigacao } from './calendario';
 import type { Obrigacao } from './calendario';
 import type { FatoGerador } from './retencao';
+import type { Consentimento, TextoDeConsentimento } from './consentimento';
+import type { Fornecedor } from './fornecedor';
+export type { Fornecedor } from './fornecedor';
 export type { FatoGerador } from './retencao';
 
 export type Papel = 'engenharia' | 'dpo' | 'produto' | 'seguranca' | 'auditor';
@@ -59,7 +62,12 @@ export type Mecanismo = 'pais_adequado' | 'clausulas_padrao_anpd' | 'normas_corp
   | 'consentimento_especifico' | 'nao_aplicavel';
 
 export interface Compartilhamento {
-  destino: string;
+  /**
+   * O parceiro, por chave. `destino: string` saiu: sem entidade, "OpenAI" era
+   * uma string diferente em cada linha e o DPA dele não tinha dono — a pergunta
+   * "posso mandar dado para este parceiro hoje?" não tinha onde ser feita.
+   */
+  fornecedorId: string;
   finalidade: string;
   internacional: boolean;
   pais?: string;
@@ -361,7 +369,7 @@ export interface Titular {
     baseLegal: BaseLegal;
     campoCatalogoId?: string;
   }[];
-  compartilhamentos: { destino: string; finalidade: string; baseLegal: BaseLegal; internacional: boolean; mecanismo: Mecanismo; ultimaRemessa: string }[];
+  compartilhamentos: { fornecedorId: string; finalidade: string; baseLegal: BaseLegal; internacional: boolean; mecanismo: Mecanismo; ultimaRemessa: string }[];
   decisao?: {
     id: string; modelo: string; aprovado: boolean; shap: { feature: string; impacto: number }[];
     /** T4-03 — a revisão do Art. 20 só vale se deixar prova. Preenchida pela rota, nunca pela tela. */
@@ -627,17 +635,19 @@ export interface Incidente {
 
 // ── C-08 · registro de consentimento ────────────────────────────────────────
 
-export interface Consentimento {
-  campoId: string;
-  versao: string;
-  texto: string;
-  coletadoEm: string;
-  canal: string;
-  hash: string;
-  estado: 'ativo' | 'revogado' | 'expirado';
-  revogadoEm?: string;
-  titulares: number;
-}
+/**
+ * O agregado por campo (`{ campoId, versao, texto, estado, titulares: number }`)
+ * **saiu**. Ele não respondia às duas perguntas do Art. 8º — esta pessoa
+ * consentiu, e com qual texto — e tornava a revogação individual do Art. 18,
+ * VIII inexecutável: revogar mudava o registro do campo inteiro.
+ *
+ * No lugar dele, os três fatos que o banco já persiste, reexportados de
+ * `mock/consentimento.ts`, que é a autoridade sobre a regra. A contagem de
+ * titulares virou `titularesAtivos()` — uma soma, não um campo.
+ */
+export type {
+  TextoDeConsentimento, Consentimento, RevogacaoDeConsentimento, EstadoDoConsentimento,
+} from './consentimento';
 
 // ── Portal do titular · Risco-001 ───────────────────────────────────────────
 
@@ -725,8 +735,11 @@ export interface OposicaoTitular {
 
 export interface RevogacaoTitular {
   id: string;
+  /** O aceite que este fato revoga. Revogar não edita o aceite: aponta para ele. */
+  consentimentoId: string;
   titularId: string;
   campoId: string;
+  canal: string;
   revogadoEmMs: number;
   cascata: ItemDaCascata[];
 }
@@ -741,6 +754,11 @@ export interface Cenario {
   pareceres: Parecer[];
   achados: Achado[];
   incidentes: Incidente[];
+  /** As versões publicadas do texto, por campo. Imutáveis. */
+  /** Os parceiros que recebem dado, com o contrato de cada um. */
+  fornecedores: Fornecedor[];
+  consentimentoTextos: TextoDeConsentimento[];
+  /** Os aceites, um por titular e por versão. Append-only. */
   consentimentos: Consentimento[];
   gates: GateRun[];
   ripds: Ripd[];

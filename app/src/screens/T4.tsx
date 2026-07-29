@@ -358,8 +358,8 @@ export default function T4() {
                   <Nota>Resposta construída a partir da tabela de linhagem, que é append-only. Não é lista mantida à mão.</Nota>
                   <Tabela cabecalho={['Destino', 'Finalidade', 'Base legal', 'Transferência', 'Última remessa']}>
                     {(titular?.compartilhamentos ?? []).map((c) => (
-                      <tr key={c.destino}>
-                        <td>{c.destino}</td>
+                      <tr key={c.fornecedorId}>
+                        <td>{banco.nomeDoFornecedor(c.fornecedorId)}</td>
                         <td>{c.finalidade}</td>
                         <td className="mono" style={{ fontSize: 12.5 }}>{c.baseLegal}</td>
                         <td>{c.internacional

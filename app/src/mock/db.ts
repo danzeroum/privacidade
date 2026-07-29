@@ -1,5 +1,8 @@
 import { sha256 } from '../lib/sha256';
 import { CENARIOS } from './scenarios';
+import { estadoDe, expiraEm } from './consentimento';
+import type { Consentimento, TextoDeConsentimento } from './consentimento';
+import type { Fornecedor } from './fornecedor';
 import type {
   AuditLinha, Cenario, Finalidade, Papel, Reclassificacao,
   OposicaoTitular, RevogacaoTitular, SessaoTitular, VerificacaoTitular,
@@ -124,6 +127,63 @@ export class BancoMock {
   /** A revogação deste titular para este campo, se houver. */
   revogacaoDe(titularId: string, campoId: string): RevogacaoTitular | undefined {
     return this.revogacoesTitular.find((r) => r.titularId === titularId && r.campoId === campoId);
+  }
+
+  // ── fornecedor como entidade (Risco-008) ─────────────────────────────────
+
+  /** O parceiro por chave. Sem entidade, o mesmo nome era uma string por linha. */
+  fornecedor(id: string): Fornecedor | undefined {
+    return this.cenario.fornecedores.find((f) => f.id === id);
+  }
+
+  /** O nome para exibir. Nunca o id: chave é para juntar, não para ler. */
+  nomeDoFornecedor(id: string): string {
+    return this.fornecedor(id)?.nome ?? id;
+  }
+
+  // ── consentimento como entidade (Risco-002) ──────────────────────────────
+
+  /** O texto vigente de um campo: a última versão publicada. Derivado, não marcado. */
+  textoVigenteDe(campoId: string): TextoDeConsentimento | undefined {
+    return [...this.cenario.consentimentoTextos]
+      .filter((t) => t.campoId === campoId && t.vigente)
+      .sort((a, b) => a.publicadoEm.localeCompare(b.publicadoEm))
+      .at(-1);
+  }
+
+  /** O aceite **deste** titular para **este** campo, qualquer que seja a versão. */
+  aceiteDe(titularId: string, campoId: string): Consentimento | undefined {
+    const textos = new Set(
+      this.cenario.consentimentoTextos.filter((t) => t.campoId === campoId).map((t) => t.id),
+    );
+    return this.cenario.consentimentos.find(
+      (c) => c.titularId === titularId && textos.has(c.textoId),
+    );
+  }
+
+  /**
+   * O estado do consentimento de um titular sobre um campo, derivado dos fatos.
+   *
+   * Devolve `null` quando não há aceite nenhum — que é diferente de revogado e
+   * de expirado, e por isso não vira um quarto valor do enum: ausência de fato
+   * não é estado do fato.
+   */
+  consentimentoDe(titularId: string, campoId: string, hojeIso = new Date().toISOString().slice(0, 10)) {
+    const aceite = this.aceiteDe(titularId, campoId);
+    if (!aceite) return null;
+    const texto = this.cenario.consentimentoTextos.find((t) => t.id === aceite.textoId);
+    if (!texto) return null;
+    const revogacao = this.revogacoesTitular.find((r) => r.consentimentoId === aceite.id);
+    return {
+      aceite,
+      texto,
+      revogacao,
+      estado: estadoDe(texto, aceite, revogacao && {
+        id: revogacao.id, consentimentoId: revogacao.consentimentoId,
+        revogadoEmMs: revogacao.revogadoEmMs, canal: revogacao.canal,
+      }, hojeIso),
+      expiraEm: expiraEm(texto, aceite),
+    };
   }
 
   /** A oposição deste titular a esta LIA, se houver — acolhida ou já recusada. */

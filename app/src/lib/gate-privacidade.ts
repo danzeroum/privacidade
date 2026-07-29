@@ -102,7 +102,11 @@ const NAO_SAO_CAMPOS = new Set([
 
 interface Inventario {
   repositorio?: string;
-  campos?: { nome: string; categoria?: string; base_legal?: string }[];
+  campos?: {
+    nome: string; categoria?: string; base_legal?: string;
+    /** Versão do texto consentido. Obrigatória quando a base é consentimento. */
+    consentimento_versao?: string;
+  }[];
   logs?: string[];
 }
 
@@ -173,6 +177,28 @@ export function rodarGate(raiz: string): ResultadoDoGate {
         comoCorrigir: 'Corrija o YAML. Inventário ilegível reprova em vez de virar lista vazia.',
       });
     }
+  }
+
+  /**
+   * Base "consentimento" sem prova versionada reprova o merge.
+   *
+   * O ROPA pode declarar qualquer base legal, e é justamente por isso que esta
+   * precisa de contrapartida: consentimento é a única que depende de um ato de
+   * outra pessoa. Declarar consentimento sem apontar a versão do texto aceito é
+   * afirmar a vontade de alguém que ninguém consultou — e o gate barra por
+   * evidência, citando o campo, como faz com o resto.
+   */
+  for (const c of inventario.campos ?? []) {
+    if (String(c.base_legal) !== 'consentimento') continue;
+    if (String(c.consentimento_versao ?? '').trim()) continue;
+    achados.push({
+      regra: 'catalogo/consentimento-sem-prova', severidade: 'bloqueia',
+      arquivo: `${DIR_PRIVACIDADE}/${arquivoInventario}`,
+      mensagem: `O campo "${c.nome}" declara base legal "consentimento" sem `
+        + 'consentimento_versao: não há texto publicado que prove o aceite.',
+      comoCorrigir: 'Publique a versão do texto consentido e declare `consentimento_versao` no campo. '
+        + 'Sem ela, a base legal é uma afirmação sobre a vontade de alguém que ninguém consultou (Art. 8º, §1º).',
+    });
   }
 
   const catalogo = new Set((inventario.campos ?? []).map((c) => String(c.nome).toLowerCase()));

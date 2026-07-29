@@ -286,20 +286,55 @@ CREATE INDEX campo_lia_idx           ON campo (lia_id) WHERE lia_id IS NOT NULL;
 -- execução sobre a tabela inteira.
 CREATE INDEX campo_retencao_ate_idx  ON campo (retencao_ate) WHERE retencao_ate IS NOT NULL;
 
+-- ---------------------------------------------------------------------
+-- 3b. Fornecedor — o destino como entidade, e o DPA como fato com prazo
+--
+-- `compartilhamento.destino` era TEXT livre: "OpenAI" repetido em várias
+-- linhas, sem chave, sem contrato. `dpa_assinado` e `dpa_expira_em` existiam
+-- ali desde sempre, sem uma constraint e sem um teste — e por isso a pergunta
+-- "posso mandar dado pessoal para este parceiro hoje?" não tinha onde ser
+-- feita: cada linha carregava a própria cópia da resposta, e nada garantia que
+-- as cópias concordassem.
+-- ---------------------------------------------------------------------
+CREATE TABLE fornecedor (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id           UUID NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
+  slug                TEXT NOT NULL,             -- 'openai'
+  nome                TEXT NOT NULL,             -- 'OpenAI'
+  papel               TEXT NOT NULL CHECK (papel IN ('operador','controlador','controlador_conjunto')),
+  pais                TEXT,
+  -- `dpa_uri` aponta para um arquivo; `dpa_assinado` diz que ele foi firmado.
+  -- Tratar os dois como a mesma coisa é como a conformidade de papel nasce:
+  -- alguém vê o anexo, marca o item, e ninguém mais pergunta se foi assinado.
+  dpa_assinado        BOOLEAN NOT NULL DEFAULT false,
+  dpa_uri             TEXT,
+  dpa_hash            TEXT,
+  dpa_expira_em       DATE,
+  sla_incidente_horas INT CHECK (sla_incidente_horas BETWEEN 1 AND 72),
+  -- Chave por parceiro (Risco-008). A coluna liga fornecedor a kms_chave; a
+  -- revogação com SLA — desligar o parceiro destruindo a chave dele — é máquina
+  -- própria e continua sendo resíduo declarado, não insinuada por esta linha.
+  kms_chave_id        UUID,
+  UNIQUE (tenant_id, slug),
+  -- Contrato assinado sem prazo não se vigia: não há o que vencer, e o que não
+  -- vence não entra em varredura nenhuma.
+  CONSTRAINT dpa_assinado_tem_prazo CHECK (NOT dpa_assinado OR dpa_expira_em IS NOT NULL)
+);
+
+CREATE INDEX fornecedor_dpa_idx ON fornecedor (dpa_expira_em) WHERE dpa_assinado;
+
 CREATE TABLE compartilhamento (
   id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   campo_id                    UUID NOT NULL REFERENCES campo(id) ON DELETE CASCADE,
-  destino                     TEXT NOT NULL,     -- 'OpenAI'
-  papel_destino               TEXT NOT NULL CHECK (papel_destino IN ('operador','controlador','controlador_conjunto')),
+  -- `destino` saiu. Sem entidade, o mesmo parceiro era uma string diferente em
+  -- cada linha, e o DPA dele não tinha dono.
+  fornecedor_id               UUID NOT NULL REFERENCES fornecedor(id) ON DELETE RESTRICT,
   finalidade                  TEXT NOT NULL,
   transferencia_internacional BOOLEAN NOT NULL DEFAULT false,
   pais_destino                TEXT,
   mecanismo                   mecanismo_transferencia NOT NULL DEFAULT 'nao_aplicavel',
   evidencia_uri               TEXT,              -- s3://.../openai-scc.pdf
   evidencia_hash              TEXT,
-  dpa_assinado                BOOLEAN NOT NULL DEFAULT false,
-  dpa_expira_em               DATE,
-  sla_incidente_horas         INT CHECK (sla_incidente_horas BETWEEN 1 AND 72),
 
   -- Art. 33: transferência internacional exige mecanismo declarado e evidência.
   CONSTRAINT transferencia_exige_mecanismo CHECK (
@@ -630,6 +665,69 @@ CREATE TRIGGER campo_exige_lia_vigente
   BEFORE INSERT OR UPDATE ON campo
   FOR EACH ROW EXECUTE FUNCTION exige_lia_vigente();
 
+/*
+ * O DPA recusa a **escrita** da transferência (Risco-008).
+ *
+ * Mesmo molde do `exige_lia_vigente()` acima, e pelo mesmo motivo: a condição
+ * que sustenta o tratamento é conferida na entrada, não confiada à disciplina
+ * de quem escreve.
+ *
+ * O que este trigger NÃO faz, e é importante que não se leia nele: ele não
+ * vigia. Dispara sobre a linha que está sendo escrita e nunca sobre a que já
+ * está parada — a transferência gravada hoje com contrato válido continua
+ * gravada quando o contrato vencer amanhã. Quem pega o que envelhece é a
+ * varredura (`varrerDpas`), que abre achado. Chamar isto de vigilância seria
+ * exatamente a promessa sem instrumento que a auditoria mapeou.
+ */
+CREATE OR REPLACE FUNCTION exige_dpa_vigente() RETURNS TRIGGER AS $$
+DECLARE f RECORD;
+BEGIN
+  SELECT nome, dpa_assinado, dpa_expira_em, dpa_uri INTO f
+    FROM fornecedor WHERE id = NEW.fornecedor_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Transferência para fornecedor inexistente (%).', NEW.fornecedor_id;
+  END IF;
+
+  -- Sem assinatura não há contrato, e prazo futuro não conserta isso.
+  -- Evidência anexada também não: um PDF numa pasta não é um contrato firmado.
+  IF NOT f.dpa_assinado THEN
+    RAISE EXCEPTION 'Transferência para %: sem DPA assinado (Art. 39)%.',
+      f.nome,
+      CASE WHEN f.dpa_uri IS NOT NULL
+        THEN ' — há evidência anexada, mas evidência não é contrato firmado'
+        ELSE '' END;
+  END IF;
+
+  -- Vence **hoje** ainda vale: o contrato cobre o último dia, não a véspera.
+  IF f.dpa_expira_em < current_date THEN
+    RAISE EXCEPTION 'Transferência para %: o DPA venceu em % (Art. 39).',
+      f.nome, f.dpa_expira_em;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER compartilhamento_exige_dpa_vigente
+  BEFORE INSERT OR UPDATE ON compartilhamento
+  FOR EACH ROW EXECUTE FUNCTION exige_dpa_vigente();
+
+-- O que o trigger não alcança: transferência viva sob contrato que venceu
+-- depois de gravada. É esta view que a varredura lê para abrir achado.
+CREATE VIEW gov.transferencia_sem_dpa AS
+SELECT c.id AS compartilhamento_id, c.campo_id, c.finalidade,
+       f.id AS fornecedor_id, f.slug, f.nome, f.dpa_assinado, f.dpa_expira_em,
+       greatest(0, current_date - f.dpa_expira_em) AS atraso_dias,
+       CASE
+         WHEN NOT f.dpa_assinado THEN 'nao_assinado'
+         WHEN f.dpa_expira_em < current_date THEN 'vencido'
+         ELSE 'vigente'
+       END AS estado_dpa
+FROM compartilhamento c
+JOIN fornecedor f ON f.id = c.fornecedor_id
+WHERE NOT f.dpa_assinado OR f.dpa_expira_em < current_date;
+
 -- ---------------------------------------------------------------------
 -- 8. Direitos do titular (Art. 18)                                   [Tela T4]
 -- ---------------------------------------------------------------------
@@ -791,6 +889,151 @@ SELECT r.id, r.tenant_id, r.data_referencia, r.origem, r.status, r.iniciado_em, 
 FROM expurgo_run r
 LEFT JOIN expurgo_entrada e ON e.expurgo_run_id = r.id
 GROUP BY r.id;
+
+-- ---------------------------------------------------------------------
+-- 8b. Consentimento como entidade                          [Portal, telas 08-10]
+--
+-- Não havia tabela: consentimento era valor de enum e um contador
+-- (`titulares: number`) na camada de demonstração. Assim não se responde às
+-- duas perguntas que o Art. 8º faz — *esta pessoa consentiu?* e *com qual
+-- texto?* — nem se executa a revogação individual do Art. 18, VIII, porque
+-- revogar mudava o registro do campo inteiro.
+--
+-- São três fatos com donos distintos, e por isso três tabelas. A terceira é a
+-- que custa: revogar **cria fato novo** e nunca edita o aceite. Se apagasse, a
+-- organização perderia justamente a prova de que houve consentimento enquanto
+-- houve tratamento — que é o que o Art. 8º, §2º cobra, inclusive depois.
+-- ---------------------------------------------------------------------
+
+CREATE TABLE consentimento_texto (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id      UUID NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
+  campo_id       UUID NOT NULL REFERENCES campo(id) ON DELETE CASCADE,
+  versao         TEXT NOT NULL,
+  texto          TEXT NOT NULL CHECK (length(btrim(texto)) > 0),
+  texto_hash     TEXT NOT NULL,
+  -- Quanto o aceite vale, no mesmo domínio do ciclo de vida. `indeterminado` é
+  -- legítimo aqui — há consentimento sem prazo —, e exige a mesma justificativa
+  -- que o ROPA exige: prazo sem fim por omissão é o que faz um aceite de 2019
+  -- sustentar um tratamento de hoje.
+  validade       retencao NOT NULL,
+  validade_fonte TEXT,
+  publicado_em   DATE NOT NULL DEFAULT current_date,
+  UNIQUE (campo_id, versao),
+  CONSTRAINT texto_indeterminado_exige_fonte CHECK (
+    validade <> 'indeterminado' OR validade_fonte IS NOT NULL
+  )
+);
+
+-- Vigente é **derivado**, não um campo que alguém desliga: é a última versão
+-- publicada do campo. Coluna `vigente` exigiria UPDATE numa tabela que não pode
+-- ser editada, e a saída seria abrir a exceção justamente onde ela não cabe.
+CREATE VIEW gov.consentimento_texto_vigente AS
+SELECT DISTINCT ON (campo_id) *
+FROM consentimento_texto
+ORDER BY campo_id, publicado_em DESC, versao DESC;
+
+CREATE TABLE consentimento (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id          UUID NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
+  -- O titular do produto, pseudonimizado — a plataforma não hospeda o cadastro.
+  titular_pseudonimo TEXT NOT NULL,
+  texto_id           UUID NOT NULL REFERENCES consentimento_texto(id) ON DELETE RESTRICT,
+  canal              TEXT NOT NULL CHECK (canal IN ('app','web','checkout','presencial','telefone')),
+  coletado_em        DATE NOT NULL,
+  prova_hash         TEXT NOT NULL,
+  /*
+   * `validade` é copiada do texto no instante do aceite, de propósito.
+   *
+   * Denormalização deliberada, e não descuido: publicar uma versão nova do
+   * texto com prazo maior **não pode** estender em silêncio os aceites já
+   * dados. O que vale é o prazo que estava em vigor quando a pessoa disse sim —
+   * e congelá-lo aqui é o que permite `expira_em` ser coluna gerada.
+   */
+  validade           retencao NOT NULL,
+  expira_em          DATE GENERATED ALWAYS AS (gov.retencao_ate(validade, coletado_em)) STORED,
+  UNIQUE (tenant_id, titular_pseudonimo, texto_id)
+);
+
+CREATE INDEX consentimento_texto_idx   ON consentimento (texto_id);
+CREATE INDEX consentimento_expira_idx  ON consentimento (expira_em) WHERE expira_em IS NOT NULL;
+
+-- O aceite copia o prazo que estava valendo. Divergir dele é erro de escrita,
+-- não uma escolha do chamador.
+CREATE OR REPLACE FUNCTION consentimento_congela_validade() RETURNS TRIGGER AS $$
+DECLARE v_validade TEXT;
+BEGIN
+  SELECT validade INTO v_validade FROM consentimento_texto WHERE id = NEW.texto_id;
+  IF NEW.validade IS DISTINCT FROM v_validade THEN
+    RAISE EXCEPTION 'consentimento: a validade (%) precisa ser a do texto aceito (%).',
+      NEW.validade, v_validade;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER consentimento_valida_prazo
+  BEFORE INSERT ON consentimento
+  FOR EACH ROW EXECUTE FUNCTION consentimento_congela_validade();
+
+-- Revogar cria fato novo. O UNIQUE é o que impede revogar duas vezes; o
+-- ON DELETE RESTRICT é o que impede o aceite sumir por baixo da revogação.
+CREATE TABLE consentimento_revogacao (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  consentimento_id UUID NOT NULL UNIQUE REFERENCES consentimento(id) ON DELETE RESTRICT,
+  revogado_em      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  canal            TEXT NOT NULL,
+  motivo           TEXT,
+  /*
+   * O expurgo do que já foi coletado nasce daqui, com a data derivada do marco
+   * de revogação — o `fato_gerador` que o ciclo de vida declarou e que até
+   * agora não tinha quem o usasse. Trinta dias de carência: o tempo de propagar
+   * a cascata antes de eliminar, senão a prova de execução chega depois de o
+   * dado sumir.
+   */
+  retencao         retencao NOT NULL DEFAULT 'consentimento_revogado',
+  retencao_ate     DATE GENERATED ALWAYS AS (
+                     gov.retencao_ate(retencao, (revogado_em AT TIME ZONE 'UTC')::DATE)
+                   ) STORED,
+  CONSTRAINT revogacao_tem_prazo_de_expurgo CHECK (retencao_ate IS NOT NULL)
+);
+
+CREATE INDEX revogacao_expurgo_idx ON consentimento_revogacao (retencao_ate);
+
+-- A cascata, persistida. No estágio atual nascem duas frentes: a cessação onde
+-- o dado mora e o expurgo do que já foi coletado. A notificação de quem
+-- recebeu ganha alvo de verdade quando fornecedor virar entidade — hoje ela
+-- aponta para um nome em texto livre, e um nome não tem DPA nem SLA.
+CREATE TABLE revogacao_propagacao (
+  id             BIGSERIAL PRIMARY KEY,
+  revogacao_id   UUID NOT NULL REFERENCES consentimento_revogacao(id) ON DELETE CASCADE,
+  alvo           TEXT NOT NULL,
+  tipo           TEXT NOT NULL CHECK (tipo IN ('cessacao','notificacao','expurgo')),
+  efeito         TEXT NOT NULL,
+  estado         TEXT NOT NULL DEFAULT 'pendente' CHECK (estado IN ('propagado','pendente')),
+  iniciada_em    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  confirmada_em  TIMESTAMPTZ,
+  UNIQUE (revogacao_id, alvo, tipo),
+  CONSTRAINT propagado_tem_confirmacao CHECK (estado <> 'propagado' OR confirmada_em IS NOT NULL)
+);
+
+CREATE INDEX propagacao_pendente_idx ON revogacao_propagacao (iniciada_em)
+  WHERE estado = 'pendente';
+
+-- O estado vigente de cada aceite, derivado. Revogado precede expirado: o ato
+-- do titular não some porque o relógio também correu.
+CREATE VIEW gov.consentimento_estado AS
+SELECT c.id, c.tenant_id, c.titular_pseudonimo, c.canal, c.coletado_em, c.expira_em,
+       t.campo_id, t.versao, t.texto, t.texto_hash,
+       r.id AS revogacao_id, r.revogado_em, r.retencao_ate AS expurgo_ate,
+       CASE
+         WHEN r.id IS NOT NULL THEN 'revogado'
+         WHEN c.expira_em IS NOT NULL AND c.expira_em < current_date THEN 'expirado'
+         ELSE 'ativo'
+       END AS estado
+FROM consentimento c
+JOIN consentimento_texto t ON t.id = c.texto_id
+LEFT JOIN consentimento_revogacao r ON r.consentimento_id = c.id;
 
 -- ---------------------------------------------------------------------
 -- 9b. Achado de auditoria                                           [Tela T11]
@@ -1135,6 +1378,17 @@ CREATE TRIGGER linhagem_imutavel
   BEFORE UPDATE OR DELETE ON linhagem
   FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
 
+-- Append-only nos dois fatos que provam: o aceite e o texto aceito. Ficam aqui,
+-- e não junto das tabelas, porque `bloqueia_mutacao()` só existe a partir desta
+-- seção — e um schema que só aplica na ordem certa é um schema que aplica.
+CREATE TRIGGER consentimento_imutavel
+  BEFORE UPDATE OR DELETE ON consentimento
+  FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
+
+CREATE TRIGGER consentimento_texto_imutavel
+  BEFORE UPDATE OR DELETE ON consentimento_texto
+  FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
+
 -- Botão "Verificar integridade" da T6 chama esta função.
 CREATE OR REPLACE FUNCTION verificar_integridade_audit(p_tenant UUID)
 RETURNS TABLE (linha_id BIGINT, esperado TEXT, encontrado TEXT, integro BOOLEAN) AS $$
@@ -1251,11 +1505,15 @@ SELECT s.slug                AS sistema,
        c.retencao,
        c.lia_id,
        bool_or(sh.transferencia_internacional) AS transferencia_internacional,
-       array_remove(array_agg(DISTINCT sh.destino), NULL) AS destinos
+       -- O destino agora tem nome porque tem entidade. O ROPA passa a poder
+       -- responder "com quem" e "sob qual contrato" pela mesma junção.
+       array_remove(array_agg(DISTINCT fo.nome), NULL) AS destinos,
+       bool_and(coalesce(fo.dpa_assinado, true)) AS todos_com_dpa
 FROM campo c
 JOIN dataset d ON d.id = c.dataset_id AND d.vigente
 JOIN sistema s ON s.id = d.sistema_id
 LEFT JOIN compartilhamento sh ON sh.campo_id = c.id
+LEFT JOIN fornecedor fo ON fo.id = sh.fornecedor_id
 GROUP BY s.slug, s.repositorio, d.nome, d.zona_lake, c.nome, c.tipo_armazenado,
          c.categoria, c.sensivel, c.base_legal, c.finalidade, c.retencao, c.lia_id;
 
