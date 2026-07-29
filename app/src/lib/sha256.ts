@@ -71,6 +71,15 @@ export function sha256(mensagem: string): string {
 export const curto = (hash: string, n = 8) => `${hash.slice(0, n)}…`;
 
 /**
+ * PR 15 — hash de bloco encadeado: o hash anterior entra no cálculo do
+ * seguinte, como no audit trail. Uma função só, usada pela rota que anexa a
+ * evidência e pela massa de demonstração que já nasce com cadeia — duas
+ * fórmulas produziriam uma semente que não confere pela regra do produto.
+ */
+export const hashEncadeado = (anterior: string | null, ...partes: string[]): string =>
+  sha256([anterior ?? '', ...partes].join('·'));
+
+/**
  * Hash do CPF para busca. Só o dígito importa — máscara é formatação, não dado.
  * É esta função que o frontend chama antes de mandar qualquer coisa para a rede:
  * o CPF digitado nunca sai do navegador.

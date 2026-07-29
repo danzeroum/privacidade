@@ -465,6 +465,24 @@ export interface Parecer {
   devolucoes: number;
 }
 
+/**
+ * PR 15 — a prova que cada etapa do achado deixa, encadeada.
+ *
+ * `hashAnterior` aponta para a evidência anterior **do mesmo achado**, pelo
+ * mesmo motivo do audit trail: anexo solto prova que um arquivo existe, e nada
+ * sobre a ordem em que apareceu. Encadeado, remontar a sequência depois exige
+ * recalcular tudo o que veio depois — que é a diferença entre arquivo e prova.
+ */
+export interface EvidenciaDeAchado {
+  arquivo: string;
+  hash: string;
+  hashAnterior: string | null;
+  por: string;
+  quando: string;
+  /** A etapa em que a prova entrou. Evidência de execução não prova eficácia. */
+  etapa: EstadoAchado;
+}
+
 export interface Achado {
   id: string;
   codigo: string;
@@ -476,7 +494,24 @@ export interface Achado {
   reincidencias: number;
   causaRaiz?: string;
   plano?: string;
+  /**
+   * PR 15 — o que faria alguém dizer que o plano funcionou, declarado **antes**
+   * de executar. Sem ele, "verificado" é opinião de quem verifica, e a
+   * verificação independente perde o que teria de conferir.
+   */
+  criterioDeEficacia?: string;
+  /** Quem executou. É o fato que torna a independência da verificação aferível. */
+  executadoPor?: string;
   verificadoPor?: string;
+  /**
+   * O veredito da verificação **contra o critério**. Separado do estado de
+   * propósito: `verificado` diz que alguém conferiu; este campo diz o que a
+   * conferência concluiu. Verificar e aprovar não são o mesmo ato.
+   */
+  eficaciaAtingida?: boolean;
+  motivoDaReabertura?: string;
+  /** Cadeia de custódia, append-only. */
+  evidencias: EvidenciaDeAchado[];
 }
 
 // ── C-07 · incidente de segurança (Art. 48) ─────────────────────────────────
