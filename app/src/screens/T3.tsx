@@ -295,6 +295,8 @@ export default function T3() {
         <div className="stack">
           <Rito ripd={ripd} />
 
+          <Dispensas />
+
           <Cartao titulo="Checklist LINDDUN" hint="ativar gera mitigação">
             {ripd.linddun.map((l) => (
               <label className="ck" key={l.chave} style={{ cursor: 'pointer' }}>
@@ -336,6 +338,97 @@ export default function T3() {
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * PR 11 — a dispensa como decisão registrada, e o gatilho que a reabre.
+ *
+ * Dispensar não é deixar de fazer RIPD: é registrar por que não se faz e o que,
+ * se acontecer, obriga a refazer. Por isso o gatilho é um **código do catálogo**
+ * e não uma frase — a triagem do CI fala esse vocabulário, e é ela que dispara.
+ *
+ * O botão de disparo existe no modo demonstração porque, em produção, quem
+ * chama a rota é o pipeline. Ele não é um atalho de escrita: passa pela mesma
+ * rota, com a mesma exigência de evidência e o mesmo registro antes de aplicar.
+ */
+function Dispensas() {
+  const banco = useSessao((s) => s.banco);
+  const chamar = useSessao((s) => s.chamar);
+  const avisar = useSessao((s) => s.avisar);
+  useSessao((s) => s.versao);
+
+  const dispensados = banco.cenario.ripds.filter((r) => r.status === 'dispensado');
+  const reabertos = banco.cenario.ripds.filter(
+    (r) => r.status !== 'dispensado' && (r.dispensas ?? []).some((d) => d.disparos.some((x) => x.reabriu)),
+  );
+
+  if (dispensados.length === 0 && reabertos.length === 0) return null;
+
+  const disparar = (ripdId: string, codigo: string, condicao: string) => {
+    const res = chamar<{ reabriu: boolean; motivo: string }>(
+      { metodo: 'POST', caminho: `/v1/ripds/${ripdId}/gatilho`, body: { codigo, evidencia: condicao } },
+      'gatilho',
+    );
+    if (res.status === 200) {
+      avisar(res.body.reabriu ? 'negado' : 'info',
+        res.body.reabriu
+          ? `${codigo} disparou: o RIPD voltou para elaboração sem intervenção manual.`
+          : `${codigo} ficou registrado como evidência.`,
+        res.body.motivo);
+      useSessao.setState((s) => ({ versao: s.versao + 1 }));
+    }
+  };
+
+  return (
+    <Cartao titulo="Dispensa e gatilho de reabertura" hint="dispensa é decisão registrada, não ausência de RIPD">
+      {dispensados.map((r) => {
+        const d = (r.dispensas ?? []).at(-1);
+        if (!d) return null;
+        return (
+          <div key={r.codigo} style={{ paddingBottom: 10, borderBottom: '1px solid var(--line)', marginBottom: 10 }}>
+            <div className="row" style={{ gap: 8 }}>
+              <span className="mono" style={{ fontSize: 13, fontWeight: 600 }}>{r.codigo}</span>
+              <Pill tom="neutral">dispensado</Pill>
+            </div>
+            <p className="hint" style={{ margin: '6px 0' }}>{d.justificativa}</p>
+            {d.gatilhos.map((g) => (
+              <div className="row" key={g.codigo} style={{ gap: 8, marginTop: 6 }}>
+                <span className="hash">{g.codigo} · {rotuloDoGatilho(g.codigo)}</span>
+                <span className="hint" style={{ flex: 1, minWidth: 180 }}>{g.condicao}</span>
+                {banco.modoDemo && (
+                  <Permitido acao="gerar_ripd" alternativa={null}>
+                    <button className="reveal" onClick={() => disparar(r.id, g.codigo, g.condicao)}>
+                      Simular disparo
+                    </button>
+                  </Permitido>
+                )}
+              </div>
+            ))}
+            {d.disparos.length > 0 && (
+              <Nota tom="warn">
+                {d.disparos.length} disparo(s) registrado(s); o último ({d.disparos.at(-1)!.codigo}){' '}
+                {d.disparos.at(-1)!.reabriu ? 'reabriu o RIPD' : 'não reabriu e ficou como evidência'}.
+              </Nota>
+            )}
+          </div>
+        );
+      })}
+
+      {reabertos.map((r) => (
+        <Nota key={r.codigo} tom="crit">
+          <b>{r.codigo} foi reaberto por gatilho.</b> Está em <span className="mono">{r.status}</span>, e
+          a dispensa anterior continua no artefato dizendo o que se comprometeu a vigiar.
+        </Nota>
+      ))}
+
+      <Recusa ancora="gatilho" />
+      <Nota>
+        O gatilho é um código do catálogo da triagem, não uma frase: é o que permite a esteira reabrir
+        o RIPD sozinha. Gatilho crítico que a dispensa não previu também reabre — a omissão não protege
+        a dispensa.
+      </Nota>
+    </Cartao>
   );
 }
 

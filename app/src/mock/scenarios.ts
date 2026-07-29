@@ -1,6 +1,7 @@
 import { sha256, hashCpf } from '../lib/sha256';
 import { aplicar } from './decisoes';
 import type { Obrigacao, Trilha, TipoObrigacao } from './calendario';
+import type { Epico, Ripd } from './types';
 import type { Acao } from './permissoes';
 import type { Decisao, DecisaoRegistrada, TabelaId, Valor } from './decisoes';
 import type {
@@ -205,6 +206,55 @@ const incidentePadrao = (camposIds: string[], riscoCodigo: string, ripdId: strin
  * PR 7 — parecer e achado ganham identidade para as máquinas deles serem
  * exercitáveis. Nascem no primeiro estado, como o incidente.
  */
+/**
+ * PR 11 — um RIPD dispensado por cenário, para a dispensa ser demonstrável.
+ *
+ * Nasce com o gatilho declarado e sem disparo. É o segundo RIPD do cenário: o
+ * primeiro está em revisão e é o que a T3 abre. Dispensa não gera item de fila
+ * — é justamente o estado que não pede ação de ninguém, e é isso que faz o
+ * gatilho ser a única coisa que a reabre.
+ */
+const ripdDispensadoPadrao = (codigo: string, sistema: string, prNumero: number): Ripd => ({
+  id: 'r2', codigo, titulo: 'Relatório de sessão agregado por região', sistema, prNumero,
+  headSha: 'f0e9d8c',
+  contexto: 'Painel interno com contagem de sessões por região, sem identificador de titular.',
+  foraDeEscopo: 'Qualquer quebra por titular, por dispositivo ou por faixa etária.',
+  fluxoMermaid: 'graph LR\n  A[Eventos] --> B(Agregador k>=50)\n  B --> C[Painel]',
+  camposIds: [], operacoes: [], recomendacoes: [], triggers: [],
+  volumeTitulares: 0, status: 'dispensado', linddun: LINDDUN_BASE.map((l) => ({ ...l })),
+  dispensas: [{
+    justificativa: 'Agregação com k mínimo de 50 por região, sem identificador direto nem indireto; '
+      + 'nenhum gatilho crítico da triagem foi acionado no diff.',
+    gatilhos: [
+      { codigo: 'T5', condicao: 'Quebra do agregado abaixo de k=50, que volta a permitir singularização.' },
+      { codigo: 'T7', condicao: 'Cruzamento do agregado com qualquer base que tenha identificador.' },
+    ],
+    por: '@eng-maria', quando: '2026-05-04T10:12:00Z', disparos: [],
+  }],
+});
+
+/**
+ * PR 11 — o épico com o checklist de PbD.
+ *
+ * As marcações espelham o `.privacy/epico.yml` do repositório, e a regra que as
+ * avalia é a mesma que o gate de CI usa. Um dos sete entra **marcado e sem
+ * evidência** de propósito: é o caso que o produto precisa saber exibir, porque
+ * é o que um checklist ingênuo contaria como pronto.
+ */
+const epicosPadrao = (repositorio: string, prNumero: number): Epico[] => [{
+  id: 'e1', codigo: 'EPIC-2026-114', repositorio, prNumero,
+  titulo: 'Coleta de evento de sessão para o painel de audiência',
+  pbd: [
+    { chave: 'proativo', marcado: true, evidencia: 'gate de CI barra o merge antes do deploy' },
+    { chave: 'padrao', marcado: true, evidencia: 'app/src/ui/primitivos.tsx · CampoPII nasce mascarado' },
+    { chave: 'embutida', marcado: true, evidencia: 'app/src/mock/estados.ts · sequência na API' },
+    { chave: 'soma_positiva', marcado: true, evidencia: '' },
+    { chave: 'ciclo_de_vida', marcado: true, evidencia: 'db/schema.sql · TTL e cripto-shredding' },
+    { chave: 'transparencia', marcado: true, evidencia: 'app/src/mock/db.ts · cadeia verificável' },
+    { chave: 'centrado_no_titular', marcado: false, evidencia: '' },
+  ],
+}];
+
 const pareceresPadrao = (): Parecer[] => [
   { id: 'p1', codigo: 'PT-2026-018', ripdId: 'r1', status: 'rascunho', autor: '@eng-maria', devolucoes: 0 },
 ];
@@ -302,6 +352,7 @@ const banco: Cenario = {
   ],
   campos: camposBanco,
   obrigacoes: agendaPadrao(),
+  epicos: epicosPadrao('danzeroum/credit-scoring', 1234),
   pareceres: pareceresPadrao(),
   achados: achadosPadrao(),
   incidentes: incidentePadrao(['b-cpf', 'b-nome', 'b-hist'], 'R09', 'r1'),
@@ -360,7 +411,8 @@ const banco: Cenario = {
       }, 1, '2026-03-12T14:02:10Z'),
     ],
     linddun: LINDDUN_BASE.map((l) => ({ ...l })),
-  }],
+  },
+  ripdDispensadoPadrao('RIPD-2026-021', 'analytics', 1240)],
   riscos: riscosComuns(
     { codigo: 'R1', descricao: 'Vazamento de CPF via prompt do LLM', probabilidade: 4, impacto: 5, dano: 'material', danoTexto: 'Crédito negado indevidamente e exposição do documento fora do perímetro', tratamento: 'Pseudonimização HMAC pré-prompt + SCC com a OpenAI', tipo: 'mitigar', esforcoSprints: 1, dono: '@eng-maria', dominio: 'Engenharia', prazo: '15/08', reavaliacao: '15/11', status: 'em_tratamento', ripdCodigo: 'RIPD-2026-014' },
     { codigo: 'R2', descricao: 'Decisão automatizada sem canal de revisão', probabilidade: 3, impacto: 5, dano: 'discriminacao', danoTexto: 'Discriminação algorítmica sem via de contestação (Art. 20)', tratamento: 'Endpoint /revisao + teste de disparidade no CI', tipo: 'mitigar', esforcoSprints: 2, dono: '@dpo-marcela', dominio: 'DPO', prazo: '29/08', reavaliacao: '29/11', status: 'em_tratamento', ripdCodigo: 'RIPD-2026-014' },
@@ -474,6 +526,7 @@ const varejo: Cenario = {
   ],
   campos: camposVarejo,
   obrigacoes: agendaPadrao(),
+  epicos: epicosPadrao('aurora/recomendacao', 512),
   pareceres: pareceresPadrao(),
   achados: achadosPadrao(),
   incidentes: incidentePadrao(['v-cpf', 'v-email', 'v-tel'], 'R09', 'r1'),
@@ -521,7 +574,8 @@ const varejo: Cenario = {
     volumeTitulares: 2_400_000,
     status: 'em_revisao',
     linddun: LINDDUN_BASE.map((l) => ({ ...l, ativo: l.chave === 'location' ? true : l.ativo })),
-  }],
+  },
+  ripdDispensadoPadrao('RIPD-2026-034', 'recomendacao', 518)],
   riscos: riscosComuns(
     { codigo: 'R1', descricao: 'Dado de saúde alimentando recomendação de marketing', probabilidade: 4, impacto: 5, dano: 'moral', danoTexto: 'Inferência de condição de saúde exposta na vitrine, visível a terceiros no mesmo domicílio', tratamento: 'Segregar base da farmácia; chave KMS própria; proibir join no gate', tipo: 'evitar', esforcoSprints: 1.5, dono: '@squad-saude', dominio: 'Engenharia', prazo: '05/08', reavaliacao: '05/11', status: 'em_tratamento', ripdCodigo: 'RIPD-2026-031' },
     { codigo: 'R2', descricao: 'Público semelhante enviado a rede de anúncios sem oposição fácil', probabilidade: 4, impacto: 3, dano: 'perda_de_controle', danoTexto: 'Titular não consegue sair da audiência publicitária', tratamento: 'Oposição em um clique + purga de audiência em 24 h', tipo: 'mitigar', esforcoSprints: 1, dono: '@squad-crm', dominio: 'Produto', prazo: '19/08', reavaliacao: '19/11', status: 'identificado' },
@@ -627,6 +681,7 @@ const midia: Cenario = {
   ],
   campos: camposMidia,
   obrigacoes: agendaPadrao(),
+  epicos: epicosPadrao('palco/ads', 77),
   pareceres: pareceresPadrao(),
   achados: achadosPadrao(),
   incidentes: incidentePadrao(['m-cpf', 'm-inferencia'], 'R09', 'r1'),
@@ -680,7 +735,8 @@ const midia: Cenario = {
       }, 1, '2026-07-14T10:30:08Z'),
     ],
     linddun: LINDDUN_BASE.map((l) => ({ ...l, ativo: true })),
-  }],
+  },
+  ripdDispensadoPadrao('RIPD-2026-012', 'player', 81)],
   riscos: riscosComuns(
     { codigo: 'R1', descricao: 'Inferência reconstrói categoria sensível sem coleta', probabilidade: 5, impacto: 5, dano: 'discriminacao', danoTexto: 'Exposição de característica protegida a anunciantes, com efeito de discriminação sem que o titular tenha informado nada', tratamento: 'Excluir títulos sensíveis do sinal; auditoria de reidentificação por combinação', tipo: 'evitar', esforcoSprints: 1.5, dono: '@bruno.reis', dominio: 'Engenharia', prazo: '02/08', reavaliacao: '02/11', status: 'identificado', ripdCodigo: 'RIPD-2026-008' },
     { codigo: 'R2', descricao: 'Perfil infantil em audiência publicitária', probabilidade: 3, impacto: 5, dano: 'moral', danoTexto: 'Publicidade comportamental dirigida a criança (Art. 14)', tratamento: 'Bloqueio de perfis infantis no pipeline de audiência', tipo: 'evitar', esforcoSprints: 0.5, dono: '@squad-conta', dominio: 'Engenharia', prazo: '02/08', reavaliacao: '02/11', status: 'mitigado', ripdCodigo: 'RIPD-2026-008' },

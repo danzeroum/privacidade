@@ -1,5 +1,7 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { readFileSync } from 'fs';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { dirname, join, resolve } from 'path';
+import { tmpdir } from 'os';
 import { render, screen, fireEvent, act, cleanup, within } from '@testing-library/react';
 import { BancoMock } from '../src/mock/db';
 import { request } from '../src/mock/api';
@@ -19,6 +21,9 @@ import {
   CAPACIDADE_DIAS_MES, RESERVA_DEMANDA, assinaturaDoFeed, cargaDoAno, mesDe,
 } from '../src/mock/calendario';
 import type { Obrigacao } from '../src/mock/calendario';
+import { PRINCIPIOS_PBD, avaliarPbd, vereditoPbd } from '../src/mock/pbd';
+import type { MarcacaoPbd, VereditoPbd } from '../src/mock/pbd';
+import { relatorio, rodarGate } from '../src/lib/gate-privacidade';
 import { CampoPII, Didatico, Explica } from '../src/ui/primitivos';
 import { MemoryRouter } from 'react-router-dom';
 import T2 from '../src/screens/T2';
@@ -2095,13 +2100,26 @@ describe('PR 7 · a rota de transição — sequência, conteúdo, registro', ()
     expect(soJustificativa.status).toBe(422);
     expect((soJustificativa.body as { erro: string }).erro).toContain('gatilho de reabertura');
 
+    // PR 11 — o gatilho passou de prosa a código do catálogo. A frase abaixo
+    // era aceita antes e não disparava nada: era validada e descartada.
+    const emProsa = mover('ripd', ripd.id, {
+      para: 'dispensado',
+      justificativa: 'Tratamento não usa dado pessoal nesta versão.',
+      gatilhos: [{ codigo: 'Qualquer coleta de identificador direto', condicao: 'reabre a triagem' }],
+    });
+    expect(emProsa.status).toBe(422);
+    expect((emProsa.body as { erro: string }).erro).toContain('não é gatilho do catálogo');
+
     const completo = mover('ripd', ripd.id, {
       para: 'dispensado',
       justificativa: 'Tratamento não usa dado pessoal nesta versão.',
-      gatilhoDeReabertura: 'Qualquer coleta de identificador direto reabre a triagem.',
+      gatilhos: [{ codigo: 'T1', condicao: 'Qualquer coleta de identificador direto no diff.' }],
     });
     expect(completo.status).toBe(200);
     expect(ripd.status).toBe('dispensado');
+    // A dispensa fica no artefato: validada e descartada, não sustentaria nada.
+    expect(ripd.dispensas).toHaveLength(1);
+    expect(ripd.dispensas![0].gatilhos[0].codigo).toBe('T1');
   });
 
   it('aceitação — lia: vencida → vigente é 409; vencida → balanceamento passa', () => {
@@ -2214,9 +2232,11 @@ describe('PR 7 · a rota de transição — sequência, conteúdo, registro', ()
     mover('ripd', ripd.id, {
       para: 'dispensado',
       justificativa: 'Confirmado com o titular 529.982.247-25 que não há tratamento.',
-      gatilhoDeReabertura: 'Coleta de identificador direto reabre.',
+      gatilhos: [{ codigo: 'T1', condicao: 'Coleta de identificador direto no diff.' }],
     });
     expect(banco.auditoria.at(-1)!.justificativa).not.toContain('529.982.247-25');
+    // E a justificativa gravada no artefato também sai redigida.
+    expect(banco.cenario.ripds[0].dispensas![0].justificativa).not.toContain('529.982.247-25');
   });
 });
 
@@ -3275,5 +3295,363 @@ describe('PR 10 · T10 na tela', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Calendário do ano' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /T10 Calendário do ano/ })).toBeInTheDocument();
     expect(TELAS.filter((t) => t.grupo === 'Trabalho').map((t) => t.rota)).toEqual(['/t0', '/t10']);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('PR 11 · dispensa de RIPD com gatilho de reabertura', () => {
+  const dispensar = (ripd: { id: string }, gatilhos: unknown[], papel: Papel = 'dpo') =>
+    chamar(papel, {
+      metodo: 'POST', caminho: `/v1/estados/ripd/${ripd.id}`,
+      body: {
+        para: 'dispensado',
+        justificativa: 'Agregação com k mínimo de 50 e sem identificador direto nem indireto.',
+        gatilhos,
+      },
+    });
+
+  const emTriagem = () => {
+    const r = banco.cenario.ripds[0];
+    r.status = 'triagem';
+    return r;
+  };
+
+  it('sem gatilho é 422; com gatilho do catálogo, o estado muda e o trail cresce', () => {
+    const ripd = emTriagem();
+    const antes = banco.auditoria.length;
+
+    expect(dispensar(ripd, []).status).toBe(422);
+    expect(ripd.status).toBe('triagem');
+    expect(banco.auditoria).toHaveLength(antes);
+
+    const ok = dispensar(ripd, [{ codigo: 'T5', condicao: 'Quebra do agregado abaixo de k=50.' }]);
+    expect(ok.status).toBe(200);
+    expect(ripd.status).toBe('dispensado');
+    expect(banco.auditoria).toHaveLength(antes + 1);
+    expect(banco.auditVerificar().integro).toBe(true);
+  });
+
+  it('o gatilho é código do catálogo, não prosa — e a condição precisa dizer algo', () => {
+    const ripd = emTriagem();
+    // A frase de antes do PR 11 era aceita e não disparava nada.
+    expect(dispensar(ripd, [{ codigo: 'coleta de identificador', condicao: 'reabre a triagem' }]).status).toBe(422);
+    expect(dispensar(ripd, [{ codigo: 'T5', condicao: 'muda' }]).status).toBe(422);
+    expect(ripd.status).toBe('triagem');
+  });
+
+  it('a dispensa fica no artefato, append-only e com a justificativa redigida', () => {
+    const ripd = emTriagem();
+    dispensar(ripd, [{ codigo: 'T5', condicao: 'Quebra do agregado abaixo de k=50.' }]);
+    expect(ripd.dispensas).toHaveLength(1);
+    expect(ripd.dispensas![0].gatilhos[0].codigo).toBe('T5');
+    expect(ripd.dispensas![0].disparos).toEqual([]);
+
+    // Dispensar de novo depois de reabrir acrescenta, não reescreve.
+    ripd.status = 'triagem';
+    dispensar(ripd, [{ codigo: 'T7', condicao: 'Cruzamento com base que tenha identificador direto.' }]);
+    expect(ripd.dispensas).toHaveLength(2);
+    expect(ripd.dispensas![0].gatilhos[0].codigo).toBe('T5');
+  });
+});
+
+describe('PR 11 · o gatilho dispara e reabre sem intervenção manual', () => {
+  const dispensado = () => banco.cenario.ripds.find((r) => r.status === 'dispensado')!;
+  const disparar = (codigo: string, evidencia: string, papel: Papel = 'engenharia') =>
+    chamar<{ reabriu: boolean; motivo: string }>(papel, {
+      metodo: 'POST', caminho: `/v1/ripds/${dispensado().id}/gatilho`, body: { codigo, evidencia },
+    });
+
+  it('gatilho declarado dispara e o RIPD volta a elaboracao, com o evento na cadeia', () => {
+    const ripd = dispensado();
+    expect(ripd.dispensas![0].gatilhos.map((g) => g.codigo)).toContain('T7');
+    const antes = banco.auditoria.length;
+
+    const res = disparar('T7', 'join entre o agregado e a base de assinantes em etl/audiencia.sql:88');
+    expect(res.status).toBe(200);
+    expect(res.body.reabriu).toBe(true);
+    expect(ripd.status).toBe('elaboracao');
+
+    // Dois eventos: o disparo e a transição. Ambos na cadeia, e a cadeia íntegra.
+    expect(banco.auditoria).toHaveLength(antes + 2);
+    expect(banco.auditoria.at(-2)!.acao).toBe('GATILHO_DISPARADO');
+    expect(banco.auditoria.at(-2)!.campos).toContain('T7');
+    expect(banco.auditoria.at(-1)!.acao).toBe('ESTADO_TRANSICIONADO');
+    expect(banco.auditoria.at(-1)!.campos).toContain('dispensado→elaboracao');
+    expect(banco.auditVerificar().integro).toBe(true);
+
+    // E o disparo fica pendurado na dispensa, que continua no artefato.
+    expect(ripd.dispensas![0].disparos).toHaveLength(1);
+    expect(ripd.dispensas![0].disparos[0].reabriu).toBe(true);
+  });
+
+  it('gatilho crítico não declarado também reabre — a omissão não protege a dispensa', () => {
+    const ripd = dispensado();
+    expect(ripd.dispensas![0].gatilhos.map((g) => g.codigo)).not.toContain('T3');
+    const res = disparar('T3', 'novo endpoint /audiencia/score retorna decisão automatizada por sessão');
+    expect(res.status).toBe(200);
+    expect(res.body.reabriu).toBe(true);
+    expect(res.body.motivo).toContain('crítico');
+    expect(ripd.status).toBe('elaboracao');
+  });
+
+  it('gatilho não crítico e não declarado fica como evidência, sem reabrir', () => {
+    const ripd = dispensado();
+    const res = disparar('T6', 'dependência nova de biblioteca de agregação em package.json');
+    expect(res.status).toBe(200);
+    expect(res.body.reabriu).toBe(false);
+    expect(ripd.status).toBe('dispensado');
+    // O fato aconteceu e fica registrado: não reabrir não é não acontecer.
+    expect(ripd.dispensas![0].disparos).toHaveLength(1);
+    expect(ripd.dispensas![0].disparos[0].reabriu).toBe(false);
+    expect(banco.auditoria.at(-1)!.acao).toBe('GATILHO_DISPARADO');
+  });
+
+  it('disparo exige evidência, código do catálogo e um RIPD dispensado', () => {
+    expect(disparar('T7', 'curto').status).toBe(422);
+    expect(disparar('T99', 'evidência suficientemente longa para passar').status).toBe(422);
+    // Um RIPD que não está dispensado não tem gatilho pendurado.
+    const emRevisao = banco.cenario.ripds[0];
+    expect(chamar('engenharia', {
+      metodo: 'POST', caminho: `/v1/ripds/${emRevisao.id}/gatilho`,
+      body: { codigo: 'T7', evidencia: 'evidência suficientemente longa para passar' },
+    }).status).toBe(409);
+  });
+
+  it('se o log falhar, o gatilho não dispara e a dispensa continua de pé', () => {
+    const ripd = dispensado();
+    banco.simularFalhaDeLog = true;
+    const res = disparar('T7', 'join entre o agregado e a base de assinantes');
+    expect(res.status).toBe(503);
+    expect(ripd.status).toBe('dispensado');
+    expect(ripd.dispensas![0].disparos).toEqual([]);
+  });
+
+  it('disparar é da esteira: papel sem gerar_ripd não alcança a rota', () => {
+    expect(disparar('T7', 'evidência suficientemente longa para passar', 'dpo').status).toBe(403);
+    expect(disparar('T7', 'evidência suficientemente longa para passar', 'auditor').status).toBe(403);
+  });
+});
+
+describe('PR 11 · os sete princípios — a regra', () => {
+  const marcar = (over: Partial<Record<string, { marcado: boolean; evidencia: string }>> = {}) =>
+    PRINCIPIOS_PBD.map((p) => ({
+      chave: p.chave,
+      marcado: over[p.chave]?.marcado ?? true,
+      evidencia: over[p.chave]?.evidencia ?? `app/src/mock/${p.chave}.ts`,
+    }));
+
+  it('só passa com os sete evidenciados', () => {
+    expect(vereditoPbd(marcar()).aprovado).toBe(true);
+    expect(vereditoPbd(marcar()).evidenciados).toBe(7);
+  });
+
+  it('seis de sete mantém o vermelho e nomeia o que falta', () => {
+    const v = vereditoPbd(marcar({ transparencia: { marcado: false, evidencia: '' } }));
+    expect(v.aprovado).toBe(false);
+    expect(v.evidenciados).toBe(6);
+    expect(v.pendencias).toHaveLength(1);
+    expect(v.pendencias[0].chave).toBe('transparencia');
+    // Acionável: o gate diz a pergunta que o time precisa responder.
+    expect(v.pendencias[0].motivo).toContain('em branco');
+    expect(v.pendencias[0].pergunta.length).toBeGreaterThan(20);
+  });
+
+  it('marcado sem evidência é reprovação, e a mensagem é diferente do branco', () => {
+    const semEvidencia = vereditoPbd(marcar({ padrao: { marcado: true, evidencia: '' } }));
+    const emBranco = vereditoPbd(marcar({ padrao: { marcado: false, evidencia: '' } }));
+
+    expect(semEvidencia.aprovado).toBe(false);
+    expect(semEvidencia.pendencias[0].situacao).toBe('marcado_sem_evidencia');
+    expect(semEvidencia.pendencias[0].motivo).toContain('não aponta evidência');
+    expect(emBranco.pendencias[0].situacao).toBe('em_branco');
+    // As duas reprovam, e dizem coisas diferentes: contar "quantos faltam"
+    // esconderia justamente a afirmação que ninguém consegue conferir.
+    expect(semEvidencia.pendencias[0].motivo).not.toBe(emBranco.pendencias[0].motivo);
+  });
+
+  it('princípio ausente da lista conta como em branco, não como aprovado', () => {
+    const v = vereditoPbd([{ chave: 'proativo', marcado: true, evidencia: 'app/src/mock/politicas.ts' }]);
+    expect(v.aprovado).toBe(false);
+    expect(v.evidenciados).toBe(1);
+    expect(v.pendencias).toHaveLength(6);
+  });
+
+  it('a rota devolve o veredito calculado pela mesma função', () => {
+    const res = chamar<{ pbd: MarcacaoPbd[]; veredito: VereditoPbd }[]>('produto', { metodo: 'GET', caminho: '/v1/epicos' });
+    expect(res.status).toBe(200);
+    for (const e of res.body) expect(e.veredito).toEqual(vereditoPbd(e.pbd));
+    // A massa traz de propósito o caso que um checklist ingênuo contaria como pronto.
+    const situacoes = avaliarPbd(res.body[0].pbd).map((p) => p.situacao);
+    expect(situacoes).toContain('marcado_sem_evidencia');
+    expect(situacoes).toContain('em_branco');
+    expect(res.body[0].veredito.aprovado).toBe(false);
+  });
+});
+
+describe('PR 11 · o gate de privacidade — verificação: ele roda e falha certo?', () => {
+  const raizes: string[] = [];
+  const repo = (arquivos: Record<string, string>): string => {
+    const raiz = mkdtempSync(join(tmpdir(), 'gate-'));
+    raizes.push(raiz);
+    for (const [rel, conteudo] of Object.entries(arquivos)) {
+      const alvo = join(raiz, rel);
+      mkdirSync(dirname(alvo), { recursive: true });
+      writeFileSync(alvo, conteudo);
+    }
+    return raiz;
+  };
+  afterEach(() => {
+    for (const r of raizes.splice(0)) rmSync(r, { recursive: true, force: true });
+  });
+
+  const INVENTARIO = ['repositorio: teste', 'campos:', '  - nome: titular_hash', '  - nome: campo'].join('\n');
+  const EPICO = ['pbd:', ...PRINCIPIOS_PBD.map((p) => `  - chave: ${p.chave}\n    evidencia: src/app.ts`)].join('\n');
+  const BASE = {
+    '.privacy/data-inventory.teste.yaml': INVENTARIO,
+    '.privacy/epico.yml': EPICO,
+    'src/app.ts': 'export const x = 1;\n',
+  };
+
+  it('repositório sem declaração reprova — ausência não é aprovação', () => {
+    const r = rodarGate(repo({ 'src/app.ts': '' }));
+    expect(r.aprovado).toBe(false);
+    expect(r.achados[0].regra).toBe('declaracao/ausente');
+  });
+
+  it('repositório limpo passa, e a varredura leu alguma coisa', () => {
+    const r = rodarGate(repo({ ...BASE, 'logs/app.log': 'ts=2026-01-01 campo=cpf titular_hash=hmac:9f4c\n' }));
+    expect(r.achados, JSON.stringify(r.achados)).toEqual([]);
+    expect(r.aprovado).toBe(true);
+    // Zero arquivo varrido seria um gate que passa por não ter olhado.
+    expect(r.arquivosVarridos).toBe(1);
+  });
+
+  it('CPF em log de exemplo reprova citando arquivo e linha', () => {
+    const r = rodarGate(repo({
+      ...BASE,
+      'logs/cobranca.log': [
+        'ts=2026-01-01 campo=cpf titular_hash=hmac:9f4c',
+        'ts=2026-01-01 campo=cpf valor=347.912.884-42',
+      ].join('\n'),
+    }));
+    expect(r.aprovado).toBe(false);
+    const achado = r.achados.find((a) => a.regra === 'pii-em-log/cpf')!;
+    expect(achado.arquivo).toBe(join('logs', 'cobranca.log'));
+    expect(achado.linha).toBe(2);
+    expect(achado.mensagem).toContain('347.912.884-42');
+    expect(achado.comoCorrigir).toContain('redator');
+  });
+
+  it('e-mail e telefone em log também reprovam', () => {
+    const r = rodarGate(repo({
+      ...BASE,
+      'logs/a.log': 'campo=email valor=marina.s@exemplo.com\ncampo=fone valor=(11) 98765-4321\n',
+    }));
+    const regras = r.achados.map((a) => a.regra);
+    expect(regras).toContain('pii-em-log/email');
+    expect(regras).toContain('pii-em-log/telefone');
+  });
+
+  it('campo fora do catálogo reprova, e campo declarado passa', () => {
+    const r = rodarGate(repo({ ...BASE, 'logs/a.log': 'campo=x titular_hash=y renda=1200\n' }));
+    const achado = r.achados.find((a) => a.regra === 'catalogo/campo-nao-declarado')!;
+    expect(achado.mensagem).toContain('"renda"');
+    expect(achado.comoCorrigir).toContain('categoria e base legal');
+    // `campo` e `titular_hash` estão no inventário e não geram achado.
+    expect(r.achados.filter((a) => a.regra === 'catalogo/campo-nao-declarado')).toHaveLength(1);
+  });
+
+  it('inventário ilegível reprova em vez de virar lista vazia', () => {
+    const r = rodarGate(repo({ ...BASE, '.privacy/data-inventory.teste.yaml': 'campos: [\n  - : :\n' }));
+    expect(r.aprovado).toBe(false);
+    expect(r.achados.some((a) => a.regra === 'catalogo/ilegivel')).toBe(true);
+  });
+
+  it('seis de sete princípios evidenciados mantém o gate vermelho, nomeando o que falta', () => {
+    const seisDeSete = ['pbd:', ...PRINCIPIOS_PBD.slice(0, 6)
+      .map((p) => `  - chave: ${p.chave}\n    evidencia: src/app.ts`)].join('\n');
+    const r = rodarGate(repo({ ...BASE, '.privacy/epico.yml': seisDeSete }));
+    expect(r.aprovado).toBe(false);
+    const pendencias = r.achados.filter((a) => a.regra.startsWith('pbd/'));
+    expect(pendencias).toHaveLength(1);
+    expect(pendencias[0].mensagem).toContain(PRINCIPIOS_PBD[6].pergunta);
+  });
+
+  it('marcado sem evidência reprova, e com mensagem própria', () => {
+    const semEvidencia = ['pbd:', ...PRINCIPIOS_PBD.map((p, i) => (
+      i === 3 ? `  - chave: ${p.chave}\n    evidencia: ''` : `  - chave: ${p.chave}\n    evidencia: src/app.ts`
+    ))].join('\n');
+    const r = rodarGate(repo({ ...BASE, '.privacy/epico.yml': semEvidencia }));
+    expect(r.aprovado).toBe(false);
+    const achado = r.achados.find((a) => a.regra === 'pbd/marcado_sem_evidencia')!;
+    expect(achado.mensagem).toContain('não aponta evidência');
+    expect(achado.comoCorrigir).toContain('desmarque');
+  });
+
+  it('evidência que aponta para arquivo inexistente é evidência que não existe', () => {
+    const mentira = ['pbd:', ...PRINCIPIOS_PBD.map((p, i) => (
+      i === 0 ? `  - chave: ${p.chave}\n    evidencia: src/nao-existe.ts` : `  - chave: ${p.chave}\n    evidencia: src/app.ts`
+    ))].join('\n');
+    const r = rodarGate(repo({ ...BASE, '.privacy/epico.yml': mentira }));
+    expect(r.aprovado).toBe(false);
+    const achado = r.achados.find((a) => a.regra === 'pbd/evidencia-inexistente')!;
+    expect(achado.mensagem).toContain('src/nao-existe.ts');
+  });
+
+  it('todo achado bloqueante diz onde é e como corrigir', () => {
+    const r = rodarGate(repo({
+      ...BASE,
+      'logs/a.log': 'campo=cpf valor=347.912.884-42 renda=1200\n',
+      '.privacy/epico.yml': 'pbd: []',
+    }));
+    expect(r.achados.length).toBeGreaterThan(3);
+    for (const a of r.achados) {
+      expect(a.comoCorrigir.length, a.regra).toBeGreaterThan(20);
+      expect(a.mensagem.length, a.regra).toBeGreaterThan(20);
+      expect(a.regra, 'regra sem namespace não é acionável').toMatch(/\//);
+    }
+    // O relatório do CI cita arquivo e linha, não só o código de saída.
+    expect(relatorio(r)).toContain('logs/a.log:1');
+  });
+});
+
+describe('PR 11 · o gate de privacidade — validação: ele barra o que a LGPD exige?', () => {
+  it('este repositório passa no próprio gate', () => {
+    // O gate come a própria comida: se o repositório que prega o controle não
+    // passa nele, o controle é decoração.
+    const r = rodarGate(resolve('..'));
+    expect(r.achados, relatorio(r)).toEqual([]);
+    expect(r.arquivosVarridos, 'nenhum log varrido é gate que passa por não ter olhado').toBeGreaterThan(0);
+  });
+
+  it('o log de exemplo publicado registra o campo acessado, nunca o valor', () => {
+    // Art. 37: o que sustenta o acesso em auditoria é finalidade, ator e campo —
+    // não o dado. O exemplo do repositório precisa demonstrar isso.
+    const log = readFileSync('../.privacy/exemplos/audit-trail.log', 'utf8');
+    expect(log).toContain('campo=cpf');
+    expect(log).toContain('purpose=');
+    expect(log).toContain('titular_hash=hmac:');
+    expect(log).not.toMatch(/\d{3}\.\d{3}\.\d{3}-\d{2}/);
+    // Inclusive a tentativa negada entra no registro.
+    expect(log).toContain('result=negado');
+  });
+
+  it('o workflow do gate não tolera falha e roda nos dois gatilhos', () => {
+    const yml = readFileSync('../.github/workflows/privacy-ci-gate.yml', 'utf8');
+    // Mesma disciplina do C-18: a palavra que tornaria o gate decorativo não
+    // aparece no arquivo, e uma varredura simples confirma a ausência.
+    expect(yml).not.toContain('continue-on-error');
+    expect(yml).toMatch(/on:\s*\n\s*push:/);
+    expect(yml).toContain('pull_request');
+    expect(yml).toContain('npm run gate:privacidade');
+  });
+
+  it('a regra de PbD do gate é a mesma da tela — não há segunda implementação', () => {
+    const fonte = readFileSync('src/lib/gate-privacidade.ts', 'utf8');
+    expect(fonte).toContain("from '../mock/pbd'");
+    // Se o gate recalculasse a situação por conta própria, as duas divergiriam
+    // e a que valeria seria a que ninguém está olhando.
+    expect(fonte).not.toContain('marcado_sem_evidencia:');
+    expect(fonte.match(/const MINIMO_EVIDENCIA/)).toBeNull();
   });
 });

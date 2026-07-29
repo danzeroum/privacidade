@@ -1,0 +1,41 @@
+# Inventário de dados deste repositório (artefato 1 de docs/01-arquitetura.md).
+#
+# Não é o ROPA do produto — é o que **este repositório** trata nos exemplos que
+# publica. O gate de privacidade lê este arquivo e reprova o merge quando um
+# campo aparece em log de exemplo sem estar declarado aqui.
+#
+# A regra que dá sentido ao arquivo: declarar é ato explícito e visível no diff.
+# Campo sem entrada aqui não é campo esquecido, é campo que ninguém pode tratar.
+repositorio: danzeroum/privacidade
+
+# Caminhos que o gate trata como log de exemplo, **além** dos padrões embutidos
+# (*.log, logs/, exemplos/, fixtures/). A declaração só acrescenta: se pudesse
+# remover, bastaria apagar uma linha para o gate parar de olhar onde incomoda.
+logs:
+  - .privacy/exemplos/
+
+campos:
+  - nome: titular_hash
+    categoria: pseudonimizado
+    base_legal: obrigacao_legal
+    observacao: HMAC-SHA256 do documento, com chave no KMS. Nunca o documento.
+
+  - nome: campo
+    categoria: pseudonimizado
+    base_legal: obrigacao_legal
+    observacao: Nome do campo acessado, não o valor dele. É o que o Art. 37 exige registrar.
+
+  - nome: recurso
+    categoria: anonimizado
+    base_legal: obrigacao_legal
+    observacao: Tipo e código do artefato tocado.
+
+  - nome: justificativa
+    categoria: pessoal
+    base_legal: obrigacao_legal
+    observacao: Texto de quem acessou, já redigido pelo redator antes de ser gravado.
+
+  - nome: cadeia
+    categoria: anonimizado
+    base_legal: obrigacao_legal
+    observacao: Hash encadeado da linha anterior do audit trail.

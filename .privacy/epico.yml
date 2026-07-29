@@ -1,0 +1,64 @@
+# Checklist dos sete princípios de Privacy by Design como campo do épico
+# (PR-03 do BPMN, MAPA-PROCESSOS.md §1). O gate de privacidade lê este arquivo.
+#
+# Duas regras, e a segunda é a que importa:
+#
+# 1. Princípio em branco mantém o status check vermelho — o time ainda não olhou.
+# 2. Princípio marcado sem evidência é **reprovação**, não aprovação. A marca
+#    sozinha afirma um controle que ninguém consegue conferir, e um checklist que
+#    a aceita mede disciplina de clicar. A evidência aponta arquivo, teste ou
+#    commit, e o gate confere que o alvo existe.
+codigo: EPIC-2026-114
+titulo: Governança de privacidade operável — protótipo navegável do Lastro
+repositorio: danzeroum/privacidade
+
+pbd:
+  - chave: proativo
+    marcado: true
+    evidencia: app/src/mock/politicas.ts
+    nota: >-
+      Rota sem política declarada é recusada por padrão. O controle impede o
+      acesso indevido de nascer, em vez de detectá-lo na revisão de log.
+
+  - chave: padrao
+    marcado: true
+    evidencia: app/src/ui/primitivos.tsx
+    nota: >-
+      Todo campo pessoal nasce mascarado, inclusive para o DPO, e não existe
+      interruptor que desligue o mascaramento para a sessão.
+
+  - chave: embutida
+    marcado: true
+    evidencia: app/src/mock/estados.ts
+    nota: >-
+      A sequência legal de cada artefato é a máquina de estados, e não uma
+      checagem pendurada na tela. Transição ilegal é 409 na camada de API.
+
+  - chave: soma_positiva
+    marcado: true
+    evidencia: app/src/screens/T5.tsx
+    nota: >-
+      A matriz de risco ficou operável por teclado sem criar caminho de escrita
+      sem registro: as setas ajustam um rascunho e aplicar continua exigindo
+      justificativa. Acessibilidade e prova, não uma em troca da outra.
+
+  - chave: ciclo_de_vida
+    marcado: true
+    evidencia: db/schema.sql
+    nota: >-
+      RLS por tenant, TTL por dataset e cripto-shredding por chave: proteção na
+      coleta, no repouso e no descarte, com o expurgo verificado por hash.
+
+  - chave: transparencia
+    marcado: true
+    evidencia: app/src/mock/db.ts
+    nota: >-
+      Audit trail append-only com hash encadeado. O auditor externo verifica a
+      cadeia sozinho, e a verificação dele também fica registrada.
+
+  - chave: centrado_no_titular
+    marcado: true
+    evidencia: app/src/screens/T4.tsx
+    nota: >-
+      Revisão de decisão automatizada com fundamento e devolutiva no mesmo ato,
+      e revogação de consentimento que propaga até bloquear a revelação.

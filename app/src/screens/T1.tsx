@@ -4,7 +4,8 @@ import { Cabecalho, Cartao, Didatico, Kpi, Nota, Pill, Tabela, Permitido } from 
 import { Estados, useRecurso } from '../ui/estados';
 import { CORES_DANO } from '../ui/reclassificar';
 import { useSessao } from '../store/sessao';
-import type { Risco } from '../mock/types';
+import { avaliarPbd } from '../mock/pbd';
+import type { Epico, Risco, SituacaoPbd, VereditoPbd } from '../mock/types';
 
 export default function T1() {
   const banco = useSessao((s) => s.banco);
@@ -235,6 +236,100 @@ export default function T1() {
         </Tabela>
       </Cartao>
 
+      <ChecklistPbd />
+    </>
+  );
+}
+
+/**
+ * PR 11 — o checklist dos sete princípios como campo do épico.
+ *
+ * Não é documento anexo nem página de política: é campo do épico, e o gate de CI
+ * lê o equivalente no `.privacy/epico.yml` do repositório com a **mesma** função
+ * (`mock/pbd.ts`). Se a tela reimplementasse a regra, a que valeria seria a que
+ * ninguém está olhando.
+ *
+ * As três situações não são graus da mesma coisa:
+ *
+ * - **evidenciado** é o único que passa.
+ * - **em branco** é incompleto: o time ainda não olhou o princípio.
+ * - **marcado sem evidência** é reprovação, e mais séria que o branco — afirma
+ *   um controle que ninguém consegue apontar. Um checklist que aceita a marca
+ *   sozinha mede disciplina de clicar, não privacidade no produto.
+ */
+function ChecklistPbd() {
+  const epicos = useRecurso<(Epico & { veredito: VereditoPbd })[]>(
+    { metodo: 'GET', caminho: '/v1/epicos' },
+    { vazioSe: (e) => e.length === 0 },
+  );
+
+  const TOM: Record<SituacaoPbd, 'ok' | 'warn' | 'crit'> = {
+    evidenciado: 'ok', em_branco: 'warn', marcado_sem_evidencia: 'crit',
+  };
+  const ROTULO: Record<SituacaoPbd, string> = {
+    evidenciado: 'evidenciado', em_branco: 'em branco', marcado_sem_evidencia: 'marcado sem evidência',
+  };
+
+  return (
+    <>
+      <div className="sec-title">Privacy by Design no épico</div>
+      <Estados
+        recurso={epicos}
+        rotulo="os épicos em andamento"
+        vazio={<b>Nenhum épico em andamento neste cenário.</b>}
+      >
+        {(lista) => (
+          <>
+            {lista.map((e) => (
+              <Cartao
+                key={e.id}
+                titulo={`${e.codigo} · ${e.titulo}`}
+                hint={e.veredito.aprovado
+                  ? 'os sete princípios com evidência apontada'
+                  : `${e.veredito.evidenciados} de ${e.veredito.total} evidenciados — status check vermelho`}
+              >
+                <div className={`banner ${e.veredito.aprovado ? 'ok' : 'crit'}`} style={{ marginBottom: 12 }}>
+                  <span className="mark">{e.veredito.aprovado ? '✅' : '⛔'}</span>
+                  <div style={{ flex: 1 }}>
+                    <h4>
+                      {e.veredito.aprovado
+                        ? 'Checklist completo — o gate não barra por PbD'
+                        : `Checklist incompleto — ${e.veredito.pendencias.length} princípio(s) barram o merge`}
+                    </h4>
+                    <p>
+                      {e.repositorio} · PR #{e.prNumero}. O gate de privacidade lê este mesmo checklist do{' '}
+                      <span className="mono">.privacy/epico.yml</span> do repositório e sai com código 1
+                      enquanto houver pendência.
+                    </p>
+                  </div>
+                </div>
+
+                <Tabela cabecalho={['#', 'Princípio', 'Situação', 'Evidência ou o que falta']}>
+                  {avaliarPbd(e.pbd).map((p) => (
+                    <tr key={p.chave}>
+                      <td className="num mono">{p.numero}</td>
+                      <td>{p.rotulo}</td>
+                      <td><Pill tom={TOM[p.situacao]}>{ROTULO[p.situacao]}</Pill></td>
+                      <td style={{ maxWidth: 420 }}>
+                        {p.situacao === 'evidenciado'
+                          ? <span className="hash">{p.evidencia}</span>
+                          : p.motivo}
+                      </td>
+                    </tr>
+                  ))}
+                </Tabela>
+              </Cartao>
+            ))}
+            <Didatico>
+              <Nota>
+                Marcar sem evidência é a reprovação mais séria do checklist, e não a mais leve: a marca
+                sozinha afirma um controle que ninguém consegue conferir. É por isso que o gate distingue
+                as duas situações em vez de contar "quantos faltam".
+              </Nota>
+            </Didatico>
+          </>
+        )}
+      </Estados>
     </>
   );
 }
