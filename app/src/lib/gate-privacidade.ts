@@ -86,7 +86,7 @@ const ARQUIVO_PII_SINTETICA = 'pii-sintetica.yaml';
  */
 const PADROES_DE_LOG = [/\.log$/, /[/\\]logs?[/\\]/, /[/\\]exemplos?[/\\]/, /[/\\]fixtures?[/\\]/];
 
-const IGNORAR = new Set(['node_modules', '.git', 'dist', 'coverage', '.next', 'build']);
+const IGNORAR = new Set(['node_modules', '.git', 'dist', 'dist-producao', 'coverage', '.next', 'build']);
 
 /**
  * Os padrões de dado pessoal procurados no repositório.

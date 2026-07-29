@@ -1,4 +1,5 @@
 import { sha256 } from '../lib/sha256';
+import { EH_DEMONSTRACAO } from '../lib/perfil';
 import { CENARIOS } from './scenarios';
 import { estadoDe, expiraEm } from './consentimento';
 import { novoSegredoDeFeed } from './calendario';
@@ -54,12 +55,18 @@ export class BancoMock {
   simularFalhaDeLog = false;
 
   /**
-   * Modo demonstração. As rotas que simulam ataque (`POST /v1/audit/forjar`)
-   * só existem com ele ligado — e ainda assim exigem a ação `escrever`. Uma
-   * rota de ataque presa a uma condição só é uma condição a menos do que ela
-   * precisa.
+   * Modo demonstração — agora **derivado do perfil do build** (Risco-035).
+   *
+   * Era `= true`, escrito à mão, e o RIPD §7.3 pedia para "amarrar a
+   * `import.meta.env` e testar o build". Amarrado: no perfil de produção nasce
+   * `false`, e a rota que simula ataque nem chega a ser publicada — o bloco dela
+   * é apagado em tempo de build.
+   *
+   * O campo continua mutável para que a demonstração possa desligá-lo em tela e
+   * mostrar a rota sumindo. Duas condições, não uma: uma rota de ataque presa a
+   * uma condição só é uma condição a menos do que ela precisa.
    */
-  modoDemo = true;
+  modoDemo = EH_DEMONSTRACAO;
 
   private proximoId = 1;
 
