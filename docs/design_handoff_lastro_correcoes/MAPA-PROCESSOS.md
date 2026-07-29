@@ -18,102 +18,87 @@ recusa. O BPMN é a especificação; a máquina de estados é a implementação;
 | **PR-02** RIPD e análise algorítmica | `ripd` | T3 inteira; gate de CI | dispensa registrada com gatilho de reabertura; análise algorítmica como seção |
 | **PR-03** PbD no ciclo de desenvolvimento | `mudanca` | gate de CI + T1 (o que a esteira barrou) + T2 (inventário pós-deploy) | checklist dos 7 princípios como campo do épico, lido pelo gate |
 | **PR-04** Ciclo de governança | `risco`, `politica`, `indicador` | T1 (maturidade e métricas), T5 (matriz e RACI), T8 (LIA) | obrigações de calendário; D2 executável |
-| **PR-05** Auditoria, planos e evidências | `achado`, `incidente` | T11 (achado: causa raiz→plano→verificação), T6 (expurgo, trilha), T9 (incidentes) | — |
+| **PR-05** Auditoria, planos e evidências | `achado`, `incidente` | T11 (achado: causa raiz → plano → verificação), T6 (expurgo, trilha), T9 (incidentes) | — |
 | — | trabalho de cada pessoa | **T0 · Minha fila** (nova) | entrada centrada em trabalho, derivada dos estados |
 | — | obrigações do ano | **T10 · Calendário do ano** (nova) | fonte das obrigações que a fila promove a item |
 | — | ciclo do achado | **T11 · Achados e planos de ação** (nova) | artefato `achado` — o único dos oito sem tela própria antes disto |
+| — | referência do programa | **T12 · Como funciona** (nova) | fica **fora** de `TELAS`, como o §5 pede: link próprio no trilho, sem controle e sem leitura de banco |
 
-Duas telas por processo seriam dez telas. O produto cobre os cinco fluxos com onze — porque o recorte
-dele é por artefato, não por processo, e as duas telas novas são de *trabalho*, não de processo.
-Mantenha esse recorte.
+Duas telas por processo seriam dez telas. O produto cobre os cinco fluxos com **doze** no trilho —
+porque o recorte dele é por artefato, não por processo. Das quatro acrescentadas, três entram no trilho:
+duas de *trabalho* (T0 e T10) e uma do artefato que faltava (T11). A quarta não é tela de operação
+nenhuma e por isso fica fora dele (T12). Mantenha esse recorte.
 
 ---
 
-## 2 · Máquinas de estado (uma por artefato)
+## 2 · Máquinas de estado — onde elas moram
 
-Regra geral: **poucos estados — 7 é o teto observado, e passar disso é sintoma, não erro de
-sintaxe**; transição só com evidência e registro no trail; toda transição ilegal tem teste. `ripd` e
-`achado` têm 7 legítimos: `dispensado` é estado em que se permanece (com gatilho de reabertura
-pendurado), não registro de saída, e `reaberto` carrega reincidência que `causa_raiz` não expressa. Sugestão de arquivo: `app/src/mock/estados.ts`, validado em `api.ts` como as 9 regras.
+Cada artefato tem um ciclo de vida, e ele **não é enunciado aqui**. A especificação
+está em `docs/processos/*.bpmn`, um arquivo por artefato, e o que a executa está em
+`app/src/mock/estados.ts`. Um teste de conformidade compara os dois nas duas
+direções e reprova o build quando divergem — aresta nova no código sem atualizar o
+desenho reprova, e aresta apagada do desenho sem tirar do código reprova também.
 
-```
-parecer      rascunho → emitido → homologado → { vigente | devolvido }
-                                 devolvido → emitido            (máx. 2 voltas, 3ª vai ao comitê)
+Este documento tinha as oito tabelas transcritas em prosa, e elas divergiram: a
+subseção "Declarado × derivado" do §4 existiu por semanas na cópia de trabalho e
+não na do repositório. Duas enunciações do mesmo processo, uma com catraca e outra
+sem, é o mesmo defeito que recusamos na linha do tempo do incidente — um segundo
+lugar para a história divergir. O que ficou aqui é a **intenção**; o que vale é o
+par conferido.
 
-ripd         triagem → { dispensado | elaboracao } → parecer_juridico → deliberado → vigente
-                       dispensado exige justificativa + gatilho de reabertura
-                       vigente → em_revisao        (anual, ou por gatilho antecipado)
+O que continua sendo decisão deste documento, e não do desenho:
 
-lia          rascunho → balanceamento → assinada → vigente → vencida
-                       vencida → balanceamento     (renovação; nunca volta direto a vigente)
+- **Transição só com evidência e registro no trail.** A ordem é gravar, depois
+  mover: falha de registro aborta a transição com `503`, e o estado não muda.
+- **Toda transição ilegal tem teste.** As nomeadas na primeira versão deste mapa
+  seguem cobertas, e a varredura de conformidade cobre todas as outras.
+- **Sequência e conteúdo são coisas separadas.** Estar fora de ordem é `409`; estar
+  na ordem e faltar o que sustenta é `422`. Trocar os dois códigos manda a pessoa
+  reescrever um texto que já estava bom quando o problema era o passo anterior.
+  As exigências de conteúdo estão listadas em `docs/processos/README.md`, ao lado
+  dos arquivos e presas por teste ao que a API aplica.
 
-risco        identificado → avaliado → em_tratamento → { mitigado | aceito }
-                       aceito exige dono, prazo de reavaliação e gatilho de reabertura
+### Sobre o antigo limite de seis estados
 
-solicitacao  recebida → em_analise → { concluida | recusada_com_fundamento }
-                       recusada exige fundamento legal; ambas param o cronômetro
+A primeira versão deste mapa pedia **no máximo seis estados por artefato**. A regra
+sai, e sai porque duas máquinas legitimamente têm sete.
 
-achado       aberto → causa_raiz → plano → executado → verificado → { encerrado | reaberto }
-                       reaberto entra com criticidade elevada e conta como reincidência
+O RIPD tem sete porque a dispensa é um desfecho próprio — decisão registrada com
+gatilho de reabertura, não ausência de RIPD — e porque a revisão periódica é um
+retorno ao trabalho, não um recomeço. O achado tem sete porque a reincidência entra
+com criticidade elevada e conta como reincidência: tratá-la como uma abertura nova
+apagaria justamente o que a auditoria precisa ver.
 
-incidente    aberto → contido → decidido → { comunicado | nao_comunicado } → encerrado
-                       decidido exige fundamento — inclusive para não comunicar
-
-chave        nova → recriptografando → canary → ativa → revogada
-```
-
-### Voltas declaradas de propósito
-
-Sem estas quatro arestas a máquina tem beco sem saída, e o calendário (T10) perde sentido — obrigação
-de reavaliar só existe se a reavaliação puder reabrir:
-
-| Aresta | Por quê |
-|---|---|
-| `risco: mitigado → em_tratamento` | risco reavaliado é risco vivo |
-| `risco: aceito → em_tratamento` | senão aceitar um risco é aceitar para sempre |
-| `ripd: em_revisao → elaboracao` | revisar é reabrir o trabalho, não recarimbar |
-| `achado: reaberto → causa_raiz` | reincidência não recomeça do plano que falhou |
-
-### Transições ilegais que devem ser teste
-
-| Tentativa | Resposta | Por quê |
-|---|---|---|
-| `ripd: triagem → vigente` | 409 | pular parecer e deliberação é aprovar o risco, não o tratamento |
-| `ripd: dispensado` sem justificativa | 422 | dispensa sem registro é omissão, não decisão |
-| `lia: vencida → vigente` | 409 | renovar exige rebalanceamento, não recarimbo |
-| `risco: aceito` sem dono ou sem prazo | 422 | risco aceito sem dono volta como surpresa |
-| `solicitacao: recebida → concluida` | 409 | conclusão sem análise não tem o que provar |
-| `achado: executado → encerrado` | 409 | falta a verificação independente de eficácia |
-| `incidente: aberto → comunicado` | 409 | comunicar antes de conter e apurar escopo comunica o errado |
-| `incidente: decidido` sem fundamento | 422 | vale para as duas decisões, inclusive a de não comunicar |
-| qualquer transição sem `auditAppend` | 503 | mesma ordem da Regra 3: gravar, depois responder |
+Comprimir qualquer uma das duas para caber em seis custaria um campo novo para
+guardar a distinção que o estado deixaria de fazer — e campo paralelo diverge do
+registro, que é o problema que a máquina de estados existe para não ter. O limite
+era heurística contra proliferação, e a proliferação nunca aconteceu: seis das oito
+máquinas cabiam nele sem esforço, e cinco delas têm cinco estados ou menos.
 
 ---
 
 ## 3 · As decisões como dados (DMN)
 
-As três tabelas saem do documento e entram no código como **dados versionados** — nunca como `if`
-espalhado na tela. Ficam em `app/src/mock/decisoes.ts`, com `versao` por tabela e várias versões
-convivendo; a API **grava a versão aplicada em cada decisão**, dentro do payload do hash, do mesmo
-jeito que a cadeia de auditoria. `.ts` e não `.json`: a tabela precisa de união discriminada para o
-teste de condição, e em JSON o mesmo conteúdo entra sem tipo e sai com `as` — o contrário do ponto.
-Serializar para `.dmn` fica no PR 12, onde a especificação é o entregável.
+As três tabelas — complexidade e alçada, nível de risco, exigência de RIPD e de
+análise algorítmica — **não são enunciadas aqui**. Elas estão em
+`docs/processos/*.dmn`, uma por versão publicada, e o que as executa está em
+`app/src/mock/decisoes.ts`. A varredura de conformidade deriva o domínio de cada
+entrada da própria tabela e compara todas as combinações: limiar novo entra na
+conferência sozinho.
 
-- **D1 · complexidade e alçada** — entradas: categoria do dado, volume de titulares, decisão
-  automatizada, transferência internacional. Saída: complexidade + alçada.
-- **D2 · nível de risco e tratamento** — entradas: probabilidade, impacto ao titular. Saída: nível,
-  tratamento, quem aprova. É a mesma grade P × I da T5: **use uma só**, ou as duas divergem em três
-  meses.
-- **D3 · exige RIPD / análise algorítmica** — entradas: gatilhos. Saída: obrigatório, dispensado com
-  justificativa, análise algorítmica sim/não. Já existe embrionário no `ripd-triage.sh` e nos
-  `triggers` do cenário — unifique.
+O que continua sendo decisão deste documento:
 
-Duas regras de implementação que valem mais que a tabela em si:
-
-1. **Entrada indefinida cai no cenário mais restritivo.** Nunca no mais permissivo, nunca em erro.
-2. **A decisão é explicada em uma frase na tela**, com as entradas que a produziram: “alta
-   complexidade: campo sensível + decisão automatizada → DPO e comitê”. Explicar a decisão substitui
-   ler a tabela — é isso que mantém o sistema simples de operar.
+1. **Entrada indefinida cai no cenário mais restritivo.** Nunca no mais permissivo,
+   nunca em erro. A decisão registra o que assumiu, porque omissão que decide calada
+   é omissão que ninguém revisita.
+2. **A decisão é explicada em uma frase na tela**, com as entradas que a produziram.
+   A frase é derivada da regra que casou, não escrita ao lado dela — texto ao lado
+   de uma regra é a próxima divergência esperando acontecer.
+3. **A versão aplicada fica gravada em cada decisão.** Publicar uma versão nova não
+   mexe em decisão já tomada: as versões convivem, e quem confere uma decisão de
+   março precisa ler a tabela de março.
+4. **Um só modelo de risco.** A tabela de nível de risco é a fonte da faixa de cor
+   da matriz da T5. Não existe segundo limiar escrito na tela.
 
 ---
 
@@ -132,6 +117,14 @@ Está desenhada em `Lastro Redesenho.dc.html`, primeira tela do trilho. O que el
   processo sem abrir diagrama nenhum.
 - **Contadores como pergunta, não como métrica:** o que venceu · o que é para hoje · o que vem em 30
   dias · o que é de outro papel.
+
+### Declarado × derivado — quem é dono
+
+Item de fila é derivado: o dono sai da `Acao` que a próxima transição exige, nunca de campo escrito
+à mão. Obrigação de calendário é dado autorado: declara `responsavel` como declara `antecedencia`, e
+o item promovido herda esse dono. Não é exceção ao princípio da fila — é o outro lado dele. Um teste
+falha quando uma obrigação promovível não declara `responsavel`, para o vazio não voltar a `escrever`
+em silêncio.
 
 O que ela **não** é: caixa de entrada de notificações, lista de tudo, nem substituta do painel. O
 painel (T1) responde pelo estado do programa; a fila responde pelo seu dia.
@@ -158,18 +151,6 @@ O bloco resumido continua na fila (T0). Diagnóstico anual, revisão trimestral,
 aceito, vencimento de LIA, de consentimento e de chave **não são instâncias de processo**: são
 compromissos agendados que geram item na fila quando chega a hora. Modelar como processo em execução
 é o que faz painel de governança encher de coisa que ninguém trata.
-
-### Declarado × derivado — quem é dono
-
-A regra que sustenta os dois lados, e que deve virar invariante para não regredir: **item de fila é
-*derivado*** — o dono sai da `Acao` que a próxima transição exige, nunca de um campo escrito à mão
-(senão diverge de `permissoes.ts`, como o rótulo do gatilho divergia do catálogo antes do PR 8).
-**Obrigação de calendário é *dado autorado*** — provisionada em 1º de janeiro, declara `responsavel`
-do mesmo jeito que declara `antecedencia` e `consequencia`; o item que ela promove herda esse dono.
-Não é exceção ao princípio da fila: é o outro lado dele. Por isso obrigação de condução do programa
-não deve cair em `escrever` (que a espalha por engenharia e segurança) — ela nomeia o `responsavel`.
-Um teste deve falhar quando uma obrigação promovível não declara `responsavel`, para que o vazio não
-volte a `escrever` em silêncio.
 
 ---
 
@@ -201,6 +182,13 @@ volte a `escrever` em silêncio.
 | 10 | T10 · Calendário do ano + obrigações gerando item na fila | fecha a segunda natureza de trabalho |
 | 11 | Dispensa de RIPD com gatilho de reabertura; checklist PbD lido pelo gate | completa PR-02 e PR-03 do BPMN |
 | 12 | `docs/processos/*.bpmn` + `*.dmn` versionados e uma página “Como funciona” | a especificação entra no repositório como fonte, não como anexo |
+
+> **Estatuto deste documento.** Os seis PRs acima entraram, e com eles a especificação executável
+> passou a viver em `docs/processos/*.bpmn` e `*.dmn`, conferidos por teste contra
+> `app/src/mock/estados.ts` e `app/src/mock/decisoes.ts`. A partir daí este mapa é **documento de
+> intenção**: ele explica o porquê das decisões e não é fonte da verdade sobre estado, transição ou
+> tabela de decisão. Quando o texto daqui e o par conferido discordarem, o par conferido está certo —
+> e a discordância é um defeito deste arquivo, não do código.
 
 **Antes de tudo isso, em PR próprio direto na `main`: o gate de CI do repositório (C-18).** O projeto
 defende que RIPD é gate de CI e não documento pós-fato — e o repositório não tem `.github/workflows/`.
