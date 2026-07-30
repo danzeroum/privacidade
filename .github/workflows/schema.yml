@@ -30,6 +30,12 @@ permissions:
 jobs:
   invariantes:
     name: Constraints e invariantes do banco
+    # fora-da-matriz: limite físico, e não escolha. `services:` sobe container
+    # Docker, e runner Windows do GitHub não executa container Linux; o job ainda
+    # instala o cliente com `apt-get`. Trocar o Postgres por outro banco para
+    # caber na matriz seria pior que ficar de fora: invariante testado contra
+    # outro motor não é o mesmo invariante, e um `CHECK` que passa no SQLite não
+    # diz nada sobre o `GENERATED ALWAYS AS` que este schema usa.
     runs-on: ubuntu-latest
 
     services:

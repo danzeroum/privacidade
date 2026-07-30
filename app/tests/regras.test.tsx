@@ -56,6 +56,11 @@ import { PAPEIS } from '../src/mock/permissoes';
 import {
   avaliarAuditoria, lerPolitica, pesoDe, relatorioDaAuditoria,
 } from '../src/lib/auditoria';
+import { argumentoSeguroParaShell, precisaDeShell } from '../src/lib/plataforma';
+import { linhaDaMedida, medirFimDeLinha } from '../src/lib/fim-de-linha';
+import {
+  MINIMO_DO_MOTIVO, avaliarMatriz, jobsDe, nomeDeCheck, relatorioDaMatriz,
+} from '../src/lib/matriz-ci';
 import { execSync, spawnSync } from 'node:child_process';
 import {
   EH_DEMONSTRACAO, SELO_DE_DEMONSTRACAO, SELO_DO_SELETOR_DE_PAPEL, perfilDe,
@@ -8772,7 +8777,13 @@ describe('PR 27 · aceitação — a reconciliação da auditoria é conferível
       const nomes = new Set<string>();
       for (const arquivo of readdirSync(join('..', '.github', 'workflows'))) {
         const yml = readFileSync(join('..', '.github', 'workflows', arquivo), 'utf8');
-        for (const m of yml.matchAll(/^\s{4}name: (.+)$/gm)) nomes.add(m[1].trim());
+        // `nomeDeCheck` remove a expressão do sufixo da matriz. O leg base tem
+        // sufixo vazio, então `Tipos e testes${{ matrix.sufixo }}` é o check
+        // `Tipos e testes` — o nome que já está marcado como required, e o que
+        // não pode mudar. Sem a remoção, este teste passaria a não encontrar
+        // nenhum dos checks citados na tabela, e a reprovação seria sobre a
+        // sintaxe do YAML em vez de sobre a citação.
+        for (const job of jobsDe(yml)) if (job.nome) nomes.add(job.nome);
       }
       // *Required status check* se marca por nome de job. Citar nome de workflow
       // no lugar do nome do job produziria uma marcação que não existe.
@@ -9432,8 +9443,14 @@ describe('PR 29 · Risco-005(c) — o relógio do programa dispara sem sessão a
     it('instante inválido sai 2 e não emite plano', () => {
       const destino = join(tmpdir(), 'relogio-plano-teste-3.json');
       rmSync(destino, { force: true });
+      // `shell` pela plataforma: em Windows o alvo é `npx.cmd`, que o Node recusa
+      // executar sem shell desde a correção da CVE-2024-27980. E o caminho vai
+      // conferido antes de entrar, porque com shell o Windows remonta a linha de
+      // comando: um tmpdir com espaço partiria o argumento ao meio, e o teste
+      // passaria a provar outra coisa sem avisar.
+      expect(argumentoSeguroParaShell(destino), `tmpdir impróprio para shell: ${destino}`).toBe(true);
       const r = spawnSync('npx', ['vite-node', 'scripts/relogio.ts', '--', '--agora=nao-e-data', `--json=${destino}`],
-        { encoding: 'utf8' });
+        { encoding: 'utf8', shell: precisaDeShell(process.platform) });
       expect(r.status, 'varredura que não roda tem de sair diferente de zero').not.toBe(0);
       expect(existsSync(destino), 'plano emitido apesar de a varredura não ter rodado').toBe(false);
     }, 90_000);
@@ -9754,9 +9771,11 @@ excecoes:
        * sem registro que este repositório recusa; tirar o caminho do argumento
        * resolve e ainda deixa o CLI com menos botão.
        */
+      // `shell` pela plataforma, mesma razão do CLI do relógio: `npx.cmd` não é
+      // executável que o `spawn` alcance sozinho em Windows.
       const rodar = (r: unknown) => spawnSync(
         'npx', ['vite-node', 'scripts/audit.ts', '--', '--stdin', '--hoje=2026-07-30'],
-        { encoding: 'utf8', input: JSON.stringify(r) },
+        { encoding: 'utf8', input: JSON.stringify(r), shell: precisaDeShell(process.platform) },
       );
 
       const vermelho = rodar(relatorio([{ source: 7, severity: 'critical', name: 'p' }]));
@@ -9767,7 +9786,8 @@ excecoes:
 
       // Entrada que não é JSON não vira relatório vazio: sem relatório não há
       // veredito, e veredito por omissão é o Risco-003 com outro nome.
-      const lixo = spawnSync('npx', ['vite-node', 'scripts/audit.ts', '--', '--stdin'], { encoding: 'utf8', input: 'nao-e-json' });
+      const lixo = spawnSync('npx', ['vite-node', 'scripts/audit.ts', '--', '--stdin'],
+        { encoding: 'utf8', input: 'nao-e-json', shell: precisaDeShell(process.platform) });
       expect(lixo.status).toBe(1);
     }, 180_000);
 
@@ -10031,6 +10051,340 @@ describe('PR 31 · Risco-008 (resíduo) — desligar parceiro destruindo a chave
         expect(p!.finalidade).toBe('dispensada');
         expect(p!.motivoDaDispensa!.length).toBeGreaterThan(40);
       }
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 32 · a matriz Windows — a causa raiz dos dois defeitos de plataforma
+//
+// O #36 trouxe dois defeitos que só existiam fora do Ubuntu: um
+// `VITE_PERFIL=producao vite build` que o cmd.exe não entende, e um leitor de CSV
+// que quebrava com CRLF. Os dois atravessaram a série inteira com a suíte
+// declarando verde, porque a suíte nunca tinha rodado no ambiente onde eles
+// existiam. Corrigir os dois sem corrigir isso deixaria a causa de pé.
+//
+// Este bloco cobre as três camadas. A primeira é o leitor (`/\r?\n/`), já
+// exercitada em `PR 26 · CRLF não corrompe a última coluna`. A segunda é o
+// `.gitattributes`. A terceira é a matriz — e é a única que **observa** as duas
+// primeiras em vez de confiar nelas.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('PR 32 · a matriz Windows, e o que ela cobra', () => {
+  const DIR = join('..', '.github', 'workflows');
+  const ARQUIVOS = readdirSync(DIR).map((arquivo) => ({
+    arquivo, yml: readFileSync(join(DIR, arquivo), 'utf8'),
+  }));
+
+  /** Os quatro jobs Node puros — os que a matriz cobre. */
+  const NA_MATRIZ = [
+    'Tipos e testes',
+    'PII, catálogo e PbD',
+    'Disparidade e proxies do modelo',
+    'Dependências vulneráveis',
+  ];
+
+  /** Os quatro que ficam de fora, e o id de cada um. */
+  const FORA = ['invariantes', 'relogio', 'segredos', 'codeql'];
+
+  describe('unidade — a plataforma como parâmetro, não como ambiente', () => {
+    it('`npm` e `npx` precisam de shell só em Windows', () => {
+      // Recebe a plataforma em vez de ler `process.platform`: é o que permite
+      // exercer os dois lados no mesmo processo. Um teste que só provasse o lado
+      // em que está rodando provaria metade — que é exatamente o defeito que
+      // este PR fecha.
+      expect(precisaDeShell('win32')).toBe(true);
+      expect(precisaDeShell('linux')).toBe(false);
+      expect(precisaDeShell('darwin')).toBe(false);
+    });
+
+    it('argumento que não sobrevive à remontagem da linha de comando reprova', () => {
+      // Com `shell: true` o Windows remonta a linha a partir dos argumentos.
+      // Espaço parte o argumento ao meio; `&` e `|` viram outro comando.
+      expect(argumentoSeguroParaShell('/tmp/relogio-plano-teste.json')).toBe(true);
+      expect(argumentoSeguroParaShell('C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\p.json')).toBe(true);
+      expect(argumentoSeguroParaShell('C:\\Program Files\\p.json')).toBe(false);
+      expect(argumentoSeguroParaShell('a&b')).toBe(false);
+      expect(argumentoSeguroParaShell('a|b')).toBe(false);
+      expect(argumentoSeguroParaShell('a>b')).toBe(false);
+      // Vazio não é "seguro por não ter nada": é argumento que sumiu.
+      expect(argumentoSeguroParaShell('')).toBe(false);
+    });
+
+    it('nenhum spawnSync de npm/npx sem a decisão de shell — catraca sobre o fonte', () => {
+      /**
+       * A regra mora em `plataforma.ts`, e esta catraca é o que impede a quinta
+       * chamada de nascer sem ela. Eram quatro: uma em código de produção
+       * (`scripts/audit.ts`) e três em teste, nenhuma cobrada porque o CI era
+       * monoplataforma.
+       */
+      const fontes = [
+        ...readdirSync('scripts').filter((f) => f.endsWith('.ts')).map((f) => join('scripts', f)),
+        join('tests', 'regras.test.tsx'),
+      ];
+
+      // Extrai o texto da chamada por balanço de parênteses: a chamada tem
+      // várias linhas, e procurar `shell` "na mesma linha" acharia nenhuma.
+      const chamadas = (fonte: string) => {
+        const achadas: string[] = [];
+        let i = fonte.indexOf('spawnSync(');
+        while (i >= 0) {
+          let profundidade = 0;
+          let j = i + 'spawnSync'.length;
+          for (; j < fonte.length; j += 1) {
+            if (fonte[j] === '(') profundidade += 1;
+            else if (fonte[j] === ')') { profundidade -= 1; if (profundidade === 0) break; }
+          }
+          achadas.push(fonte.slice(i, j + 1));
+          i = fonte.indexOf('spawnSync(', j);
+        }
+        return achadas;
+      };
+
+      let conferidas = 0;
+      for (const caminho of fontes) {
+        for (const chamada of chamadas(readFileSync(caminho, 'utf8'))) {
+          if (!/spawnSync\(\s*\n?\s*'(npm|npx)'/.test(chamada)) continue;
+          conferidas += 1;
+          expect(chamada, `${caminho}: spawnSync de npm/npx sem decisão de shell`)
+            .toMatch(/shell:\s*precisaDeShell\(/);
+        }
+      }
+      // Não-vacuidade: se o extrator parasse de achar as chamadas, o laço acima
+      // passaria por não ter iterado — e a catraca estaria desligada em silêncio.
+      expect(conferidas, 'o extrator não achou nenhuma chamada de npm/npx').toBe(4);
+    });
+  });
+
+  describe('unidade — o fim de linha medido, e o que a medição não cobre', () => {
+    it('as três formas de quebra são contadas separadas', () => {
+      // `split` normalizaria justamente o que se quer observar. Por isso a
+      // contagem é sobre bytes: é a única forma de a etapa do CI enxergar a
+      // primeira camada em vez de reproduzi-la.
+      expect(medirFimDeLinha('a\r\nb\nc\rd')).toEqual({ crlf: 1, lf: 1, crSozinho: 1 });
+      expect(medirFimDeLinha('sem quebra')).toEqual({ crlf: 0, lf: 0, crSozinho: 0 });
+      expect(medirFimDeLinha('a\r\n\r\n')).toEqual({ crlf: 2, lf: 0, crSozinho: 0 });
+    });
+
+    it('a linha de relatório sai na mesma forma nas duas plataformas', () => {
+      const linha = linhaDaMedida('README.md', { crlf: 0, lf: 232, crSozinho: 0 });
+      expect(linha).toContain('README.md');
+      expect(linha).toContain('LF=  232');
+      expect(linha).toContain('CRLF=    0');
+    });
+
+    it('os leitores que NÃO normalizam CRLF são lista fechada — e é o .gitattributes que os cobre', () => {
+      /**
+       * Declarar o que o instrumento não cobre, em vez de deixar a palavra
+       * "normaliza" valendo por implementação.
+       *
+       * Cinco lugares partem conteúdo com `split('\n')` seco. Dois são sobre
+       * **mensagem de erro** (`e.message.split('\n')[0]`), que nunca vem de
+       * arquivo. Três são sobre conteúdo de arquivo, e neles a primeira camada
+       * não existe: quem os protege é o `* text=auto eol=lf`, que fixa LF na
+       * árvore de trabalho.
+       *
+       * A lista é fechada para que um leitor novo sem `/\r?\n/` reprove aqui em
+       * vez de herdar em silêncio uma proteção que é de outra camada.
+       */
+      const secos = readdirSync(join('src', 'lib'))
+        .filter((f) => f.endsWith('.ts'))
+        .filter((f) => /\.split\('\\n'\)/.test(readFileSync(join('src', 'lib', f), 'utf8')))
+        .sort();
+      expect(secos).toEqual(['auditoria.ts', 'catraca-producao.ts', 'equidade.ts', 'gate-privacidade.ts', 'segredos.ts']);
+    });
+  });
+
+  describe('sistema — todo job ou está na matriz, ou diz por que não', () => {
+    it('os workflows do repositório não têm nenhum achado', () => {
+      const achados = avaliarMatriz(ARQUIVOS);
+      expect(achados, relatorioDaMatriz(achados)).toEqual([]);
+    });
+
+    it('os dois conjuntos são não-vazios — catraca que classifica tudo de um lado não classifica', () => {
+      const jobs = ARQUIVOS.flatMap(({ yml }) => jobsDe(yml));
+      // Um YAML que o leitor não conseguisse fatiar devolveria zero jobs, e o
+      // teste acima passaria com achados vazios por não ter olhado nenhum.
+      expect(jobs.length).toBe(NA_MATRIZ.length + FORA.length);
+      expect(jobs.filter((j) => j.naMatriz).length).toBe(NA_MATRIZ.length);
+      expect(jobs.filter((j) => j.motivo !== null).length).toBe(FORA.length);
+    });
+
+    it('os quatro Node puros estão na matriz, e os quatro de fora são os nomeados', () => {
+      const jobs = ARQUIVOS.flatMap(({ yml }) => jobsDe(yml));
+      expect(jobs.filter((j) => j.naMatriz).map((j) => j.nome).sort()).toEqual([...NA_MATRIZ].sort());
+      expect(jobs.filter((j) => j.motivo !== null).map((j) => j.id).sort()).toEqual([...FORA].sort());
+    });
+
+    it('o leg Ubuntu mantém o nome exato do check — a marcação do dono não é tocada', () => {
+      /**
+       * O ponto inteiro do sufixo por `include`. Se o nome do leg base mudasse,
+       * os três *required status checks* já marcados na `main` deixariam de
+       * existir no mesmo instante, e a proteção de branch passaria a exigir um
+       * check que nenhum workflow produz — a `main` ficaria bloqueada sem que
+       * nada estivesse quebrado.
+       */
+      const jobs = ARQUIVOS.flatMap(({ yml }) => jobsDe(yml)).filter((j) => j.naMatriz);
+      for (const job of jobs) {
+        expect(job.nomeBruto, `${job.id}: nome sem o sufixo da matriz`).toMatch(/\$\{\{ matrix\.sufixo \}\}$/);
+        // O sufixo do leg base é string vazia, então o nome do check é o de
+        // antes, byte a byte.
+        expect(NA_MATRIZ, `${job.id}: nome de check mudou`).toContain(job.nome);
+      }
+    });
+
+    it('o leg base declara `sufixo: \'\'` — a premissa do extrator, cobrada em vez de suposta', () => {
+      /**
+       * `nomeDeCheck` remove `${{ matrix.sufixo }}` porque o `include` declara
+       * esse sufixo vazio no leg Ubuntu. A premissa mora no YAML, e sem esta
+       * catraca alguém poderia trocá-la por `sufixo: '-linux'`: o extrator
+       * continuaria devolvendo `Tipos e testes`, e a tabela continuaria citando
+       * um check que passou a se chamar `Tipos e testes-linux`.
+       */
+      for (const { arquivo, yml } of ARQUIVOS) {
+        for (const job of jobsDe(yml)) {
+          if (!job.naMatriz) continue;
+          const bloco = yml.slice(yml.indexOf(`\n  ${job.id}:`));
+          expect(bloco.slice(0, bloco.indexOf('steps:')), `${arquivo} · ${job.id}: leg base sem sufixo vazio`)
+            .toContain("{ os: ubuntu-latest, sufixo: '' }");
+        }
+      }
+    });
+
+    it('todo job de matriz tem fail-fast: false — leg cancelado bloquearia pelo motivo errado', () => {
+      for (const { arquivo, yml } of ARQUIVOS) {
+        for (const job of jobsDe(yml)) {
+          if (!job.naMatriz) continue;
+          const bloco = yml.slice(yml.indexOf(`\n  ${job.id}:`));
+          expect(bloco.slice(0, bloco.indexOf('steps:')), `${arquivo} · ${job.id}`)
+            .toContain('fail-fast: false');
+        }
+      }
+    });
+
+    it('nenhum workflow tolera falha — nem os que ganharam matriz', () => {
+      for (const { arquivo, yml } of ARQUIVOS) {
+        expect(yml, `${arquivo} tolera falha`).not.toContain('continue-on-error');
+      }
+    });
+  });
+
+  describe('injeção — a catraca reprova o que ela promete reprovar', () => {
+    const YML = (corpo: string) => `name: X\non:\n  push:\njobs:\n${corpo}`;
+
+    it('job novo sem matriz e sem motivo reprova, nomeando o job', () => {
+      const achados = avaliarMatriz([{
+        arquivo: 'novo.yml',
+        yml: YML('  recemChegado:\n    name: Coisa nova\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n'),
+      }]);
+      expect(achados).toHaveLength(1);
+      expect(achados[0].job).toBe('recemChegado');
+      expect(achados[0].regra).toBe('sem-windows-e-sem-motivo');
+      // O relatório cita arquivo e job: achado que não diz onde é opinião.
+      expect(relatorioDaMatriz(achados)).toContain('novo.yml · recemChegado');
+    });
+
+    it('motivo sem corpo reprova — exceção sem registro é a forma de defeito recusada aqui', () => {
+      const achados = avaliarMatriz([{
+        arquivo: 'novo.yml',
+        yml: YML('  preguicoso:\n    # fora-da-matriz: n/a\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n'),
+      }]);
+      expect(achados).toHaveLength(1);
+      expect(achados[0].regra).toBe('motivo-sem-corpo');
+      expect(achados[0].detalhe).toContain(String(MINIMO_DO_MOTIVO));
+    });
+
+    it('motivo vazio reprova igual — dois-pontos e nada depois não é declaração', () => {
+      const achados = avaliarMatriz([{
+        arquivo: 'novo.yml',
+        yml: YML('  vazio:\n    # fora-da-matriz:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n'),
+      }]);
+      expect(achados.map((a) => a.regra)).toEqual(['motivo-sem-corpo']);
+    });
+
+    it('na matriz E com motivo reprova: um YAML que se contradiz mente depois', () => {
+      const achados = avaliarMatriz([{
+        arquivo: 'novo.yml',
+        yml: YML(
+          '  contraditorio:\n'
+          + '    # fora-da-matriz: um motivo suficientemente longo para passar do mínimo exigido pela regra.\n'
+          + '    runs-on: ${{ matrix.os }}\n'
+          + '    strategy:\n      matrix:\n        include:\n          - { os: windows-latest }\n'
+          + '    steps:\n      - run: true\n',
+        ),
+      }]);
+      expect(achados.map((a) => a.regra)).toEqual(['na-matriz-e-com-motivo']);
+    });
+
+    it('motivo que cita `windows-latest` não conta como estar na matriz', () => {
+      /**
+       * A armadilha mais fácil de plantar aqui: os motivos reais **nomeiam** a
+       * plataforma que o job não roda. Um leitor que procurasse `windows-latest`
+       * no bloco inteiro leria a própria justificativa como prova do contrário
+       * dela, e todo job excluído passaria por estar excluído.
+       */
+      const yml = YML(
+        '  gitleaks:\n'
+        + '    # fora-da-matriz: roda em windows-latest sem problema — fica de fora por semântica,\n'
+        + '    # porque lê blobs do git, que são os mesmos bytes em toda plataforma.\n'
+        + '    runs-on: ubuntu-latest\n    steps:\n      - run: true\n',
+      );
+      const [job] = jobsDe(yml);
+      expect(job.naMatriz, 'a citação do motivo foi lida como matriz').toBe(false);
+      expect(avaliarMatriz([{ arquivo: 'novo.yml', yml }])).toEqual([]);
+    });
+
+    it('o extrator remove só o sufixo declarado vazio — qualquer outra expressão vira null', () => {
+      /**
+       * O furo que a injeção G encontrou, e que a primeira versão deste extrator
+       * tinha: apagar `${{ … }}` inteiro reconstruía o nome antigo a partir de um
+       * nome novo. `Tipos e testes ${{ matrix.os }}` publica o check
+       * `Tipos e testes ubuntu-latest`, e a catraca de checks citados afirmava
+       * que `Tipos e testes` continuava existindo.
+       *
+       * `null` é a resposta honesta para "não sei qual é o nome": propaga como
+       * job sem nome, e a citação da tabela reprova.
+       */
+      expect(nomeDeCheck('Tipos e testes${{ matrix.sufixo }}')).toBe('Tipos e testes');
+      expect(nomeDeCheck('Dependências vulneráveis')).toBe('Dependências vulneráveis');
+      expect(nomeDeCheck('Tipos e testes ${{ matrix.os }}')).toBeNull();
+      expect(nomeDeCheck('${{ matrix.os }}')).toBeNull();
+      expect(nomeDeCheck('${{ matrix.sufixo }}')).toBeNull();
+    });
+  });
+
+  describe('validação — o defeito do #36 seria pego hoje?', () => {
+    it('nenhum script do package.json usa prefixo de variável POSIX', () => {
+      /**
+       * O defeito literal do #36: `"build:producao": "VITE_PERFIL=producao vite build"`.
+       * É sintaxe de `sh`. O cmd.exe lê `VITE_PERFIL=producao` como o **nome do
+       * programa**, não acha, e o build inteiro morre antes de começar.
+       *
+       * A correção foi trocar por `--mode producao` + `.env.producao`, e esta é a
+       * catraca que impede a volta. Ela reprova nas duas plataformas, de
+       * propósito: um defeito que só o leg Windows pega chega ao autor tarde, e
+       * a suíte local é onde ele custa menos.
+       *
+       * O leg Windows continua sendo a prova de verdade — este teste conhece a
+       * **forma** do defeito, e o runner conhece o efeito dele.
+       */
+      const scripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts as Record<string, string>;
+      for (const [nome, comando] of Object.entries(scripts)) {
+        expect(comando, `script "${nome}" com prefixo de variável POSIX: não roda em cmd.exe`)
+          .not.toMatch(/^\s*[A-Z_][A-Z0-9_]*=/);
+      }
+      expect(Object.keys(scripts).length).toBeGreaterThan(8);
+      // E o caminho que substituiu o prefixo continua de pé.
+      expect(scripts['build:producao']).toContain('--mode producao');
+      expect(readFileSync('.env.producao', 'utf8')).toContain('VITE_PERFIL=producao');
+    });
+
+    it('a etapa que mede fim de linha existe no workflow e roda nas duas plataformas', () => {
+      const ci = ARQUIVOS.find((a) => a.arquivo === 'ci.yml')!.yml;
+      // Sem `if` de plataforma: a medida das duas colunas é o que permite
+      // comparar. Uma medida só do Windows não teria contra o que ser lida.
+      const etapa = ci.slice(ci.indexOf('Fim de linha, medido neste runner'));
+      expect(etapa).toContain('npm run --silent fim-de-linha');
+      expect(etapa.slice(0, etapa.indexOf('- name: Verificação'))).not.toContain('if:');
     });
   });
 });

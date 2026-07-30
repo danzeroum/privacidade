@@ -59,6 +59,13 @@ permissions:
 jobs:
   relogio:
     name: Varreduras de prazo
+    # fora-da-matriz: limite físico, e nem é check de PR. Os passos de abertura de
+    # alerta são shell POSIX com `gh` e `jq` — `while read -r` e redirecionamento
+    # para `$GITHUB_OUTPUT` não sobrevivem ao pwsh sem serem reescritos, e
+    # reescrever regra de shell em dois dialetos é a duplicação que este
+    # repositório evita mantendo a decisão em `relogio.ts`. Some-se que o gatilho
+    # é `schedule`/`workflow_dispatch`: não há diff aqui para uma segunda
+    # plataforma cobrir.
     runs-on: ubuntu-latest
     defaults:
       run:

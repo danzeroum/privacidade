@@ -75,6 +75,14 @@ jobs:
     # resultado às segundas-feiras — e um verde semanal que ninguém lê é ruído com
     # aparência de vigilância.
     if: github.event_name != 'schedule'
+    # fora-da-matriz: fica de fora por semântica, e não por limite físico — e a
+    # diferença foi medida antes de escrever esta linha. `gitleaks-action@v2` é
+    # `using: node20` e trata `win32` explicitamente na detecção de plataforma:
+    # ele **roda** em Windows. Dizer que não rodaria seria mentira conferível em
+    # dois cliques. O que ele varre são os blobs do git e o histórico, que são os
+    # mesmos bytes em toda plataforma — um segundo leg daria a mesma resposta, e
+    # um check duplicado que nunca diverge é custo de runner com aparência de
+    # cobertura.
     runs-on: ubuntu-latest
 
     steps:
@@ -91,9 +99,20 @@ jobs:
           GITLEAKS_CONFIG: .gitleaks.toml
 
   dependencias:
-    name: Dependências vulneráveis
+    # Sufixo vazio no leg Ubuntu preserva o nome do check — ver a nota longa em
+    # `ci.yml`. Este job estava **vermelho em Windows** e ninguém sabia: o CLI
+    # chamava `spawnSync('npm', …)` sem shell, e em Windows o alvo é `npm.cmd`,
+    # que o Node recusa executar sem `shell: true` desde a correção da
+    # CVE-2024-27980. O relatório voltava vazio e o CLI reprovava culpando o npm.
+    name: Dependências vulneráveis${{ matrix.sufixo }}
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, sufixo: '' }
+          - { os: windows-latest, sufixo: ' (windows)' }
     defaults:
       run:
         working-directory: app
@@ -118,6 +137,12 @@ jobs:
 
   codeql:
     name: CodeQL
+    # fora-da-matriz: também por semântica, e por uma colisão concreta. O CodeQL
+    # analisa o mesmo fonte com as mesmas queries em qualquer runner, então o
+    # segundo leg produziria o mesmo conjunto de alertas; e dois `analyze` na
+    # mesma categoria sobem SARIF para o mesmo lugar, onde o segundo upload
+    # sobrescreve o primeiro em vez de somar. Duplicar aqui não amplia cobertura:
+    # troca um resultado por outro idêntico e paga dobrado por isso.
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -14,6 +14,7 @@
     "equidade": "vite-node scripts/equidade.ts",
     "relogio": "vite-node scripts/relogio.ts",
     "audit:politica": "vite-node scripts/audit.ts",
+    "fim-de-linha": "vite-node scripts/fim-de-linha.ts",
     "varredura:segredos": "vite-node scripts/segredos.ts",
     "build:producao": "vite build --mode producao --outDir dist-producao",
     "catraca:producao": "npm run build:producao && vite-node scripts/catraca.ts"
