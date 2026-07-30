@@ -26,6 +26,7 @@
 import { diasDeAtraso } from './retencao';
 import { hashEncadeado } from '../lib/sha256';
 import type { Achado as AchadoDeDpa } from './types';
+import type { EstadoFornecedor } from './estados';
 
 export type PapelDoFornecedor = 'operador' | 'controlador' | 'controlador_conjunto';
 
@@ -52,13 +53,87 @@ export interface Fornecedor {
   /**
    * A chave que protege o dado deste parceiro (Risco-008, "chave por parceiro").
    *
-   * A coluna existe e liga fornecedor a `kms_chave`. O que **não** existe ainda
-   * é a revogação com SLA — desligar um parceiro destruindo a chave dele é
-   * máquina própria, e fica declarada como resíduo em vez de insinuada por uma
-   * coluna que ninguém usa.
+   * Ligava fornecedor a `kms_chave` e não era usada por nada. O desligamento a
+   * destrói: é o que torna o encerramento verificável em vez de prometido.
    */
   kmsChaveId?: string;
+  /**
+   * Onde o parceiro está no ciclo de vida da relação. Nono artefato da máquina
+   * de estados — não há atalho por fornecedor.
+   */
+  estado: EstadoFornecedor;
+  /**
+   * Quantos dias o DPA promete para devolução ou eliminação no encerramento.
+   *
+   * É contra este número que a janela declarada no desligamento é conferida.
+   * Ausente, o contrato não restringe nada — e a ausência fica visível no campo,
+   * em vez de virar uma janela livre que ninguém percebe que é livre.
+   */
+  dpaEncerramentoDias?: number;
+  /** O fato do desligamento. Ausente enquanto o parceiro está ativo. */
+  desligamento?: Desligamento;
 }
+
+/**
+ * O desligamento é **fato**, não flag.
+ *
+ * `estado = 'desligado'` responderia "está desligado" e nada mais: quem decidiu,
+ * por quê, quando, e qual janela foi prometida sairiam do registro no instante
+ * em que alguém mudasse o campo.
+ */
+export interface Desligamento {
+  motivo: string;
+  decididoPor: string;
+  /** ISO completo: a janela é contada a partir daqui. */
+  decididoEm: string;
+  janelaDias: number;
+  /** `AAAA-MM-DD`, derivada da decisão mais a janela — nunca digitada. */
+  janelaAte: string;
+  /** A prova da destruição. Ausente enquanto o desligamento está em curso. */
+  chaveDestruidaEm?: string;
+  chaveDestruidaPor?: string;
+  provaHash?: string;
+}
+
+const DIA_MS = 86_400_000;
+
+/** `AAAA-MM-DD` da decisão mais a janela. Derivada, como no banco. */
+export const fimDaJanela = (decididoEm: string, janelaDias: number): string =>
+  new Date(new Date(decididoEm).getTime() + janelaDias * DIA_MS).toISOString().slice(0, 10);
+
+/**
+ * Por que este desligamento não pode ser aceito — ou `null` quando pode.
+ *
+ * Separa conteúdo de sequência: a ordem dos passos é da máquina de estados, e o
+ * que falta **dentro** do passo é isto. Janela maior que o contrato é 422 e não
+ * 409, porque a transição é legal; o que não cabe é o prazo.
+ */
+export function motivoDaRecusaDoDesligamento(f: Fornecedor, motivo: string, janelaDias: unknown): string | null {
+  if (motivo.trim().length < 20) {
+    return 'O desligamento exige motivo de ao menos 20 caracteres: quem ler o registro daqui a um ano '
+      + 'precisa saber por que a relação terminou.';
+  }
+  if (typeof janelaDias !== 'number' || !Number.isInteger(janelaDias) || janelaDias < 0 || janelaDias > 365) {
+    return 'A janela precisa ser um número inteiro de dias entre 0 e 365. Zero é uma decisão declarada '
+      + '— "não há dado a devolver" —, e omiti-la é uma etapa que ninguém percebeu que existia.';
+  }
+  if (f.dpaEncerramentoDias !== undefined && janelaDias > f.dpaEncerramentoDias) {
+    return `A janela de ${janelaDias} dia(s) excede os ${f.dpaEncerramentoDias} que o DPA de ${f.nome} `
+      + 'promete no encerramento. O prazo do desligamento não pode ser maior que o prazo contratado.';
+  }
+  return null;
+}
+
+/** A janela acabou? Vence **hoje** ainda vale, como o DPA. */
+export const janelaVencida = (d: Desligamento, hojeIso: string): boolean => d.janelaAte < hojeIso;
+
+/** Dias além da janela. Zero ou negativo enquanto ela não estourou. */
+export const diasAlemDaJanela = (d: Desligamento, hojeIso: string): number =>
+  Math.round((new Date(`${hojeIso}T12:00:00Z`).getTime() - new Date(`${d.janelaAte}T12:00:00Z`).getTime()) / DIA_MS);
+
+/** O código determinístico do achado de desligamento vencido. */
+export const codigoDoDesligamento = (slug: string): string =>
+  `DESLIG-${slug.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
 
 export type EstadoDoDpa = 'vigente' | 'vencido' | 'nao_assinado' | 'sem_prazo';
 
@@ -154,6 +229,15 @@ export function varrerDpas(
   );
 
   for (const f of banco.cenario.fornecedores) {
+    /**
+     * Parceiro fora de `ativo` sai desta varredura (PR 31).
+     *
+     * Durante o desligamento a pendência é **destruir a chave**, não renovar o
+     * contrato. Sem esta linha, um parceiro em encerramento com DPA vencendo
+     * geraria dois alertas dizendo coisas diferentes sobre o mesmo fato, e quem
+     * recebesse os dois trataria o errado.
+     */
+    if (f.estado !== 'ativo') continue;
     const codigo = codigoDoAchadoDeDpa(f.slug);
     const existente = banco.cenario.achados.find((a) => a.codigo === codigo);
     const estado = estadoDoDpa(f, hojeIso);

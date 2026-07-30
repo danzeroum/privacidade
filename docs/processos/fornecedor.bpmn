@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PR-05 · Fornecedor — ciclo de vida da relação com o parceiro.
+
+  Especificação de referência. O runtime que a executa é app/src/mock/estados.ts,
+  e o teste de conformidade (app/tests/regras.test.tsx) reprova o build quando
+  os dois divergem — em qualquer direção.
+
+  Cada <task> é um estado; cada <sequenceFlow> entre tasks é uma transição legal.
+  O que este arquivo NÃO diz, de propósito: o conteúdo que cada transição exige
+  (motivo, janela, prova de destruição). Isso é validação e vive em
+  app/src/mock/api.ts — misturar as duas produz 422 onde devia ser 409.
+-->
+<bpmn:definitions
+    xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    id="definicoes-fornecedor"
+    targetNamespace="https://lastro.exemplo/processos">
+  <bpmn:process id="fornecedor" name="PR-05 · Fornecedor" isExecutable="false">
+    <bpmn:documentation>A janela entre a decisão e a destruição da chave é obrigatória, mesmo de zero dia: zero declarado é decisão, zero implícito é etapa que ninguém viu. Desligado é final — retomar é contrato novo, e o registro do encerramento continua legível.</bpmn:documentation>
+    <bpmn:startEvent id="inicio" name="Parceiro contratado">
+      <bpmn:outgoing>flow-inicio</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:task id="ativo" name="ativo">
+      <bpmn:incoming>flow-inicio</bpmn:incoming>
+      <bpmn:outgoing>flow-ativo-desligando</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="desligando" name="desligando">
+      <bpmn:incoming>flow-ativo-desligando</bpmn:incoming>
+      <bpmn:outgoing>flow-desligando-desligado</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="desligado" name="desligado">
+      <bpmn:incoming>flow-desligando-desligado</bpmn:incoming>
+      <bpmn:outgoing>flow-fim</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:endEvent id="fim" name="Relação encerrada, histórico preservado">
+      <bpmn:incoming>flow-fim</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="flow-inicio" sourceRef="inicio" targetRef="ativo" />
+    <bpmn:sequenceFlow id="flow-ativo-desligando" sourceRef="ativo" targetRef="desligando" name="decidir o desligamento, com motivo e janela" />
+    <bpmn:sequenceFlow id="flow-desligando-desligado" sourceRef="desligando" targetRef="desligado" name="destruir a chave, com prova encadeada" />
+    <bpmn:sequenceFlow id="flow-fim" sourceRef="desligado" targetRef="fim" />
+  </bpmn:process>
+</bpmn:definitions>

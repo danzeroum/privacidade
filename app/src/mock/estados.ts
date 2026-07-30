@@ -21,7 +21,7 @@
 
 export type Artefato =
   | 'parecer' | 'ripd' | 'lia' | 'risco'
-  | 'solicitacao' | 'achado' | 'incidente' | 'chave';
+  | 'solicitacao' | 'achado' | 'incidente' | 'chave' | 'fornecedor';
 
 export type EstadoParecer = 'rascunho' | 'emitido' | 'homologado' | 'vigente' | 'devolvido';
 export type EstadoRipd =
@@ -34,6 +34,7 @@ export type EstadoAchado =
 export type EstadoIncidente =
   | 'aberto' | 'contido' | 'decidido' | 'comunicado' | 'nao_comunicado' | 'encerrado';
 export type EstadoChave = 'nova' | 'recriptografando' | 'canary' | 'ativa' | 'revogada';
+export type EstadoFornecedor = 'ativo' | 'desligando' | 'desligado';
 
 export type EstadoDe<A extends Artefato> =
   A extends 'parecer' ? EstadoParecer
@@ -43,7 +44,8 @@ export type EstadoDe<A extends Artefato> =
           : A extends 'solicitacao' ? EstadoSolicitacao
             : A extends 'achado' ? EstadoAchado
               : A extends 'incidente' ? EstadoIncidente
-                : EstadoChave;
+                : A extends 'chave' ? EstadoChave
+                  : EstadoFornecedor;
 
 type Maquina<E extends string> = Record<E, E[]>;
 
@@ -149,6 +151,25 @@ const CHAVE: Maquina<EstadoChave> = {
   revogada: [],
 };
 
+/**
+ * Desligar parceiro é passar por uma janela, e a janela é obrigatória.
+ *
+ * `ativo → desligado` não existe **mesmo quando a janela é de zero dia**. Zero
+ * declarado é uma decisão — "não há dado a devolver" —, e zero implícito é uma
+ * etapa que ninguém percebeu que existia. Pular a janela é 409, e o 409 é do
+ * mesmo guarda genérico que rege os outros oito artefatos: não há atalho por
+ * fornecedor, e é isso que este arquivo existe para garantir.
+ *
+ * `desligado` é final. Retomar a relação é contrato novo, com DPA novo e chave
+ * nova — não é reabrir o registro do encerramento anterior, que continua legível
+ * exatamente por ser o período que uma auditoria examina.
+ */
+const FORNECEDOR: Maquina<EstadoFornecedor> = {
+  ativo: ['desligando'],
+  desligando: ['desligado'],
+  desligado: [],
+};
+
 export const MAQUINAS: { [A in Artefato]: Maquina<EstadoDe<A>> } = {
   parecer: PARECER,
   ripd: RIPD,
@@ -158,6 +179,7 @@ export const MAQUINAS: { [A in Artefato]: Maquina<EstadoDe<A>> } = {
   achado: ACHADO,
   incidente: INCIDENTE,
   chave: CHAVE,
+  fornecedor: FORNECEDOR,
 };
 
 /** Mantido do PR 4: era o nome que a T9 e os testes do incidente já usavam. */
@@ -165,7 +187,7 @@ export const TRANSICOES_INCIDENTE = INCIDENTE;
 
 /** A lista, para quem precisa validar o nome do artefato vindo de uma URL. */
 export const ARTEFATOS: Artefato[] = [
-  'parecer', 'ripd', 'lia', 'risco', 'solicitacao', 'achado', 'incidente', 'chave',
+  'parecer', 'ripd', 'lia', 'risco', 'solicitacao', 'achado', 'incidente', 'chave', 'fornecedor',
 ];
 
 export const estadosDe = <A extends Artefato>(artefato: A): EstadoDe<A>[] =>
@@ -212,6 +234,12 @@ const MOTIVOS: Partial<Record<Artefato, Record<string, string>>> = {
   },
   chave: {
     'recriptografando→ativa': 'Promover antes do canary deixa registro ilegível com a chave nova.',
+  },
+  fornecedor: {
+    'ativo→desligado': 'Desligar sem janela destrói a chave antes de o parceiro devolver o que tem e antes de o '
+      + 'dado em trânsito chegar. A janela é declarada — pode ser de zero dia, mas não pode ser omitida.',
+    'desligado→ativo': 'Retomar a relação é contrato novo, com DPA novo e chave nova. O registro do encerramento '
+      + 'anterior continua legível, e é justamente ele que uma auditoria examina.',
   },
 };
 

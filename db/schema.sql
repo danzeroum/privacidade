@@ -311,10 +311,33 @@ CREATE TABLE fornecedor (
   dpa_hash            TEXT,
   dpa_expira_em       DATE,
   sla_incidente_horas INT CHECK (sla_incidente_horas BETWEEN 1 AND 72),
-  -- Chave por parceiro (Risco-008). A coluna liga fornecedor a kms_chave; a
-  -- revogação com SLA — desligar o parceiro destruindo a chave dele — é máquina
-  -- própria e continua sendo resíduo declarado, não insinuada por esta linha.
+  -- Chave por parceiro (Risco-008). A coluna liga fornecedor a kms_chave, e o
+  -- desligamento a destrói: é o que torna o encerramento verificável em vez de
+  -- prometido. A máquina que rege isso vive em `app/src/mock/estados.ts` e em
+  -- `docs/processos/fornecedor.bpmn`, como a dos outros oito artefatos.
   kms_chave_id        UUID,
+  /*
+   * O estado do parceiro no ciclo de vida da relação.
+   *
+   * `desligando` é a janela contratual entre a decisão e a destruição da chave:
+   * o parceiro precisa devolver ou eliminar o que tem, e o dado em trânsito
+   * precisa chegar. Durante ela nenhuma transferência **nova** é aceita — quem
+   * recusa é o trigger abaixo, no ato, antes de qualquer destruição.
+   *
+   * `desligado` não some nem apaga histórico: as transferências já gravadas
+   * continuam legíveis, e é justamente esse período que uma auditoria examina.
+   */
+  estado              TEXT NOT NULL DEFAULT 'ativo'
+                      CHECK (estado IN ('ativo','desligando','desligado')),
+  /*
+   * Quantos dias o DPA promete para devolução ou eliminação no encerramento.
+   *
+   * Existe para a janela declarada no desligamento ser **conferível contra o
+   * contrato** em vez de livre. Sem esta coluna, "cumprimos o DPA no
+   * encerramento" seria afirmação sem nada contra o que ser checada — a promessa
+   * sem instrumento que esta série passou treze PRs fechando.
+   */
+  dpa_encerramento_dias INT CHECK (dpa_encerramento_dias BETWEEN 0 AND 365),
   UNIQUE (tenant_id, slug),
   -- Contrato assinado sem prazo não se vigia: não há o que vencer, e o que não
   -- vence não entra em varredura nenhuma.
@@ -322,6 +345,69 @@ CREATE TABLE fornecedor (
 );
 
 CREATE INDEX fornecedor_dpa_idx ON fornecedor (dpa_expira_em) WHERE dpa_assinado;
+
+/*
+ * O desligamento é **fato**, não flag.
+ *
+ * `UPDATE fornecedor SET estado='desligado'` responderia "está desligado" e
+ * nada mais: quem decidiu, por quê, quando, e qual janela foi prometida sairiam
+ * do registro no instante em que alguém rodasse o comando. É a mesma razão pela
+ * qual a dispensa de RIPD virou linha append-only em vez de campo booleano.
+ *
+ * A janela é obrigatória mesmo quando é de zero dia. Zero declarado é uma
+ * decisão ("não há dado a devolver"); zero implícito é uma etapa que ninguém
+ * percebeu que existia.
+ */
+CREATE TABLE fornecedor_desligamento (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  fornecedor_id UUID NOT NULL REFERENCES fornecedor(id) ON DELETE RESTRICT,
+  motivo        TEXT NOT NULL CHECK (length(btrim(motivo)) >= 20),
+  decidido_por  UUID NOT NULL REFERENCES ator(id),
+  decidido_em   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  janela_dias   INT NOT NULL CHECK (janela_dias BETWEEN 0 AND 365),
+  -- Derivada, e não digitada: o fim da janela é uma função da decisão, e um
+  -- campo próprio permitiria que ele divergisse dela.
+  janela_ate    DATE NOT NULL GENERATED ALWAYS AS ((decidido_em AT TIME ZONE 'UTC')::date + janela_dias) STORED,
+  -- A prova da destruição da chave. Enquanto for nula, o desligamento está em
+  -- curso; preenchida, ele terminou. É o que a varredura de prazo consulta.
+  chave_destruida_em TIMESTAMPTZ,
+  chave_destruida_por UUID REFERENCES ator(id),
+  prova_hash    TEXT,
+  CONSTRAINT prova_completa CHECK (
+    (chave_destruida_em IS NULL AND chave_destruida_por IS NULL AND prova_hash IS NULL)
+    OR (chave_destruida_em IS NOT NULL AND chave_destruida_por IS NOT NULL AND prova_hash IS NOT NULL)
+  )
+);
+
+-- Um desligamento aberto por parceiro. Dois abertos seriam duas janelas
+-- concorrentes, e nenhuma varredura saberia qual prazo cobrar.
+CREATE UNIQUE INDEX fornecedor_desligamento_aberto_uk
+  ON fornecedor_desligamento (fornecedor_id) WHERE chave_destruida_em IS NULL;
+
+/*
+ * A janela prometida não pode ultrapassar o que o contrato promete.
+ *
+ * Sem isto, "o desligamento cumpre o DPA" seria prosa: qualquer janela caberia,
+ * inclusive uma maior que o prazo de devolução firmado. Contrato sem prazo de
+ * encerramento declarado não restringe nada — e essa ausência é visível na
+ * coluna, não escondida aqui.
+ */
+CREATE OR REPLACE FUNCTION janela_cabe_no_contrato() RETURNS TRIGGER AS $$
+DECLARE v_prometido INT; v_nome TEXT;
+BEGIN
+  SELECT dpa_encerramento_dias, nome INTO v_prometido, v_nome
+    FROM fornecedor WHERE id = NEW.fornecedor_id;
+  IF v_prometido IS NOT NULL AND NEW.janela_dias > v_prometido THEN
+    RAISE EXCEPTION 'Desligamento de %: janela de % dia(s) excede os % que o DPA promete no encerramento.',
+      v_nome, NEW.janela_dias, v_prometido;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER desligamento_janela_cabe_no_contrato
+  BEFORE INSERT OR UPDATE ON fornecedor_desligamento
+  FOR EACH ROW EXECUTE FUNCTION janela_cabe_no_contrato();
 
 CREATE TABLE compartilhamento (
   id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -682,11 +768,25 @@ CREATE TRIGGER campo_exige_lia_vigente
 CREATE OR REPLACE FUNCTION exige_dpa_vigente() RETURNS TRIGGER AS $$
 DECLARE f RECORD;
 BEGIN
-  SELECT nome, dpa_assinado, dpa_expira_em, dpa_uri INTO f
+  SELECT nome, dpa_assinado, dpa_expira_em, dpa_uri, estado INTO f
     FROM fornecedor WHERE id = NEW.fornecedor_id;
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Transferência para fornecedor inexistente (%).', NEW.fornecedor_id;
+  END IF;
+
+  /*
+   * O estado vem **antes** do DPA, e a ordem é a ordem das perguntas.
+   *
+   * Um parceiro em desligamento pode ter contrato válido até o fim da janela.
+   * Checar o DPA primeiro deixaria a transferência passar por um contrato que
+   * segue vigente para uma relação que já foi encerrada — e a recusa, quando
+   * viesse, falaria de prazo em vez de falar do desligamento.
+   */
+  IF f.estado <> 'ativo' THEN
+    RAISE EXCEPTION 'Transferência para %: o parceiro está em "%" (Art. 39). '
+      'A relação foi encerrada; o histórico continua legível, mas nada novo entra.',
+      f.nome, f.estado;
   END IF;
 
   -- Sem assinatura não há contrato, e prazo futuro não conserta isso.

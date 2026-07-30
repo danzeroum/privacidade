@@ -94,6 +94,85 @@ SELECT assert_falha($$
 $$, 'legítimo interesse com LIA em revisão por disparidade');
 
 -- ---------------------------------------------------------------------
+-- Risco-008 (resíduo) — desligamento de parceiro com SLA
+-- ---------------------------------------------------------------------
+
+-- O parceiro em desligamento recusa transferência NOVA no ato, e a recusa fala
+-- do desligamento — não do prazo do contrato, que pode seguir válido.
+UPDATE fornecedor SET estado = 'desligando' WHERE slug = 'serasa';
+
+SELECT assert_falha($$
+  INSERT INTO compartilhamento (campo_id, fornecedor_id, finalidade, transferencia_internacional, mecanismo)
+  SELECT c.id, f.id, 'Consulta de score', false, 'nao_aplicavel'
+    FROM campo c, fornecedor f
+   WHERE c.nome = 'score_serasa' AND f.slug = 'serasa'
+$$, 'transferência para parceiro em desligamento');
+
+-- E o histórico continua legível: o encerramento não apaga o que houve, que é
+-- justamente o período que uma auditoria examina.
+SELECT assert_igual(
+  (SELECT count(*) > 0 FROM compartilhamento c JOIN fornecedor f ON f.id = c.fornecedor_id WHERE f.slug = 'serasa'),
+  true,
+  'compartilhamento antigo de parceiro em desligamento segue legível');
+
+UPDATE fornecedor SET estado = 'desligado' WHERE slug = 'serasa';
+SELECT assert_falha($$
+  INSERT INTO compartilhamento (campo_id, fornecedor_id, finalidade, transferencia_internacional, mecanismo)
+  SELECT c.id, f.id, 'Consulta de score', false, 'nao_aplicavel'
+    FROM campo c, fornecedor f
+   WHERE c.nome = 'score_serasa' AND f.slug = 'serasa'
+$$, 'transferência para parceiro desligado');
+
+UPDATE fornecedor SET estado = 'ativo' WHERE slug = 'serasa';
+
+-- Estado fora do vocabulário fechado.
+SELECT assert_falha($$
+  UPDATE fornecedor SET estado = 'suspenso' WHERE slug = 'serasa'
+$$, 'estado de fornecedor fora do CHECK');
+
+-- A janela prometida não ultrapassa o que o contrato promete no encerramento.
+UPDATE fornecedor SET dpa_encerramento_dias = 30 WHERE slug = 'serasa';
+
+SELECT assert_falha($$
+  INSERT INTO fornecedor_desligamento (fornecedor_id, motivo, decidido_por, janela_dias)
+  SELECT f.id, 'Encerramento contratual por decisão do comitê de privacidade.', a.id, 45
+    FROM fornecedor f, ator a WHERE f.slug = 'serasa' AND a.papel = 'dpo' LIMIT 1
+$$, 'janela de desligamento maior que o prazo do DPA');
+
+-- Motivo curto não sustenta o encerramento em auditoria.
+SELECT assert_falha($$
+  INSERT INTO fornecedor_desligamento (fornecedor_id, motivo, decidido_por, janela_dias)
+  SELECT f.id, 'saiu', a.id, 10
+    FROM fornecedor f, ator a WHERE f.slug = 'serasa' AND a.papel = 'dpo' LIMIT 1
+$$, 'desligamento sem motivo escrito');
+
+-- Janela válida entra, e `janela_ate` é derivada — não digitada.
+INSERT INTO fornecedor_desligamento (fornecedor_id, motivo, decidido_por, janela_dias)
+SELECT f.id, 'Encerramento contratual por decisão do comitê de privacidade.', a.id, 30
+  FROM fornecedor f, ator a WHERE f.slug = 'serasa' AND a.papel = 'dpo' LIMIT 1;
+
+SELECT assert_igual(
+  (SELECT janela_ate FROM fornecedor_desligamento d JOIN fornecedor f ON f.id = d.fornecedor_id
+    WHERE f.slug = 'serasa'),
+  ((SELECT (decidido_em AT TIME ZONE 'UTC')::date FROM fornecedor_desligamento d
+      JOIN fornecedor f ON f.id = d.fornecedor_id WHERE f.slug = 'serasa') + 30),
+  'janela_ate é derivada da decisão mais a janela');
+
+-- Dois desligamentos abertos seriam duas janelas concorrentes, e nenhuma
+-- varredura saberia qual prazo cobrar.
+SELECT assert_falha($$
+  INSERT INTO fornecedor_desligamento (fornecedor_id, motivo, decidido_por, janela_dias)
+  SELECT f.id, 'Segundo encerramento, aberto por engano em outra tela.', a.id, 5
+    FROM fornecedor f, ator a WHERE f.slug = 'serasa' AND a.papel = 'dpo' LIMIT 1
+$$, 'segundo desligamento aberto para o mesmo parceiro');
+
+-- Prova pela metade não é prova: quem destruiu, quando e o hash andam juntos.
+SELECT assert_falha($$
+  UPDATE fornecedor_desligamento SET chave_destruida_em = now()
+   WHERE fornecedor_id = (SELECT id FROM fornecedor WHERE slug = 'serasa')
+$$, 'destruição registrada sem quem destruiu e sem hash');
+
+-- ---------------------------------------------------------------------
 -- Art. 12 — hash de CPF não é anonimização
 -- ---------------------------------------------------------------------
 SELECT assert_falha($$

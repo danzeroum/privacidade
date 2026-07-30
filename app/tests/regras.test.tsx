@@ -2088,12 +2088,22 @@ describe('T1-03 · unidade — a bolha é botão inteiro', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// PR 7 — Máquinas de estado dos oito artefatos
+// PR 7 — Máquinas de estado dos nove artefatos
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe('PR 7 · a tabela é a única autoridade sobre sequência', () => {
+  /**
+   * Lista **local**, que sombreia a importada de propósito: é a transcrição
+   * fechada contra a qual o runtime é conferido, e é ela que prova "nenhuma
+   * máquina a mais". Se usasse a lista do código, o teste compararia o código
+   * com ele mesmo.
+   *
+   * `fornecedor` entra no PR 31 (Risco-008): desligar parceiro passa pela mesma
+   * tabela dos outros oito, e máquina própria seria o atalho que este bloco
+   * existe para não deixar acontecer.
+   */
   const ARTEFATOS: Artefato[] = [
-    'parecer', 'ripd', 'lia', 'risco', 'solicitacao', 'achado', 'incidente', 'chave',
+    'parecer', 'ripd', 'lia', 'risco', 'solicitacao', 'achado', 'incidente', 'chave', 'fornecedor',
   ];
 
   it('cada artefato do MAPA tem máquina declarada, e nenhuma a mais', () => {
@@ -2139,6 +2149,9 @@ describe('PR 7 · a tabela é a única autoridade sobre sequência', () => {
       achado: ['aberto', 'causa_raiz', 'plano', 'executado', 'verificado', 'encerrado', 'reaberto'],
       incidente: ['aberto', 'contido', 'decidido', 'comunicado', 'nao_comunicado', 'encerrado'],
       chave: ['nova', 'recriptografando', 'canary', 'ativa', 'revogada'],
+      // O nono artefato (PR 31, Risco-008). Desligar parceiro passa pela mesma
+      // tabela dos outros oito: máquina própria seria o atalho que o PR 7 fechou.
+      fornecedor: ['ativo', 'desligando', 'desligado'],
     };
     for (const artefato of ARTEFATOS) {
       expect((estadosDe(artefato) as string[]).sort(), artefato).toEqual([...doMapa[artefato]].sort());
@@ -4321,12 +4334,18 @@ describe('PR 14 · verificação — o documento corresponde ao código?', () =>
     const comSete = ARTEFATOS.filter((a) => estadosDe(a).length === 7);
     expect(comSete.sort()).toEqual(['achado', 'ripd']);
     expect(ARTEFATOS.filter((a) => estadosDe(a).length > 7)).toEqual([]);
-    expect(secao.replace(/\s+/g, ' ')).toContain('seis das oito máquinas cabiam nele');
-    expect(ARTEFATOS.filter((a) => estadosDe(a).length <= 6), 'cabiam no limite antigo').toHaveLength(6);
+    /**
+     * "Seis das nove" desde o PR 31: `fornecedor` entrou como nono artefato, com
+     * três estados. A frase do documento é sobre quantas máquinas **cabiam** no
+     * limite revogado, e o denominador é o número de máquinas de hoje — deixá-lo
+     * em oito faria o texto descrever um repositório que não existe mais.
+     */
+    expect(secao.replace(/\s+/g, ' ')).toContain('seis das nove máquinas cabiam nele');
+    expect(ARTEFATOS.filter((a) => estadosDe(a).length <= 6), 'cabiam no limite antigo').toHaveLength(7);
     // Quatro, e não cinco: a LIA ganhou `em_revisao` no PR 7 e passou de cinco
     // para seis estados. Continua cabendo no limite antigo — a afirmação do
     // documento, "seis das oito máquinas cabiam nele", segue verdadeira.
-    expect(ARTEFATOS.filter((a) => estadosDe(a).length <= 5), 'cinco estados ou menos').toHaveLength(4);
+    expect(ARTEFATOS.filter((a) => estadosDe(a).length <= 5), 'cinco estados ou menos').toHaveLength(5);
   });
 
   it('o MAPA declara o próprio estatuto e traz a subseção que faltava', () => {
@@ -6332,6 +6351,9 @@ describe('PR 20 · sistema — a cascata pendente é vigiada, não só exibida',
 describe('PR 21 · unidade — a vigência do DPA, na fronteira de um dia', () => {
   const f = (extra: Partial<Fornecedor> = {}): Fornecedor => ({
     id: 'f1', slug: 'sendgrid', nome: 'SendGrid', papel: 'operador', pais: 'EUA',
+    // `estado` é obrigatório no tipo desde o PR 31: parceiro sem estado
+    // declarado não existe, e a fixture é forçada a decidir como a semente.
+    estado: 'ativo',
     dpaAssinado: true, dpaExpiraEm: '2026-09-30', ...extra,
   });
 
@@ -6463,7 +6485,7 @@ describe('PR 21 · integração — a varredura pega o que o trigger não alcan�
 
   it('parceiro cadastrado e sem uso não é achado — é cadastro', () => {
     varejo.cenario.fornecedores.push({
-      id: 'fo-novo', slug: 'novo', nome: 'Parceiro Novo', papel: 'operador', dpaAssinado: false,
+      id: 'fo-novo', slug: 'novo', nome: 'Parceiro Novo', papel: 'operador', estado: 'ativo', dpaAssinado: false,
     });
     const abertos = varrerDpas(varejo, HOJE());
     expect(abertos.map((a) => a.codigo)).not.toContain('DPA-NOVO');
