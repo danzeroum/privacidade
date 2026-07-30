@@ -129,6 +129,26 @@ const obr = (
   };
 };
 
+/**
+ * A reavaliação da AIA — só no cenário de crédito (Risco-007).
+ *
+ * Vive fora de `agendaPadrao()` porque a agenda é compartilhada pelos três
+ * cenários, e nem varejo nem mídia têm AIA. Uma obrigação genérica nos três
+ * prometeria três documentos e entregaria um; e a fila do DPO passaria a exibir
+ * trabalho sobre um artefato inexistente, que é o oposto do que a T0 existe para
+ * fazer.
+ *
+ * Novembro, e não um mês qualquer: a data tem de ser **futura**, porque `obr()`
+ * marca `cumpridaEm` sozinho no que já passou. Reavaliação que nasce cumprida é o
+ * artefato decorativo que a própria AIA existe para não ser.
+ */
+const obrigacaoDaAia = (): Obrigacao => obr(
+  23, 10, 16, 'vencimento', 'prazo', 'Reavaliar AIA',
+  'Reavaliação da AIA do credit-scoring (Art. 20)', 30, 6, 'dpo', '/t3',
+  'Medição de disparidade refeita e fatores reconferidos 30 dias antes',
+  'a D3 segue exigindo análise algorítmica sobre um documento vencido, e o balanceamento da LIA passa a citar medição velha',
+);
+
 const agendaPadrao = (): Obrigacao[] => [
   obr(1, 0, 20, 'ciclo', 'compromisso', 'Indicadores Q4', 'Revisão trimestral de indicadores (Q4 anterior)', 5, 5, 'dpo', '/t1',
     'Material do comitê fechado 5 dias antes', 'o comitê decide sem número novo — a decisão vira opinião'),
@@ -538,7 +558,7 @@ const banco: Cenario = {
     { slug: 'analytics', nome: 'Pipeline analítico', repositorio: 'danzeroum/analytics', timeDono: '@squad-dados', temInventario: false },
   ],
   campos: camposBanco,
-  obrigacoes: agendaPadrao(),
+  obrigacoes: [...agendaPadrao(), obrigacaoDaAia()],
   epicos: epicosPadrao('danzeroum/credit-scoring', 1234),
   pareceres: pareceresPadrao(),
   achados: achadosPadrao(),
