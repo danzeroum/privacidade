@@ -61,6 +61,10 @@ import { linhaDaMedida, medirFimDeLinha } from '../src/lib/fim-de-linha';
 import {
   MINIMO_DO_MOTIVO, avaliarMatriz, jobsDe, nomeDeCheck, relatorioDaMatriz,
 } from '../src/lib/matriz-ci';
+import {
+  avaliarLeiaMe, numeroDeclarado, pisoHonesto, relatorioDoLeiaMe, telasDeApp, telasDeLeiaMe,
+  workflowsDeLeiaMe,
+} from '../src/lib/leia-me';
 import { execSync, spawnSync } from 'node:child_process';
 import {
   EH_DEMONSTRACAO, SELO_DE_DEMONSTRACAO, SELO_DO_SELETOR_DE_PAPEL, perfilDe,
@@ -10385,6 +10389,217 @@ describe('PR 32 · a matriz Windows, e o que ela cobra', () => {
       const etapa = ci.slice(ci.indexOf('Fim de linha, medido neste runner'));
       expect(etapa).toContain('npm run --silent fim-de-linha');
       expect(etapa.slice(0, etapa.indexOf('- name: Verificação'))).not.toContain('if:');
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 33 · Risco-033 — o README deixa de negar o próprio repositório
+//
+// Ele dizia "Não há CI neste repositório" e "26 testes" em cinco linhas. As duas
+// já eram falsas no corte da auditoria, e esta série as tornou mais falsas a cada
+// PR: a suíte passou de 26 para mais de 700, e três checks viraram *required*.
+//
+// A correção não é reescrever os números — seria verdade por um PR. É trocar
+// número redigitado por número mantido, no mesmo padrão declarado×derivado que a
+// suíte já aplica no MAPA, no §7.1, no piso da equidade e no cabeçalho da AIA.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('PR 33 · Risco-033 — o README conferido contra o repositório que descreve', () => {
+  const LEIAME = readFileSync(join('..', 'README.md'), 'utf8');
+  const LEIAME_APP = readFileSync('README.md', 'utf8');
+  const APP_TSX = readFileSync(join('src', 'App.tsx'), 'utf8');
+
+  /**
+   * Os dois arquivos que o Risco-033 nomeia, e só eles.
+   *
+   * `docs/01-arquitetura.md` e `docs/02-wireframes.md` também dizem "T1..T8" e
+   * "as 8 telas", e ficam **de fora de propósito**: são o desenho original, e
+   * descrevem com exatidão o que foi projetado naquele momento. Um documento de
+   * arquitetura que narra o desenho de então não nega o repositório — reescrevê-lo
+   * apagaria o registro de o que mudou, que é a mesma razão pela qual o §7.1 não
+   * reescreve ficha nenhuma.
+   *
+   * A lista é conferida abaixo justamente para que ninguém a amplie em silêncio:
+   * acrescentar `README.md` às exceções seria desligar a catraca por dentro.
+   */
+  const ARQUIVOS_COBERTOS = ['README.md', 'app/README.md'];
+
+  const WORKFLOWS = readdirSync(join('..', '.github', 'workflows')).sort().map((arquivo) => {
+    const yml = readFileSync(join('..', '.github', 'workflows', arquivo), 'utf8');
+    return { arquivo, jobs: jobsDe(yml).map((j) => j.nome!).filter(Boolean) };
+  });
+
+  // Contagens derivadas de arquivo versionado — nenhuma redigitada aqui.
+  const SCHEMA = readFileSync(join('..', 'db', 'schema.sql'), 'utf8');
+  const TESTS_SQL = readFileSync(join('..', 'db', 'tests.sql'), 'utf8');
+  const CONTAGENS = [
+    { rotulo: 'tabelas', real: (SCHEMA.match(/^CREATE TABLE/gm) ?? []).length },
+    { rotulo: 'visoes', real: (SCHEMA.match(/^CREATE (?:OR REPLACE )?VIEW/gm) ?? []).length },
+    {
+      rotulo: 'invariantes',
+      // As chamadas, menos as duas definições das próprias funções de asserção:
+      // contar a definição inflaria o número em dois e ninguém perceberia.
+      real: (TESTS_SQL.match(/\bassert_(?:falha|igual)\(/g) ?? []).length
+        - (TESTS_SQL.match(/FUNCTION assert_(?:falha|igual)\(/g) ?? []).length,
+    },
+    { rotulo: 'operacoes', real: OPERACOES.length },
+    // O único que vem de execução, e por isso o único com piso em vez de exato.
+    { rotulo: 'testes', real: (readFileSync(join('tests', 'regras.test.tsx'), 'utf8').match(/^\s+it(?:\.skip)?\(/gm) ?? []).length },
+  ];
+
+  describe('verificação — o README confere com o repositório?', () => {
+    it('nenhum achado: telas, workflows, números e as cinco frases do risco', () => {
+      const achados = avaliarLeiaMe({
+        readme: LEIAME,
+        outrosTextos: [{ arquivo: 'app/README.md', texto: LEIAME_APP }],
+        telas: telasDeApp(APP_TSX),
+        workflows: WORKFLOWS,
+        contagens: CONTAGENS,
+      });
+      expect(achados, relatorioDoLeiaMe(achados)).toEqual([]);
+    });
+
+    it('não-vacuidade: as fontes têm conteúdo, e o README transcreve os dois conjuntos', () => {
+      /**
+       * Um `App.tsx` que o leitor não conseguisse fatiar devolveria zero telas, e
+       * a comparação de conjuntos acima passaria por comparar dois vazios — que é
+       * a forma exata do Risco-003.
+       */
+      expect(telasDeApp(APP_TSX).length).toBeGreaterThan(10);
+      expect(telasDeLeiaMe(LEIAME).length).toBe(telasDeApp(APP_TSX).length);
+      expect(WORKFLOWS.length).toBeGreaterThan(4);
+      expect(workflowsDeLeiaMe(LEIAME).length).toBe(WORKFLOWS.length);
+      for (const c of CONTAGENS) expect(c.real, `contagem "${c.rotulo}" zerada`).toBeGreaterThan(0);
+    });
+
+    it('os arquivos cobertos são lista fechada — ampliar a exceção é desligar a catraca', () => {
+      expect(ARQUIVOS_COBERTOS).toEqual(['README.md', 'app/README.md']);
+    });
+  });
+
+  describe('validação — ele descreve o que o projeto é hoje?', () => {
+    it('a afirmação sobre CI vem dos workflows reais, e nomeia o que não é marcável', () => {
+      // A frase antiga negava o CI. A nova não pode ser só o contrário dela: um
+      // README que dissesse "há CI" e parasse aí esconderia que um dos jobs não
+      // deve ser marcado — e a marcação é a diferença entre informar e barrar.
+      expect(LEIAME).toContain('Checks de CI');
+      expect(LEIAME).toContain('required status check');
+      expect(LEIAME).toContain('`Varreduras de prazo` não deve ser marcado');
+    });
+
+    it('a tabela de verificação manual se declara instantâneo, e não garantia vigente', () => {
+      /**
+       * Ela existia porque não havia CI: alguém rodava à mão e anotava. Mantê-la
+       * sem dizer isso faria um instantâneo antigo parecer estado atual — que é o
+       * Risco-033 com outra roupa.
+       */
+      const secao = LEIAME.slice(LEIAME.indexOf('Instantâneo de uma verificação'));
+      expect(secao.slice(0, 400)).toContain('manual');
+      expect(secao.slice(0, 600)).toContain('Checks de CI');
+    });
+
+    it('o piso da suíte é honesto e não está defasado por uma ordem de grandeza', () => {
+      const d = numeroDeclarado(LEIAME, 'testes')!;
+      expect(d.piso, 'a contagem da suíte tem de ser piso, não exata').toBe(true);
+      const real = CONTAGENS.find((c) => c.rotulo === 'testes')!.real;
+      expect(pisoHonesto(d.valor, real)).toBe(true);
+    });
+  });
+
+  describe('injeção — a catraca reprova o que promete reprovar', () => {
+    const base = {
+      readme: LEIAME,
+      outrosTextos: [{ arquivo: 'app/README.md', texto: LEIAME_APP }],
+      telas: telasDeApp(APP_TSX),
+      workflows: WORKFLOWS,
+      contagens: CONTAGENS,
+    };
+
+    it('reintroduzir "Não há CI neste repositório" reprova, nomeando o arquivo', () => {
+      const achados = avaliarLeiaMe({
+        ...base,
+        readme: `${LEIAME}\n\n- **Não há CI neste repositório.**\n`,
+      });
+      expect(achados.map((a) => a.regra)).toContain('frase-do-risco-033');
+      expect(relatorioDoLeiaMe(achados)).toContain('README.md: "Não há CI neste repositório"');
+    });
+
+    it('a frase proibida reprova também no README do app', () => {
+      // O risco fala de "READMEs", plural. Cobrir só o da raiz deixaria a mesma
+      // afirmação viva a um diretório de distância.
+      const achados = avaliarLeiaMe({
+        ...base,
+        outrosTextos: [{ arquivo: 'app/README.md', texto: `${LEIAME_APP}\nas 8 telas do console\n` }],
+      });
+      expect(relatorioDoLeiaMe(achados)).toContain('app/README.md: "8 telas"');
+    });
+
+    it('workflow novo sem linha no README reprova, nomeando o job ausente', () => {
+      const achados = avaliarLeiaMe({
+        ...base,
+        workflows: [...WORKFLOWS, { arquivo: 'novo.yml', jobs: ['Coisa nova'] }],
+      });
+      expect(achados.map((a) => a.regra)).toContain('workflows');
+      expect(relatorioDoLeiaMe(achados)).toContain('ausente(s) do README: novo.yml · Coisa nova');
+    });
+
+    it('linha no README sem workflow correspondente reprova no sentido inverso', () => {
+      const achados = avaliarLeiaMe({ ...base, workflows: WORKFLOWS.slice(1) });
+      expect(relatorioDoLeiaMe(achados)).toContain('no README e não no repositório');
+    });
+
+    it('tela nova sem linha no README reprova', () => {
+      const achados = avaliarLeiaMe({
+        ...base,
+        telas: [...telasDeApp(APP_TSX), { id: 'T12', nome: 'Tela nova' }],
+      });
+      expect(relatorioDoLeiaMe(achados)).toContain('ausente(s) do README: T12 · Tela nova');
+    });
+
+    it('tela renomeada no app e não no README reprova — nome é transcrição, não paráfrase', () => {
+      const telas = telasDeApp(APP_TSX).map((t) => (t.id === 'T9' ? { ...t, nome: 'Incidentes e ANPD' } : t));
+      const achados = avaliarLeiaMe({ ...base, telas });
+      expect(relatorioDoLeiaMe(achados)).toContain('T9 · Incidentes e ANPD');
+    });
+
+    it('"26 testes" reprova: passa no piso e falha no teto', () => {
+      /**
+       * O número exato do defeito. `26` é um piso verdadeiro — a suíte tem mais
+       * de 26 — e é justamente por isso que só o piso não bastaria: a catraca
+       * precisa das duas metades para pegar um README defasado por um fator de
+       * vinte e sete.
+       */
+      const real = CONTAGENS.find((c) => c.rotulo === 'testes')!.real;
+      expect(real >= 26, 'o piso 26 é verdadeiro — e é o que torna o teto necessário').toBe(true);
+      expect(pisoHonesto(26, real)).toBe(false);
+
+      const achados = avaliarLeiaMe({
+        ...base,
+        readme: LEIAME.replace(/<!-- n:testes -->\*\*[\d.]+\+\*\*/, '<!-- n:testes -->**26+**'),
+      });
+      expect(achados.map((a) => a.regra)).toContain('piso-desonesto');
+    });
+
+    it('piso dentro da faixa passa — o README não muda a cada PR', () => {
+      const real = CONTAGENS.find((c) => c.rotulo === 'testes')!.real;
+      expect(pisoHonesto(real, real)).toBe(true);
+      expect(pisoHonesto(real - 1, real)).toBe(true);
+      // E um piso maior que o real é mentira, mesmo estando perto.
+      expect(pisoHonesto(real + 1, real)).toBe(false);
+    });
+
+    it('contagem exata divergente reprova, dizendo declarado e real', () => {
+      const achados = avaliarLeiaMe({
+        ...base,
+        contagens: CONTAGENS.map((c) => (c.rotulo === 'tabelas' ? { ...c, real: c.real + 1 } : c)),
+      });
+      expect(achados.map((a) => a.regra)).toContain('numero-divergente');
+      expect(relatorioDoLeiaMe(achados)).toMatch(/tabelas: declarado \d+, real \d+/);
+    });
+
+    it('número sem marca reprova — apagar a marca não é o mesmo que não ter número', () => {
+      const achados = avaliarLeiaMe({ ...base, readme: LEIAME.replace('<!-- n:visoes -->', '') });
+      expect(achados.map((a) => a.regra)).toContain('numero-sem-marca');
     });
   });
 });

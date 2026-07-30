@@ -20,9 +20,9 @@ decoração.
 
 | Camada | Onde | Como recusa | Prova |
 |---|---|---|---|
-| **Banco** | [`db/schema.sql`](db/schema.sql) | `CHECK`, índice único parcial, trigger, RLS | **23 invariantes** em [`db/tests.sql`](db/tests.sql) |
-| **API** | [`app/src/mock/api.ts`](app/src/mock/api.ts) | 403 · 404 · 409 · 422 · 503, com a regra citada | **26 testes** em [`app/tests/regras.test.tsx`](app/tests/regras.test.tsx) |
-| **Interface** | [`app/src/ui/primitivos.tsx`](app/src/ui/primitivos.tsx) | o controle **não é renderizado** | asserção de DOM nos mesmos 26 testes |
+| **Banco** | [`db/schema.sql`](db/schema.sql) | `CHECK`, índice único parcial, trigger, RLS | <!-- n:invariantes -->**82** invariantes em [`db/tests.sql`](db/tests.sql) |
+| **API** | [`app/src/mock/api.ts`](app/src/mock/api.ts) | 403 · 404 · 409 · 422 · 503, com a regra citada | <!-- n:testes -->**700+** testes em [`app/tests/regras.test.tsx`](app/tests/regras.test.tsx) |
+| **Interface** | [`app/src/ui/primitivos.tsx`](app/src/ui/primitivos.tsx) | o controle **não é renderizado** | asserção de DOM na mesma suíte |
 
 Exemplo concreto — legítimo interesse sobre dado sensível (Art. 11):
 o banco recusa com `campo_sensivel_base_legal`, a API devolve `422` citando o artigo, e a tela mostra
@@ -35,7 +35,7 @@ erro inline antes de deixar submeter. Derrubar qualquer uma das três não abre 
 | # | Entregável | Onde |
 |---|---|---|
 | 1 | **Arquitetura** — integração dos 12 artefatos via API, ABAC por finalidade, ADRs | [`docs/01-arquitetura.md`](docs/01-arquitetura.md) |
-| 2 | **Wireframes das 8 telas** — spec anotada e sistema visual | [`docs/02-wireframes.md`](docs/02-wireframes.md) |
+| 2 | **Wireframes** — spec anotada das telas originais e sistema visual | [`docs/02-wireframes.md`](docs/02-wireframes.md) |
 | 3 | **Fluxo ponta a ponta** — do PR bloqueado ao expurgo e à métrica | [`docs/03-fluxo-e2e.md`](docs/03-fluxo-e2e.md) |
 | 4 | **Schema PostgreSQL** — 39 tabelas, RLS, audit trail com hash encadeado | [`db/schema.sql`](db/schema.sql) |
 | 5 | **Protótipo navegável** — React + TS, rota real, store, API mock, 3 cenários | [`app/`](app/) · roteiro em [`app/README.md`](app/README.md) |
@@ -56,7 +56,7 @@ telas, em arquivo único que abre sem instalar nada; o navegável é onde as reg
 cd app
 npm install
 npm run dev      # http://localhost:5173
-npm test         # 26 testes de comportamento
+npm test         # a suíte inteira de comportamento
 npm run build    # bundle estático em dist/
 ```
 
@@ -99,18 +99,29 @@ xdg-open prototipo/index.html    # arquivo único, sem dependências
 
 ---
 
-## As 8 telas
+## As telas
 
-| | Tela | Artefatos que opera |
-|---|---|---|
-| **T1** | Painel de governança | `metrics-collector.py`, `privacy-ci-gate.yml`, `architecture-review.yml`, `risk-matrix.csv` |
-| **T2** | Catálogo de dados (ROPA vivo) | `data-inventory.*.yaml`, linhagem |
-| **T3** | RIPD e LINDDUN | `ripd-triage.sh`, `threat-model.md`, `parecer-tecnico.md` |
-| **T4** | Direitos do titular | `pseudonymizer.ts`, `privacy-redactor.ts`, Art. 18 e 20 |
-| **T5** | Riscos e RACI | `risk-matrix.csv` |
-| **T6** | Expurgo e auditoria | `expurgo-permanente.py`, audit trail encadeado |
-| **T7** | Chaves e criptografia | `kms-rotation.yml` |
-| **T8** | Editor de LIA | `LIA.md`, Art. 7º, IX |
+Transcritas de `TELAS` em [`app/src/App.tsx`](app/src/App.tsx), que é o mesmo array que monta o
+trilho de navegação — uma tela fora dele não é alcançável, e por isso o trilho é a definição
+operante de "as telas do app". Um teste confere a tabela abaixo contra ele **nos dois sentidos**:
+tela nova sem linha aqui reprova, e linha aqui sem tela reprova.
+
+<!-- telas:inicio -->
+| | Tela | Rota | Grupo |
+|---|---|---|---|
+| **T0** | Minha fila | `/t0` | Trabalho |
+| **T10** | Calendário do ano | `/t10` | Trabalho |
+| **T1** | Painel de governança | `/t1` | Esteira de entrega |
+| **T2** | Catálogo de dados | `/t2` | Esteira de entrega |
+| **T3** | RIPD e LINDDUN | `/t3` | Esteira de entrega |
+| **T4** | Direitos do titular | `/t4` | Operação e prova |
+| **T5** | Riscos e RACI | `/t5` | Operação e prova |
+| **T6** | Expurgo e auditoria | `/t6` | Operação e prova |
+| **T7** | Chaves e criptografia | `/t7` | Operação e prova |
+| **T8** | Editor de LIA | `/t8` | Operação e prova |
+| **T9** | Incidentes | `/t9` | Operação e prova |
+| **T11** | Achados e planos | `/t11` | Operação e prova |
+<!-- telas:fim -->
 
 ### Cinco papéis, e o que cada um **não** recebe
 
@@ -170,20 +181,20 @@ Complementos que valem para toda a interface:
 .
 ├── docs/
 │   ├── 01-arquitetura.md      diagramas, integração dos 12 artefatos, ABAC, ADRs
-│   ├── 02-wireframes.md       spec anotada das 8 telas + sistema visual
+│   ├── 02-wireframes.md       spec anotada das telas originais + sistema visual
 │   └── 03-fluxo-e2e.md        cenário completo, do PR ao expurgo
 ├── db/
-│   ├── schema.sql             39 tabelas, RLS, hash-chain, papéis por finalidade
+│   ├── schema.sql             RLS, hash-chain, papéis por finalidade
 │   ├── seed.sql               massa de demonstração
-│   └── tests.sql              23 invariantes de privacidade
+│   └── tests.sql              invariantes de privacidade, executadas no CI
 ├── api/
-│   └── openapi.yaml           contrato 3.1 — 22 rotas
+│   └── openapi.yaml           contrato 3.1, lido por teste de paridade
 ├── app/                       protótipo navegável React + TypeScript
 │   ├── src/lib/sha256.ts      SHA-256 síncrono, sem dependências
 │   ├── src/mock/api.ts        as 9 regras, implementadas fora da interface
 │   ├── src/mock/scenarios.ts  três cenários: crédito, varejo, mídia
-│   ├── src/screens/           T1..T8 com rota real
-│   └── tests/regras.test.tsx  26 testes de comportamento
+│   ├── src/screens/           uma tela por rota — ver "As telas" acima
+│   └── tests/regras.test.tsx  a suíte de comportamento
 └── prototipo/
     └── index.html             protótipo estático, arquivo único, tema claro/escuro
 ```
@@ -192,17 +203,20 @@ Complementos que valem para toda a interface:
 
 ## Verificação
 
-O que foi efetivamente executado, não apenas escrito:
+Instantâneo de uma verificação **manual**, feita à mão numa data. O que hoje roda a cada PR está
+na seção **Checks de CI** — e é lá que a garantia mora: uma tabela conferida por alguém em algum
+momento não impede a regressão de amanhã. As linhas abaixo ficam porque exercitam coisas que
+nenhum check cobre (navegador real, fluxos ponta a ponta), e os números que envelhecem saíram.
 
 | Verificação | Resultado |
 |---|---|
-| `schema.sql` em PostgreSQL 16 limpo | aplica sem erro — 39 tabelas, 4 visões |
+| `schema.sql` em PostgreSQL 16 limpo | aplica sem erro — <!-- n:tabelas -->**48** tabelas, <!-- n:visoes -->**8** visões |
 | `seed.sql` | carrega sem erro |
-| `tests.sql` | 23 invariantes, todas passam |
+| `tests.sql` | todas as invariantes passam — hoje no check `Constraints e invariantes do banco` |
 | Adulteração no audit trail | detectada mesmo com os gatilhos desligados |
-| `openapi.yaml` | YAML válido, 22 rotas, nenhuma `$ref` quebrada |
-| `tsc -b` · `vitest run` · `vite build` | typecheck limpo, 26 testes, bundle de 322 kB |
-| App em Chromium, 8 rotas × 3 cenários | zero erro de console, zero overflow a 1440 px e 720 px |
+| `openapi.yaml` | YAML válido, <!-- n:operacoes -->**73** operações, nenhuma `$ref` quebrada |
+| `tsc -b` · `vitest run` · `vite build` | typecheck limpo, suíte verde — hoje no check `Tipos e testes` |
+| App em Chromium, todas as rotas × 3 cenários | zero erro de console, zero overflow a 1440 px e 720 px |
 | Protótipo estático em Chromium | zero erro de console, zero overflow |
 | Fluxo A | RIPD aprovado → status check verde, PR sai da lista de bloqueados |
 | Fluxo B | revelação registrada → valor volta a mascarar em 60 s |
@@ -214,6 +228,29 @@ append vira corrida — cadeia com corrida não prova nada.
 
 ---
 
+## Checks de CI
+
+Transcritos de [`.github/workflows/`](.github/workflows), e conferidos por teste nos dois sentidos:
+job novo sem linha aqui reprova, e linha aqui sem job reprova. Os jobs em matriz publicam um check
+por plataforma — o leg Ubuntu com o nome da tabela, e o leg Windows com ` (windows)` no fim.
+
+<!-- workflows:inicio -->
+| Arquivo | Jobs (nome do check) | Dispara em |
+|---|---|---|
+| `ci.yml` | `Tipos e testes` | PR, push |
+| `equidade.yml` | `Disparidade e proxies do modelo` | PR, push |
+| `privacy-ci-gate.yml` | `PII, catálogo e PbD` | PR, push |
+| `relogio.yml` | `Varreduras de prazo` | agendado, manual |
+| `schema.yml` | `Constraints e invariantes do banco` | PR, push |
+| `seguranca.yml` | `Segredos no diff e no histórico` · `Dependências vulneráveis` · `CodeQL` | PR, push, agendado |
+<!-- workflows:fim -->
+
+Três são *required status check* na proteção da `main`; os demais informam o vermelho sem impedir
+o merge. **`Varreduras de prazo` não deve ser marcado**, e o próprio workflow explica por quê: a
+pendência dele está no mundo (um DPA que vence), não no diff de quem abriu o PR — e uma `main`
+vermelha todo dia treina a equipe a ignorar vermelho.
+
+---
 ## Escopo e limites
 
 Isto é **arquitetura e protótipo**, não um sistema em produção.
@@ -226,8 +263,8 @@ Isto é **arquitetura e protótipo**, não um sistema em produção.
   reproduz suas restrições, não as consulta.
 - **O mermaid não usa o renderizador oficial**: a pré-visualização extrai os nós na ordem e desenha a
   cadeia, suficiente para conferir o fluxo antes do commit.
-- **Não há CI neste repositório.** Os números da tabela acima foram produzidos localmente; não são
-  status checks automáticos.
+- **O CI existe, e três checks são obrigatórios.** Ver a seção **Checks de CI** acima. O que ele
+  ainda não cobre: não há ambiente implantado, então nenhum check exercita o sistema em execução.
 
 Nenhum dado de titular real aparece em qualquer arquivo — os CPFs são números de teste e os nomes e
 pseudônimos são fictícios.
