@@ -1,0 +1,42 @@
+# Exceções ao limiar de vulnerabilidade de dependência (Risco-005, sub-item b).
+#
+# `npm run audit:politica` reprova o build quando há advisory **high ou critical**
+# sem exceção válida aqui. Abaixo do limiar não reprova: `moderate` com correção
+# disponível é trabalho de manutenção, e transformar manutenção em bloqueio produz
+# o vermelho crônico que ensina a equipe a ignorar vermelho.
+#
+# ## O que uma exceção exige, e por quê
+#
+#   advisory     o identificador que o próprio `npm audit` usa (`via[].source`).
+#                Excepcionar por nome de pacote cobriria advisories futuros que
+#                ninguém avaliou — a exceção é sobre **este** problema.
+#   pacote       conferido contra o relatório: exceção que aponta para outro
+#                pacote é exceção que ninguém consegue revisar.
+#   severidade   registrada no momento do aceite. Se a severidade subir depois,
+#                o aceite deixou de valer para o que ele descrevia.
+#   motivo       por que este risco é aceitável **aqui**. "Sem correção
+#                disponível" sozinho não é motivo: é a situação, não a análise.
+#   aceito_por   quem respondeu por isso. Risco aceito sem dono é risco
+#                esquecido, e é o que o próprio schema deste projeto recusa em
+#                `risco.dono_handle`.
+#   valida_ate   `AAAA-MM-DD`. **Vence hoje ainda vale** — a mesma fronteira do
+#                DPA: o aceite cobre o último dia, não a véspera dele.
+#
+# ## Três coisas reprovam
+#
+#   1. advisory no limiar ou acima, sem exceção;
+#   2. exceção vencida — o vermelho volta sozinho, e é esse o ponto: aceite tem
+#      prazo, e prazo que não expira é aceite permanente com outro nome;
+#   3. exceção para advisory que **não está** no relatório — declaração morta. É
+#      a mesma regra do inventário de PII: lista que ninguém confere apodrece, e
+#      apodrecida ela passa a autorizar o que já foi corrigido.
+#
+# ## Hoje
+#
+# A lista está vazia porque não há advisory no limiar. `npm audit` reporta dois
+# `moderate` em `react-router` e `react-router-dom`, ambos com correção
+# disponível — abaixo do limiar, e por isso sem exceção: excepcionar o que não
+# reprova seria ruído com aparência de governança.
+versao: 1
+limiar: high
+excecoes: []

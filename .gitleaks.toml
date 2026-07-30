@@ -1,0 +1,49 @@
+# Varredura de segredo no diff e no histórico (Risco-005, sub-item b).
+#
+# Complementa `npm run varredura:segredos`, que já existia e continua valendo. Os
+# dois olham coisas diferentes, e vale registrar qual é qual:
+#
+#   - o nosso conhece **este** repositório: recusa literal atribuído a nome de
+#     constante com SEGREDO/SECRET/TOKEN, e procura no artefato construído o
+#     segredo histórico `lastro-ics-demo`, que gitleaks nenhum conhece;
+#   - o gitleaks conhece **o mundo**: centenas de padrões de fornecedor — chave da
+#     AWS, PAT do GitHub, token do Slack, bloco de chave privada — e varre o
+#     histórico do git, não só a árvore de trabalho.
+#
+# ## Por que não há allowlist aqui
+#
+# A expectativa razoável era que a massa sintética declarada em
+# `.privacy/pii-sintetica.yaml` fosse acusada, e que a allowlist tivesse de ser
+# **derivada** do inventário para não virar uma segunda lista divergente.
+#
+# Medido antes de escrever: gitleaks casa **segredo**, não dado pessoal. Os onze
+# CPFs, os três telefones e os dois domínios de e-mail declarados passam sem
+# nenhuma exceção — plantei os três num arquivo novo e a varredura não encontrou
+# nada. Na árvore inteira e nos 49 commits do histórico: zero achados.
+#
+# Então a allowlist nasce **vazia**, e vazia ela fica. Gerar allowlist do
+# inventário produziria um script que emite zero linhas e um teste que não tem
+# como ser provado não-vacuoso — instrumento sem problema, que é o espelho exato
+# do defeito que este repositório passou uma série inteira fechando.
+#
+# O que ficou travado é a regra, não o gerador: um teste exige que **toda**
+# entrada de allowlist tenha origem no inventário sintético. Hoje ele passa com
+# zero entradas e reprova a primeira que alguém escrever à mão — provado por
+# injeção. No dia em que a primeira entrada for necessária de verdade, o gerador
+# nasce com a regra já no lugar, e não pode nascer divergente.
+#
+# ## O que esta varredura não faz
+#
+# Ela não apaga o passado. A PII sintética anterior ao `3fd6bf7` continua nos
+# commits antigos — gitleaks não a vê, porque não é segredo, e não a apagaria de
+# qualquer forma. Reescrever histórico é decisão de quem opera o repositório, e
+# está declarada como resíduo no Risco-003 e no Risco-004.
+
+title = "Lastro — varredura de segredo"
+
+[extend]
+# As regras padrão do gitleaks, sem subtração. Desligar regra é decisão que tem
+# de aparecer no diff com motivo escrito, e nenhuma foi desligada.
+useDefault = true
+
+# Sem `[[rules.allowlist]]` e sem `[allowlist]`, de propósito. Ver acima.
