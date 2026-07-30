@@ -148,8 +148,8 @@ Regra do checklist aplicada: **direito sem endpoint com prazo, autenticação e 
 ### 7.1 Tabela consolidada (40 riscos)
 
 > **Nenhum risco está mitigado nesta data.** — afirmação congelada no commit auditado (`8d0548a`), preservada
-> como registro. A coluna **Fechado por** é o adendo de 2026-07-30 e diz onde ela deixou de valer: 16 riscos
-> fechados, 0 parciais, 24 como descritos. Método e limites do adendo no §7.5.
+> como registro. A coluna **Fechado por** é o adendo de 2026-07-30 e diz onde ela deixou de valer: 17 riscos
+> fechados, 0 parciais, 23 como descritos. Método e limites do adendo no §7.5.
 
 Fichas completas com recomendação técnica no Relatório Técnico §4.
 
@@ -169,7 +169,7 @@ Fichas completas com recomendação técnica no Relatório Técnico §4.
 | Risco-012 | GET /titulares/{id} devolve a ficha do titular sem finalidade e sem gravar no trail | P1 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-012 |
 | Risco-013 | Pseudonimização prometida como HMAC com chave no KMS é SHA-256 com sal público constante no bundle | P1 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-013 |
 | Risco-014 | MFA/step-up prometidos em docs, schema e contrato sem nenhuma instrumentação | P1 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-014 |
-| Risco-015 | Fluxo de incidente (Art. 48) existe só no protótipo: sem tabela incidente no schema e sem rota no contrato | P1 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-015 |
+| Risco-015 | Fluxo de incidente (Art. 48) existe só no protótipo: sem tabela incidente no schema e sem rota no contrato | P1 | Divergência | **Fechado** | Fechado — `4c1b314`. Provas: `PR 35 · Risco-015 — a rota que grava diz onde persiste`; check `Constraints e invariantes do banco`. As duas metades da ficha: a rota entrou no contrato em `f86020e`, e a tabela entra aqui. **Três tabelas:** `incidente` (estado, mutável com motivo pelo critério do Risco-024), `incidente_evento` (fato, append-only — é o que prova que a comunicação saiu no prazo) e `incidente_campo`, que amarra o escopo ao catálogo: quem responde ao Art. 48 diz qual dado vazou, e a resposta sai do inventário. O prazo é coluna `GENERATED` derivada da detecção, com o intervalo declarado num lugar só. Os `CHECK` cobram o conteúdo de cada estado, não só a sequência — decidir exige fundamento com corpo, `nao_comunicado` só nasce da decisão de não comunicar, e conter exige dizer quem conteve. **Junto veio o mapa** `persistencia.ts`: as 49 operações de escrita do contrato declaram destino — tabela ou motivo —, e operação nova sem entrada reprova. **Resíduo declarado:** seis operações gravam sem tabela e deveriam ter uma; cada uma cita o risco que já a cobre (Risco-001 oposição, Risco-009 verificação do portal ×2, Risco-010 calendário, Risco-014 step-up ×2). São lacunas de outros riscos, agora contáveis em vez de invisíveis. | Recomendação definida no Relatório Técnico §4, Risco-015 |
 | Risco-016 | Art. 14 não modelado: perfil infantil sob consentimento sem registro vigente e sem responsável identificado | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-016 |
 | Risco-017 | Anti-enumeração e cotas incompletas: sem paginação/hard limit nas coleções, IDs sequenciais como oráculo e rate limit só na busca | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-017 |
 | Risco-018 | Cinco endpoints de ingestão de CI sem identidade de máquina, assinatura HMAC, idempotência ou proteção de replay | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-018 |
