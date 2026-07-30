@@ -712,6 +712,144 @@ SELECT assert_falha($$
   VALUES ('11111111-1111-4111-8111-111111111111','openai','OpenAI de novo','operador')
 $$, 'fornecedor duplicado no mesmo tenant');
 
+-- ---------------------------------------------------------------------
+-- Risco-024 — append-only onde a prova mora, e só onde ela mora
+--
+-- ── Não-vacuidade primeiro ─────────────────────────────────────────────────
+--
+-- `BEFORE UPDATE ... FOR EACH ROW` só dispara se houver linha. Um `UPDATE` numa
+-- tabela vazia **passa**, e um `assert_falha` sobre ele reprovaria por vacuidade
+-- em vez de por defeito. Três das oito não têm massa (`solicitacao_evento`,
+-- `achado_evidencia`, `ripd_aprovacao`), e por isso a seção começa semeando o que
+-- falta e conferindo que nenhuma das oito está vazia — a asserção que vem depois
+-- só vale sobre linha que existe.
+-- ---------------------------------------------------------------------
+
+INSERT INTO solicitacao_evento (solicitacao_id, tipo, detalhe)
+  SELECT id, 'recebida', 'semeado pela invariante do Risco-024' FROM solicitacao_titular LIMIT 1;
+
+INSERT INTO achado (tenant_id, codigo, descricao, origem, estado, criticidade)
+  SELECT id, 'R024-SEMENTE', 'achado semeado pela invariante do Risco-024', 'auditoria_externa',
+         'aberto', 'media'
+  FROM tenant LIMIT 1;
+
+INSERT INTO achado_evidencia (achado_id, arquivo, etapa, hash)
+  SELECT id, 'evidencia.md', 'aberto', 'sha256:semeado' FROM achado LIMIT 1;
+
+INSERT INTO ripd_aprovacao (ripd_id, aprovador_id, decisao, parecer, assinatura)
+  SELECT r.id, a.id, 'aprovado', 'parecer semeado pela invariante do Risco-024', 'sha256:semeado'
+  FROM ripd r, ator a LIMIT 1;
+
+DO $$
+DECLARE t TEXT; n BIGINT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['kms_acesso','solicitacao_evento','consentimento_revogacao',
+                           'achado_evidencia','lia_evidencia','ripd_aprovacao',
+                           'gate_finding','metric_snapshot'] LOOP
+    EXECUTE format('SELECT count(*) FROM gov.%I', t) INTO n;
+    IF n = 0 THEN
+      RAISE EXCEPTION 'FALHA: % está vazia — a invariante de append-only passaria por vacuidade.', t;
+    END IF;
+  END LOOP;
+  RAISE NOTICE 'OK   %  → todas com linha', rpad('não-vacuidade das oito append-only', 52);
+END $$;
+
+--
+-- As duas direções na mesma seção, de propósito. Só a metade que barra provaria
+-- que o banco recusa; ela não provaria que a recusa é **seletiva** — e uma
+-- barreira que barrasse tudo travaria o executor de expurgo e a cascata de
+-- revogação sem acrescentar garantia nenhuma.
+-- ---------------------------------------------------------------------
+
+-- log de acesso à chave
+SELECT assert_falha($$
+  UPDATE kms_acesso SET autorizado = true
+$$, 'UPDATE em kms_acesso');
+SELECT assert_falha($$
+  DELETE FROM kms_acesso
+$$, 'DELETE em kms_acesso');
+
+-- evento da solicitação do titular
+SELECT assert_falha($$
+  UPDATE solicitacao_evento SET ocorrido_em = now()
+$$, 'UPDATE em solicitacao_evento');
+SELECT assert_falha($$
+  DELETE FROM solicitacao_evento
+$$, 'DELETE em solicitacao_evento');
+
+-- marco da revogação (move retencao_ate)
+SELECT assert_falha($$
+  UPDATE consentimento_revogacao SET revogado_em = now()
+$$, 'UPDATE em consentimento_revogacao');
+SELECT assert_falha($$
+  DELETE FROM consentimento_revogacao
+$$, 'DELETE em consentimento_revogacao');
+
+-- elo da cadeia de evidência do achado
+SELECT assert_falha($$
+  UPDATE achado_evidencia SET hash = 'outro'
+$$, 'UPDATE em achado_evidencia');
+SELECT assert_falha($$
+  DELETE FROM achado_evidencia
+$$, 'DELETE em achado_evidencia');
+
+-- hash da evidência da LIA
+SELECT assert_falha($$
+  UPDATE lia_evidencia SET objeto_hash = 'outro'
+$$, 'UPDATE em lia_evidencia');
+SELECT assert_falha($$
+  DELETE FROM lia_evidencia
+$$, 'DELETE em lia_evidencia');
+
+-- parecer assinado do RIPD
+SELECT assert_falha($$
+  UPDATE ripd_aprovacao SET parecer = 'outro'
+$$, 'UPDATE em ripd_aprovacao');
+SELECT assert_falha($$
+  DELETE FROM ripd_aprovacao
+$$, 'DELETE em ripd_aprovacao');
+
+-- achado do gate de privacidade
+SELECT assert_falha($$
+  UPDATE gate_finding SET severidade = 'baixa'
+$$, 'UPDATE em gate_finding');
+SELECT assert_falha($$
+  DELETE FROM gate_finding
+$$, 'DELETE em gate_finding');
+
+-- instantâneo de métrica
+SELECT assert_falha($$
+  UPDATE metric_snapshot SET valor = 100
+$$, 'UPDATE em metric_snapshot');
+SELECT assert_falha($$
+  DELETE FROM metric_snapshot
+$$, 'DELETE em metric_snapshot');
+
+-- ── E o outro sentido: estado operacional continua mutável ──────────────────
+--
+-- Sem isto a seção acima seria compatível com um `bloqueia_mutacao` aplicado a
+-- todas as 48 tabelas — o que passaria em oito asserções e quebraria o produto.
+
+-- O executor de expurgo carimba o fim da execução. Se isto falhar, nenhum
+-- expurgo consegue se declarar concluído.
+DO $$
+DECLARE v_id UUID;
+BEGIN
+  SELECT id INTO v_id FROM expurgo_run LIMIT 1;
+  UPDATE expurgo_run SET status = 'concluido', concluido_em = now() WHERE id = v_id;
+  RAISE NOTICE 'OK   %  → aceito', rpad('UPDATE em expurgo_run (estado, não fato)', 52);
+END $$;
+
+-- A conferência do expurgo é posterior por desenho: verificar antes de expurgar
+-- não verifica nada.
+DO $$
+DECLARE v_id BIGINT;
+BEGIN
+  SELECT id INTO v_id FROM expurgo_entrada LIMIT 1;
+  UPDATE expurgo_entrada SET verificado_em = now(), integro = true WHERE id = v_id;
+  RAISE NOTICE 'OK   %  → aceito', rpad('UPDATE em expurgo_entrada (conferência)', 52);
+END $$;
+
 DO $$ BEGIN RAISE NOTICE '';
        RAISE NOTICE '=== Todas as invariantes verificadas ===';
 END $$;

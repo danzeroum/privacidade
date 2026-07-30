@@ -47,6 +47,7 @@ jobs:
     # job a lê **linha a linha**. É a classe exata do defeito que o CI Ubuntu
     # deixou passar — um `\r` invisível no fim de cada campo, com a comparação
     # caindo em `null` e a suíte declarando verde uma paridade que não valia.
+    # sustenta: o piso de disparidade e a lista fechada de proxies que a LIA-SCORING-001 cita
     name: Disparidade e proxies do modelo${{ matrix.sufixo }}
     runs-on: ${{ matrix.os }}
     strategy:

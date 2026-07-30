@@ -50,6 +50,14 @@ export type Job = {
   naMatriz: boolean;
   /** Texto do `# fora-da-matriz:`, já juntado com as linhas de comentário seguintes. */
   motivo: string | null;
+  /**
+   * Texto do `# sustenta:` — o controle que este job mantém de pé.
+   *
+   * Uma linha só, e não a continuação de comentário que o `motivo` aceita: aqui
+   * o texto vai para uma célula de tabela no README, e célula que engolisse as
+   * linhas seguintes traria junto o `fora-da-matriz` que costuma vir logo abaixo.
+   */
+  sustenta: string | null;
 };
 
 export type Achado = {
@@ -136,6 +144,7 @@ export const jobsDe = (yml: string): Job[] => {
 
     jobs.push({
       id,
+      sustenta: atual.map((l) => l.match(/^\s*#\s*sustenta:\s*(.+)$/)).find(Boolean)?.[1].trim() ?? null,
       nomeBruto,
       nome: nomeBruto ? nomeDeCheck(nomeBruto) : null,
       naMatriz: /windows-latest/.test(semComentario),

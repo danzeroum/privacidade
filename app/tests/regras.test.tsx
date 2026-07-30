@@ -62,9 +62,12 @@ import {
   MINIMO_DO_MOTIVO, avaliarMatriz, jobsDe, nomeDeCheck, relatorioDaMatriz,
 } from '../src/lib/matriz-ci';
 import {
-  avaliarLeiaMe, numeroDeclarado, pisoHonesto, relatorioDoLeiaMe, telasDeApp, telasDeLeiaMe,
-  workflowsDeLeiaMe,
+  FATOR_DO_TETO, avaliarLeiaMe, numeroDeclarado, pisoHonesto, relatorioDoLeiaMe, telasDeApp,
+  telasDeLeiaMe, tetoDoPiso, workflowsDeLeiaMe,
 } from '../src/lib/leia-me';
+import {
+  APPEND_ONLY, MUTAVEL_COM_MOTIVO, appendOnlyDoSchema, avaliarAppendOnly, relatorioDoAppendOnly,
+} from '../src/lib/append-only';
 import { execSync, spawnSync } from 'node:child_process';
 import {
   EH_DEMONSTRACAO, SELO_DE_DEMONSTRACAO, SELO_DO_SELETOR_DE_PAPEL, perfilDe,
@@ -9466,7 +9469,13 @@ describe('PR 29 · Risco-005(c) — o relógio do programa dispara sem sessão a
       expect(yml).toContain('workflow_dispatch:');
       // Um job só, e nenhuma condição por gatilho: é o que faz o disparo manual
       // reproduzir o agendado byte a byte.
-      expect(yml.match(/^  [a-z_-]+:\n    name:/gm) ?? []).toHaveLength(1);
+      //
+      // Contado pelo `jobsDe`, e não por regex de duas linhas coladas: a versão
+      // anterior exigia `name:` **imediatamente** depois da chave do job, e
+      // quebrou quando o marcador `# sustenta:` entrou entre as duas. Contar zero
+      // job e afirmar "um job só" teria passado a ser possível — a asserção
+      // reprovou, mas por acidente de forma, não por defeito de conteúdo.
+      expect(jobsDe(yml)).toHaveLength(1);
       /**
        * A varredura é do YAML **executável**, a partir de `jobs:` — o comentário
        * do cabeçalho cita `github.event_name` justamente para explicar a regra, e
@@ -10424,10 +10433,17 @@ describe('PR 33 · Risco-033 — o README conferido contra o repositório que de
    */
   const ARQUIVOS_COBERTOS = ['README.md', 'app/README.md'];
 
-  const WORKFLOWS = readdirSync(join('..', '.github', 'workflows')).sort().map((arquivo) => {
+  // Uma entrada por job, com o controle que ele sustenta — a mesma granularidade
+  // da tabela do README, para a comparação produzir um achado por linha.
+  const WORKFLOWS = readdirSync(join('..', '.github', 'workflows')).sort().flatMap((arquivo) => {
     const yml = readFileSync(join('..', '.github', 'workflows', arquivo), 'utf8');
-    return { arquivo, jobs: jobsDe(yml).map((j) => j.nome!).filter(Boolean) };
+    return jobsDe(yml).filter((j) => j.nome).map((j) => ({ arquivo, job: j.nome!, sustenta: j.sustenta }));
   });
+
+  /** Os dois documentos que mantêm "T1..T8" por decisão declarada. */
+  const HISTORICOS = ['01-arquitetura.md', '02-wireframes.md'].map((arquivo) => ({
+    arquivo, texto: readFileSync(join('..', 'docs', arquivo), 'utf8'),
+  }));
 
   // Contagens derivadas de arquivo versionado — nenhuma redigitada aqui.
   const SCHEMA = readFileSync(join('..', 'db', 'schema.sql'), 'utf8');
@@ -10469,11 +10485,78 @@ describe('PR 33 · Risco-033 — o README conferido contra o repositório que de
       expect(telasDeLeiaMe(LEIAME).length).toBe(telasDeApp(APP_TSX).length);
       expect(WORKFLOWS.length).toBeGreaterThan(4);
       expect(workflowsDeLeiaMe(LEIAME).length).toBe(WORKFLOWS.length);
+      // E todo job declara o que sustenta: um `null` viraria "(sem sustenta)" nos
+      // dois lados da comparação, e as listas continuariam iguais — a divergência
+      // sumiria justamente por ser total.
+      for (const w of WORKFLOWS) expect(w.sustenta, `${w.arquivo} · ${w.job} sem # sustenta`).toBeTruthy();
       for (const c of CONTAGENS) expect(c.real, `contagem "${c.rotulo}" zerada`).toBeGreaterThan(0);
     });
 
     it('os arquivos cobertos são lista fechada — ampliar a exceção é desligar a catraca', () => {
       expect(ARQUIVOS_COBERTOS).toEqual(['README.md', 'app/README.md']);
+    });
+
+    it('os dois docs históricos datam-se e apontam para o README vigente', () => {
+      /**
+       * A exceção deles não pode ser silenciosa. Um leitor que abre
+       * `02-wireframes.md` e lê "as 8 telas" precisa saber, na primeira tela do
+       * arquivo, que está lendo um registro e onde está a lista de hoje.
+       */
+      for (const { arquivo, texto } of HISTORICOS) {
+        expect(texto, `${arquivo} sem cabeçalho histórico`).toContain('**Documento histórico —');
+        expect(texto, `${arquivo} sem data no cabeçalho`).toMatch(/\*\*Documento histórico — \d{4}-\d{2}-\d{2}\.\*\*/);
+        expect(texto, `${arquivo} não aponta para o README vigente`).toContain('README.md');
+        // O cabeçalho vem antes de tudo: um aviso no rodapé é um aviso que
+        // chega depois da afirmação que ele qualifica.
+        expect(texto.indexOf('**Documento histórico —'), `${arquivo}: cabeçalho fora do topo`)
+          .toBeLessThan(400);
+      }
+    });
+
+    it('o corpo histórico continua histórico — se modernizar, a exceção deixa de valer', () => {
+      /**
+       * O que justifica a exceção é o conteúdo ser de então. Se alguém atualizar
+       * os dois para as telas de hoje, a justificativa cai junto — e o teste
+       * acusa em vez de deixar a exceção sobreviver ao motivo dela.
+       *
+       * Não é congelamento por hash: correção de erro continua permitida. O que
+       * a catraca prende é a **natureza** do documento, que é o que a decisão de
+       * escopo declarou.
+       */
+      for (const { arquivo, texto } of HISTORICOS) {
+        expect(texto, `${arquivo} deixou de ser o desenho original — reveja ARQUIVOS_COBERTOS`)
+          .toMatch(/T1\.\.T8|as 8 telas/);
+      }
+    });
+
+    it('o teto da faixa é derivado do piso — nenhum literal solto na regra', () => {
+      /**
+       * O achado R-03 da revisão do #45: o teto era `piso * 2`, com o `2` escrito
+       * à mão dentro de `pisoHonesto`. Número literal no meio da regra é a mesma
+       * classe das cinco frases que este bloco removeu do README — só que em
+       * código, que é onde ninguém confere.
+       *
+       * A catraca é sobre o fonte, e não sobre o resultado: um teto correto
+       * calculado por um literal continuaria correto até alguém mudar um dos dois
+       * lugares.
+       */
+      const fonte = readFileSync(join('src', 'lib', 'leia-me.ts'), 'utf8');
+      const corpo = (nome: string) => fonte.slice(fonte.indexOf(`export const ${nome} =`))
+        .split('\n').slice(0, 3).join('\n');
+      expect(corpo('pisoHonesto'), 'literal numérico de volta em pisoHonesto').not.toMatch(/[*/]\s*\d/);
+      expect(corpo('pisoHonesto')).toContain('tetoDoPiso(piso)');
+      expect(corpo('tetoDoPiso')).toContain('FATOR_DO_TETO');
+      // E `tetoDoPiso` também: a primeira versão desta catraca só olhava
+      // `pisoHonesto`, e `piso * FATOR_DO_TETO * 2` passava — o literal tinha
+      // apenas mudado de função. A injeção que deveria pegá-lo não pegou, e o
+      // furo era meu, não dela.
+      expect(corpo('tetoDoPiso'), 'literal numérico em tetoDoPiso').not.toMatch(/[*/]\s*\d/);
+      // Declarado num lugar só: uma segunda atribuição seria a cópia que a
+      // constante existe para eliminar.
+      expect((fonte.match(/FATOR_DO_TETO =/g) ?? []).length).toBe(1);
+      // E o número não vaza para o README, que é o outro lugar onde ele poderia
+      // ser redigitado.
+      expect(tetoDoPiso(700)).toBe(700 * FATOR_DO_TETO);
     });
   });
 
@@ -10537,10 +10620,27 @@ describe('PR 33 · Risco-033 — o README conferido contra o repositório que de
     it('workflow novo sem linha no README reprova, nomeando o job ausente', () => {
       const achados = avaliarLeiaMe({
         ...base,
-        workflows: [...WORKFLOWS, { arquivo: 'novo.yml', jobs: ['Coisa nova'] }],
+        workflows: [...WORKFLOWS, { arquivo: 'novo.yml', job: 'Coisa nova', sustenta: 'um controle qualquer' }],
       });
       expect(achados.map((a) => a.regra)).toContain('workflows');
       expect(relatorioDoLeiaMe(achados)).toContain('ausente(s) do README: novo.yml · Coisa nova');
+    });
+
+    it('job sem `# sustenta:` no YAML reprova por conta própria', () => {
+      // Sem esta regra, um job sem marcador viraria "(sem sustenta)" nos dois
+      // lados e a comparação passaria — o buraco fecharia a si mesmo, que é a
+      // forma mais confortável de uma catraca falhar.
+      const achados = avaliarLeiaMe({
+        ...base,
+        workflows: [...WORKFLOWS, { arquivo: 'novo.yml', job: 'Coisa nova', sustenta: null }],
+      });
+      expect(achados.map((a) => a.regra)).toContain('job-sem-sustenta');
+    });
+
+    it('controle reescrito no YAML e não no README reprova como divergência de linha', () => {
+      const workflows = WORKFLOWS.map((w) => (w.job === 'CodeQL' ? { ...w, sustenta: 'outra coisa' } : w));
+      const achados = avaliarLeiaMe({ ...base, workflows });
+      expect(relatorioDoLeiaMe(achados)).toContain('CodeQL · outra coisa');
     });
 
     it('linha no README sem workflow correspondente reprova no sentido inverso', () => {
@@ -10600,6 +10700,130 @@ describe('PR 33 · Risco-033 — o README conferido contra o repositório que de
     it('número sem marca reprova — apagar a marca não é o mesmo que não ter número', () => {
       const achados = avaliarLeiaMe({ ...base, readme: LEIAME.replace('<!-- n:visoes -->', '') });
       expect(achados.map((a) => a.regra)).toContain('numero-sem-marca');
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 34 · Risco-024 — o append-only chega onde a prova mora
+//
+// A ficha dizia "três tabelas protegidas, e ficam mutáveis expurgo_run,
+// expurgo_entrada, kms_acesso, solicitacao_evento e gate_finding". Medindo antes
+// de mexer, duas coisas mudaram de figura: o `audit_log` **estava** protegido,
+// por função própria que não é o `bloqueia_mutacao` genérico; e as duas tabelas
+// que a série acrescentou — consentimento e o texto aceito — são fatos imutáveis,
+// e protegê-las estava certo.
+//
+// Não havia tabela errada a destravar. Havia prova acumulada sem barreira, que é
+// coisa diferente — e é a diferença que este bloco cobra.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('PR 34 · Risco-024 — append-only onde a prova mora, e só onde ela mora', () => {
+  const SCHEMA = readFileSync(join('..', 'db', 'schema.sql'), 'utf8');
+  const TESTS_SQL = readFileSync(join('..', 'db', 'tests.sql'), 'utf8');
+
+  describe('verificação — o trigger existe onde deve?', () => {
+    it('schema e mock declaram o mesmo conjunto, nos dois sentidos', () => {
+      const achados = avaliarAppendOnly(SCHEMA);
+      expect(achados, relatorioDoAppendOnly(achados)).toEqual([]);
+    });
+
+    it('não-vacuidade: o leitor acha as duas formas de proteção, não só uma', () => {
+      /**
+       * A primeira medição desta série procurou `bloqueia_mutacao` e concluiu que
+       * o `audit_log` estava desprotegido. Ele tem função própria — a exceção
+       * estreita do expurgo de PII do operador — e um inventário que perde uma
+       * proteção existente manda fazer trabalho que já foi feito.
+       */
+      const noSchema = appendOnlyDoSchema(SCHEMA);
+      expect(noSchema.length).toBe(APPEND_ONLY.length);
+      expect(noSchema, 'a proteção por função própria do trail sumiu do leitor').toContain('audit_log');
+      expect(noSchema).toContain('gate_finding');
+      expect(Object.keys(MUTAVEL_COM_MOTIVO).length).toBeGreaterThan(3);
+    });
+
+    it('toda tabela recém-protegida tem invariante de UPDATE e de DELETE', () => {
+      // Trigger sem invariante é trigger que ninguém provou; e no dia em que
+      // alguém o remover, nada fica vermelho.
+      const novas = ['kms_acesso', 'solicitacao_evento', 'consentimento_revogacao', 'achado_evidencia',
+        'lia_evidencia', 'ripd_aprovacao', 'gate_finding', 'metric_snapshot'];
+      for (const t of novas) {
+        expect(SCHEMA, `${t}: sem trigger`).toContain(`BEFORE UPDATE OR DELETE ON ${t}`);
+        expect(TESTS_SQL, `${t}: sem invariante de UPDATE`).toContain(`'UPDATE em ${t}'`);
+        expect(TESTS_SQL, `${t}: sem invariante de DELETE`).toContain(`'DELETE em ${t}'`);
+      }
+    });
+  });
+
+  describe('validação — a prova é de fato imutável no caminho todo?', () => {
+    it('o estado operacional continua mutável, e o SQL prova nas duas direções', () => {
+      /**
+       * Só a metade que barra seria compatível com um `bloqueia_mutacao` aplicado
+       * às 48 tabelas: passaria nas dezesseis asserções acima e quebraria o
+       * executor de expurgo. A seção de invariantes carrega o sentido inverso
+       * porque é ele que separa "seletivo" de "indiscriminado".
+       */
+      expect(TESTS_SQL).toContain('UPDATE expurgo_run SET status');
+      expect(TESTS_SQL).toContain('UPDATE expurgo_entrada SET verificado_em');
+      for (const t of Object.keys(MUTAVEL_COM_MOTIVO)) {
+        expect(SCHEMA, `${t} foi protegida apesar de declarada mutável`)
+          .not.toContain(`BEFORE UPDATE OR DELETE ON ${t}`);
+      }
+    });
+
+    it('as invariantes não passam por vacuidade — tabela vazia não dispara trigger de linha', () => {
+      /**
+       * `BEFORE UPDATE ... FOR EACH ROW` só dispara se houver linha, e três das
+       * oito não tinham massa. Um `UPDATE` numa tabela vazia passa, e o
+       * `assert_falha` reprovaria por vacuidade em vez de por defeito — foi assim
+       * que este caso apareceu, com a suíte de banco vermelha por um motivo que
+       * não era o trigger.
+       */
+      expect(TESTS_SQL).toContain('a invariante de append-only passaria por vacuidade');
+      expect(TESTS_SQL).toContain('INSERT INTO solicitacao_evento');
+      expect(TESTS_SQL).toContain('INSERT INTO achado_evidencia');
+      expect(TESTS_SQL).toContain('INSERT INTO ripd_aprovacao');
+    });
+
+    it('cada recusa de proteção tem motivo com corpo, não rótulo', () => {
+      for (const [t, motivo] of Object.entries(MUTAVEL_COM_MOTIVO)) {
+        expect(motivo.length, `${t}: motivo curto demais`).toBeGreaterThan(40);
+        // O motivo nomeia a coluna que exige escrita posterior: "é mutável"
+        // sozinho é a exceção sem registro que este repositório recusa.
+        expect(motivo, `${t}: motivo sem a coluna que o sustenta`).toMatch(/`\w+`/);
+      }
+    });
+  });
+
+  describe('injeção — a paridade reprova o que promete reprovar', () => {
+    it('tabela protegida no banco e ausente do mock reprova', () => {
+      const comExtra = SCHEMA + `
+CREATE TRIGGER raci_imutavel
+  BEFORE UPDATE OR DELETE ON raci
+  FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
+`;
+      const achados = avaliarAppendOnly(comExtra);
+      expect(achados.map((a) => a.regra)).toContain('no-schema-e-nao-no-mock');
+      expect(relatorioDoAppendOnly(achados)).toContain('raci');
+    });
+
+    it('tabela no mock e sem trigger no banco reprova', () => {
+      const semUm = SCHEMA.replace(
+        /CREATE TRIGGER gate_finding_imutavel[\s\S]*?bloqueia_mutacao\(\);/,
+        '',
+      );
+      const achados = avaliarAppendOnly(semUm);
+      expect(achados.map((a) => a.regra)).toContain('no-mock-e-nao-no-schema');
+      expect(relatorioDoAppendOnly(achados)).toContain('gate_finding');
+    });
+
+    it('a proteção por função própria do trail não pode ser lida como ausente', () => {
+      // A injeção que reproduz o erro da primeira medição: se o leitor voltasse a
+      // procurar só `bloqueia_mutacao`, o `audit_log` sumiria do conjunto e a
+      // paridade acusaria — em vez de o repositório concluir, de novo, que o
+      // trail está desprotegido.
+      const soGenerico = SCHEMA.replace('FOR EACH ROW EXECUTE FUNCTION audit_log_expurgo_de_pii();', ';');
+      expect(appendOnlyDoSchema(soGenerico)).not.toContain('audit_log');
+      expect(avaliarAppendOnly(soGenerico).map((a) => a.regra)).toContain('no-mock-e-nao-no-schema');
     });
   });
 });

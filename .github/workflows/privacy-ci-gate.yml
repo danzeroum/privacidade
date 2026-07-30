@@ -55,6 +55,7 @@ jobs:
     # normalizam `sep` para `/` antes de comparar, e nenhuma dessas normalizações
     # tinha sido executada uma vez sequer sobre `\`. Varredura que casa caminho
     # errado aprova por não ter olhado, que é o Risco-003 com outro nome.
+    # sustenta: dado pessoal fora do inventário, campo fora do catálogo e as quatro premissas de aceite
     name: PII, catálogo e PbD${{ matrix.sufixo }}
     runs-on: ${{ matrix.os }}
     strategy:

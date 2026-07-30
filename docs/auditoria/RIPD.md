@@ -148,8 +148,8 @@ Regra do checklist aplicada: **direito sem endpoint com prazo, autenticação e 
 ### 7.1 Tabela consolidada (40 riscos)
 
 > **Nenhum risco está mitigado nesta data.** — afirmação congelada no commit auditado (`8d0548a`), preservada
-> como registro. A coluna **Fechado por** é o adendo de 2026-07-30 e diz onde ela deixou de valer: 15 riscos
-> fechados, 0 parciais, 25 como descritos. Método e limites do adendo no §7.5.
+> como registro. A coluna **Fechado por** é o adendo de 2026-07-30 e diz onde ela deixou de valer: 16 riscos
+> fechados, 0 parciais, 24 como descritos. Método e limites do adendo no §7.5.
 
 Fichas completas com recomendação técnica no Relatório Técnico §4.
 
@@ -178,7 +178,7 @@ Fichas completas com recomendação técnica no Relatório Técnico §4.
 | Risco-021 | Redator não cobre nome, endereço, RG, data de nascimento nem IP — e a massa exibe endereço e IP sem redação | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-021 |
 | Risco-022 | Dado pessoal de colaborador fora do regime: sem finalidade/base/retenção no schema e isento do catálogo por exceção do gate | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-022 |
 | Risco-023 | Ciclo de vida do backup incompleto: chave sem cripto-shredding, sem TTL de snapshot e sem destruição auditada | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-023 |
-| Risco-024 | A prova do expurgo e o espelho do KMS são mutáveis: bloqueia_mutacao cobre 3 tabelas e gov_app tem UPDATE em todas | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-024 |
+| Risco-024 | A prova do expurgo e o espelho do KMS são mutáveis: bloqueia_mutacao cobre 3 tabelas e gov_app tem UPDATE em todas | P2 | Lacuna real | **Fechado** | Fechado — `54f22c3`. Provas: `PR 34 · Risco-024 — append-only onde a prova mora, e só onde ela mora`; check `Constraints e invariantes do banco`. **A medição corrigiu a ficha em dois pontos:** o `audit_log` já estava protegido, por função própria (`audit_log_expurgo_de_pii`) que abre a exceção estreita do expurgo de PII do operador — contar só `bloqueia_mutacao` não o via —, e as duas tabelas que a série acrescentou (`consentimento`, `consentimento_texto`) são fatos imutáveis, então não havia proteção a remover. **Fecharam** as oito que faltavam: `kms_acesso`, `solicitacao_evento`, `consentimento_revogacao`, `achado_evidencia`, `lia_evidencia`, `ripd_aprovacao`, `gate_finding` e `metric_snapshot`, cada uma com invariante de UPDATE e de DELETE em `db/tests.sql`, semeada antes de asseverar — `FOR EACH ROW` não dispara em tabela vazia, e três delas não tinham massa. As invariantes carregam **as duas direções**: `expurgo_run` e `expurgo_entrada` continuam mutáveis e há asserção disso, senão a seção seria compatível com um `bloqueia_mutacao` nas 48 tabelas. **Resíduo declarado:** (a) o `GRANT SELECT, INSERT, UPDATE ON ALL TABLES` permanece — a barreira vigente é o trigger, e trocar por grants por tabela é mudança de perfil de acesso, não de imutabilidade; (b) `solicitacao_mensagem` fica fora por causa de `lida_em`, recibo de leitura que só existe depois, com o motivo declarado em `append-only.ts`. | Recomendação definida no Relatório Técnico §4, Risco-024 |
 | Risco-025 | O inventário do próprio repositório é subconjunto pobre do modelo que o repositório prega — e o gate valida só o nome do campo | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-025 |
 | Risco-026 | Controles de LLM externo sem verificação executável: SHAP sem PII por comentário, auditoria por execução e não por chamada | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-026 |
 | Risco-027 | Eliminação sem vínculo verificável entre a solicitação do titular e o expurgo que a materializa | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-027 |

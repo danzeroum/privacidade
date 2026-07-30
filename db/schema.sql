@@ -1496,6 +1496,92 @@ CREATE TRIGGER consentimento_texto_imutavel
   BEFORE UPDATE OR DELETE ON consentimento_texto
   FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
 
+-- ── Risco-024 — o append-only chega onde a prova mora ───────────────────────
+--
+-- Até aqui, cinco tabelas eram append-only e todas mereciam: o trail, a
+-- reclassificação de risco, a linhagem, o aceite do consentimento e o texto
+-- aceito. O que faltava não era corrigir essas — era o resto da prova acumulada
+-- pela série, que ficou sem barreira nenhuma enquanto o `GRANT UPDATE` amplo
+-- seguia valendo. Onde não há trigger, não há nada.
+--
+-- O critério é um só, e ele **exclui** tanto quanto inclui: append-only é para
+-- **fato que sustenta prova**, não para estado operacional. Proteger o mutável
+-- travaria o produto sem ganhar garantia — e a lista do que ficou de fora, com o
+-- motivo, está logo abaixo destes oito.
+
+-- Quem tocou a chave, quando e se foi autorizado (Art. 46). Um log de acesso
+-- editável responde à pergunta da auditoria com o que o editor quis que ela ouvisse.
+CREATE TRIGGER kms_acesso_imutavel
+  BEFORE UPDATE OR DELETE ON kms_acesso
+  FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
+
+-- A trilha do pedido do titular: recebida, verificada, concluída. É a prova de
+-- que o prazo do Art. 18 §1º foi cumprido, e prazo se prova pela data do evento.
+CREATE TRIGGER solicitacao_evento_imutavel
+  BEFORE UPDATE OR DELETE ON solicitacao_evento
+  FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
+
+-- O marco da revogação — e `retencao_ate` é GENERATED a partir dele. Mover
+-- `revogado_em` moveria em silêncio o prazo de expurgo que nasce da revogação.
+CREATE TRIGGER consentimento_revogacao_imutavel
+  BEFORE UPDATE OR DELETE ON consentimento_revogacao
+  FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
+
+-- Evidência com `hash` e `hash_anterior`: é uma cadeia. Cadeia mutável é o
+-- Risco-004 noutra tabela — o selo continua batendo com o texto que o editor deixou.
+CREATE TRIGGER achado_evidencia_imutavel
+  BEFORE UPDATE OR DELETE ON achado_evidencia
+  FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
+
+-- A evidência que sustenta o balanceamento do Art. 10 §3º, com hash do objeto.
+-- Trocar o hash depois é trocar a prova depois de ela ter sido aceita.
+CREATE TRIGGER lia_evidencia_imutavel
+  BEFORE UPDATE OR DELETE ON lia_evidencia
+  FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
+
+-- Decisão assinada (`assinatura` = hash do documento + sub do aprovador, Art. 38).
+-- Assinatura reescrevível não é assinatura: é um campo de texto com nome solene.
+CREATE TRIGGER ripd_aprovacao_imutavel
+  BEFORE UPDATE OR DELETE ON ripd_aprovacao
+  FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
+
+-- O que o gate encontrou naquela execução. Achado editável deixa o gate verde
+-- pelo caminho mais curto, que é exatamente o Risco-003 com permissão de escrita.
+CREATE TRIGGER gate_finding_imutavel
+  BEFORE UPDATE OR DELETE ON gate_finding
+  FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
+
+-- Instantâneo por definição — a UNIQUE já é (tenant, métrica, instante). Série
+-- histórica que se reescreve é série que conta a história de agora.
+CREATE TRIGGER metric_snapshot_imutavel
+  BEFORE UPDATE OR DELETE ON metric_snapshot
+  FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
+
+-- ── Deliberadamente NÃO append-only, e por quê ──────────────────────────────
+--
+-- Cada uma abaixo foi considerada e recusada. Proteção que trava a operação não
+-- é rigor, é defeito com aparência de rigor — e a recusa fica escrita para que a
+-- próxima leitura não a confunda com esquecimento:
+--
+--   * `expurgo_run`        — `status` sai de 'executando' e `concluido_em` é
+--                            carimbado no fim. O executor precisa dos dois.
+--   * `expurgo_entrada`    — `verificado_em`, `verificado_por` e `integro` são
+--                            escritos na conferência, que é posterior por
+--                            desenho: verificar antes de expurgar não verifica
+--                            nada.
+--   * `revogacao_propagacao` — `estado` acompanha a cascata até o parceiro
+--                            confirmar; congelá-lo pararia a propagação no
+--                            primeiro passo.
+--   * `kms_rotacao_etapa`  — `status` é a própria etapa avançando: congelá-la
+--                            deixaria toda rotação parada no primeiro passo.
+--                            O que prova a rotação é `kms_acesso`, append-only.
+--   * `solicitacao_mensagem` — fato, **menos** `lida_em`, que é recibo de
+--                            leitura e só existe depois. Uma exceção estreita
+--                            como a do `audit_log` resolveria, e não foi feita
+--                            aqui: seria função nova sem defeito que a motive, e
+--                            a mensagem já é protegida contra CPF por CHECK.
+
+
 -- Botão "Verificar integridade" da T6 chama esta função.
 --
 -- Duas conferências, não uma, e a segunda é o que fecha o Risco-004.

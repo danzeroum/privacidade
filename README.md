@@ -20,7 +20,7 @@ decoração.
 
 | Camada | Onde | Como recusa | Prova |
 |---|---|---|---|
-| **Banco** | [`db/schema.sql`](db/schema.sql) | `CHECK`, índice único parcial, trigger, RLS | <!-- n:invariantes -->**82** invariantes em [`db/tests.sql`](db/tests.sql) |
+| **Banco** | [`db/schema.sql`](db/schema.sql) | `CHECK`, índice único parcial, trigger, RLS | <!-- n:invariantes -->**98** invariantes em [`db/tests.sql`](db/tests.sql) |
 | **API** | [`app/src/mock/api.ts`](app/src/mock/api.ts) | 403 · 404 · 409 · 422 · 503, com a regra citada | <!-- n:testes -->**700+** testes em [`app/tests/regras.test.tsx`](app/tests/regras.test.tsx) |
 | **Interface** | [`app/src/ui/primitivos.tsx`](app/src/ui/primitivos.tsx) | o controle **não é renderizado** | asserção de DOM na mesma suíte |
 
@@ -234,15 +234,21 @@ Transcritos de [`.github/workflows/`](.github/workflows), e conferidos por teste
 job novo sem linha aqui reprova, e linha aqui sem job reprova. Os jobs em matriz publicam um check
 por plataforma — o leg Ubuntu com o nome da tabela, e o leg Windows com ` (windows)` no fim.
 
+A coluna **O que sustenta** também é transcrição: o texto mora no marcador `# sustenta:` do próprio
+job, e não aqui. Controle descrito longe do job que o executa envelhece sozinho — é a mesma razão
+pela qual o motivo de ficar fora da matriz mora no YAML e não numa lista de exceções à parte.
+
 <!-- workflows:inicio -->
-| Arquivo | Jobs (nome do check) | Dispara em |
-|---|---|---|
-| `ci.yml` | `Tipos e testes` | PR, push |
-| `equidade.yml` | `Disparidade e proxies do modelo` | PR, push |
-| `privacy-ci-gate.yml` | `PII, catálogo e PbD` | PR, push |
-| `relogio.yml` | `Varreduras de prazo` | agendado, manual |
-| `schema.yml` | `Constraints e invariantes do banco` | PR, push |
-| `seguranca.yml` | `Segredos no diff e no histórico` · `Dependências vulneráveis` · `CodeQL` | PR, push, agendado |
+| Arquivo | Job (nome do check) | O que sustenta | Dispara em |
+|---|---|---|---|
+| `ci.yml` | `Tipos e testes` | as nove regras LGPD como comportamento, e a tipagem que as sustenta | PR, push |
+| `equidade.yml` | `Disparidade e proxies do modelo` | o piso de disparidade e a lista fechada de proxies que a LIA-SCORING-001 cita | PR, push |
+| `privacy-ci-gate.yml` | `PII, catálogo e PbD` | dado pessoal fora do inventário, campo fora do catálogo e as quatro premissas de aceite | PR, push |
+| `relogio.yml` | `Varreduras de prazo` | as quatro varreduras de prazo, abrindo alerta idempotente — informa em vez de barrar, e por isso não deve ser required | agendado, manual |
+| `schema.yml` | `Constraints e invariantes do banco` | os CHECK, triggers e colunas GENERATED que o schema apresenta como prova de conformidade | PR, push |
+| `seguranca.yml` | `Segredos no diff e no histórico` | segredo de fornecedor no diff e em todo o histórico do git | PR, push, agendado |
+| `seguranca.yml` | `Dependências vulneráveis` | o limiar de advisory declarado, com exceção datada e motivo | PR, push, agendado |
+| `seguranca.yml` | `CodeQL` | alerta novo que o diff acrescenta — o pré-existente aparece na aba Security sem bloquear | PR, push, agendado |
 <!-- workflows:fim -->
 
 Três são *required status check* na proteção da `main`; os demais informam o vermelho sem impedir
