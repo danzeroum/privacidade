@@ -36,6 +36,10 @@ import {
 import { TENTATIVAS_MAXIMAS, motivoDaFaltaDeStepUp, stepUpVigente } from '../src/mock/stepup';
 import { recusaDeFinalidade } from '../src/mock/finalidade';
 import { SEGREDOS_HISTORICOS, varrerBundle, varrerFonte } from '../src/lib/segredos';
+import {
+  BANDEIRAS, OPCOES_PADRAO, ambienteParaFilho, dependenciasDesatualizadas, interpretarArgumentos,
+  planoDePartida, textoDeAjuda, type Fatos, type Opcoes,
+} from '../src/lib/partida';
 import { execSync } from 'node:child_process';
 import {
   EH_DEMONSTRACAO, SELO_DE_DEMONSTRACAO, SELO_DO_SELETOR_DE_PAPEL, perfilDe,
@@ -7624,5 +7628,358 @@ describe('PR 24 · aceitação — o RIPD aponta para a catraca, não para prosa
     // `dist-producao/` é saída de build; versioná-lo colocaria no repositório
     // exatamente o que a catraca existe para manter fora dele.
     expect(readFileSync('.gitignore', 'utf8')).toContain('dist-producao/');
+  });
+});
+
+describe('PR 25 · partida local — o passo a passo virou plano executável', () => {
+  const FATOS_LIMPOS: Fatos = {
+    ehRepositorio: true,
+    ramo: 'main',
+    arvoreSuja: false,
+    dependenciasDesatualizadas: false,
+  };
+  const plano = (o: Partial<Opcoes> = {}, f: Partial<Fatos> = {}) =>
+    planoDePartida({ ...OPCOES_PADRAO, ...o }, { ...FATOS_LIMPOS, ...f });
+  const chaves = (o: Partial<Opcoes> = {}, f: Partial<Fatos> = {}) => plano(o, f).map((p) => p.chave);
+
+  describe('unidade — leitura de argumentos', () => {
+    it('sem argumento nenhum é o caminho completo', () => {
+      const r = interpretarArgumentos([]);
+      expect(r.ok && r.opcoes).toEqual(OPCOES_PADRAO);
+    });
+
+    it('cada bandeira liga o próprio campo, e elas se acumulam', () => {
+      const r = interpretarArgumentos(['--rapido', '--sem-navegador']);
+      expect(r.ok && r.opcoes.rapido).toBe(true);
+      expect(r.ok && r.opcoes.semNavegador).toBe(true);
+      expect(r.ok && r.opcoes.semGit).toBe(false);
+    });
+
+    it('opção desconhecida recusa em vez de ser ignorada', () => {
+      /**
+       * O defeito que isto segura é silencioso: `--sem-teste` no singular,
+       * ignorado, roda a suíte inteira e faz a pessoa concluir que a bandeira
+       * não funciona — quando o que não funciona é o nome que ela digitou.
+       */
+      const r = interpretarArgumentos(['--sem-teste']);
+      expect(r.ok).toBe(false);
+      expect(!r.ok && r.erro).toContain('--sem-teste');
+    });
+
+    it('o texto de ajuda sai de BANDEIRAS, e não de uma segunda lista', () => {
+      // Duas listas divergiriam na primeira bandeira nova, e a ajuda passaria a
+      // mentir sobre o que o script aceita.
+      const texto = textoDeAjuda();
+      for (const [nome, b] of Object.entries(BANDEIRAS)) {
+        expect(texto, nome).toContain(nome);
+        expect(texto, nome).toContain(b.ajuda);
+      }
+    });
+
+    it('--help é o mesmo que --ajuda, e pedir ajuda não é erro', () => {
+      for (const arg of ['--ajuda', '--help']) {
+        const r = interpretarArgumentos([arg]);
+        expect(r.ok, arg).toBe(true);
+        expect(r.ok && r.opcoes.ajuda, arg).toBe(true);
+      }
+      expect(plano({ ajuda: true })).toHaveLength(0);
+    });
+
+    it('plano vazio só acontece pedindo ajuda', () => {
+      // Senão o CLI imprimiria a ajuda e sairia com zero em situações que são
+      // problema — dando a impressão de que a partida correu.
+      for (const rapido of [false, true]) {
+        for (const semGit of [false, true]) {
+          for (const producao of [false, true]) {
+            for (const ehRepositorio of [false, true]) {
+              expect(chaves({ rapido, semGit, producao }, { ehRepositorio }).length).toBeGreaterThan(0);
+            }
+          }
+        }
+      }
+    });
+  });
+
+  describe('unidade — quando reinstalar', () => {
+    it('sem node_modules, sempre', () => {
+      expect(dependenciasDesatualizadas({ existe: false, mtimeDoLockInstalado: 100 }, 100)).toBe(true);
+    });
+
+    it('lock mais novo que o instalado, sim', () => {
+      expect(dependenciasDesatualizadas({ existe: true, mtimeDoLockInstalado: 100 }, 101)).toBe(true);
+    });
+
+    it('mesmo instante conta como instalado — a fronteira exata', () => {
+      /**
+       * Um `>=` aqui reinstalaria a cada partida. `npm ci` custa minuto e apaga
+       * `node_modules`: um script que faz isso sem motivo é um script que se
+       * aprende a pular, e aí ele não protege mais nada.
+       */
+      expect(dependenciasDesatualizadas({ existe: true, mtimeDoLockInstalado: 100 }, 100)).toBe(false);
+    });
+
+    it('instalação sem a cópia do lock é tratada como desatualizada', () => {
+      expect(dependenciasDesatualizadas({ existe: true, mtimeDoLockInstalado: null }, 100)).toBe(true);
+    });
+
+    it('sem package-lock.json não há o que comparar, e não reinstala', () => {
+      expect(dependenciasDesatualizadas({ existe: true, mtimeDoLockInstalado: 100 }, null)).toBe(false);
+    });
+
+    it('o passo de instalar aparece exatamente quando o lock andou', () => {
+      expect(chaves({}, { dependenciasDesatualizadas: false })).not.toContain('instalar');
+      expect(chaves({}, { dependenciasDesatualizadas: true })).toContain('instalar');
+    });
+  });
+
+  describe('unidade — o passo de git nunca é destrutivo', () => {
+    it('em main limpa, busca e puxa com --ff-only', () => {
+      const git = plano().find((p) => p.chave === 'git')!;
+      expect(git.comandos).toEqual(['git fetch --prune origin', 'git pull --ff-only origin main']);
+      // Recusar é melhor que criar merge silencioso: main local com commit
+      // próprio é decisão de quem trabalha, não do script de partida.
+      expect(git.comandos.join(' ')).toContain('--ff-only');
+    });
+
+    it('árvore suja: busca e não puxa, com o motivo visível', () => {
+      const git = plano({}, { arvoreSuja: true })!.find((p) => p.chave === 'git')!;
+      expect(git.comandos).toEqual(['git fetch --prune origin']);
+      expect(git.aviso).toBeTruthy();
+    });
+
+    it('fora da main: busca e não puxa', () => {
+      const git = plano({}, { ramo: 'serie/07-alguma-coisa' }).find((p) => p.chave === 'git')!;
+      expect(git.comandos).toEqual(['git fetch --prune origin']);
+      expect(git.aviso).toContain('serie/07-alguma-coisa');
+    });
+
+    it('falha de rede não impede a partida', () => {
+      // Ficar sem rede não é motivo para não abrir o protótipo; o aviso é que
+      // registra que o código pode estar velho.
+      expect(plano().find((p) => p.chave === 'git')!.fatal).toBe(false);
+    });
+
+    it('fora de um clone, o passo simplesmente não existe', () => {
+      expect(chaves({}, { ehRepositorio: false })).not.toContain('git');
+    });
+
+    it('--sem-git tira o passo mesmo em main limpa', () => {
+      expect(chaves({ semGit: true })).not.toContain('git');
+    });
+  });
+
+  describe('unidade — ordem e o que cada falha custa', () => {
+    it('o servidor é sempre o último passo', () => {
+      /**
+       * Não é preferência de leitura: o servidor bloqueia até o Ctrl+C. Um check
+       * depois dele nunca rodaria, e a partida declararia verde uma verificação
+       * que não aconteceu.
+       */
+      for (const rapido of [false, true]) {
+        for (const producao of [false, true]) {
+          for (const dependenciasDesatualizadas of [false, true]) {
+            const k = chaves({ rapido, producao }, { dependenciasDesatualizadas });
+            expect(k.indexOf('servidor'), JSON.stringify({ rapido, producao })).toBe(k.length - 1);
+            expect(k.filter((c) => c === 'servidor')).toHaveLength(1);
+          }
+        }
+      }
+    });
+
+    it('instalar vem depois de puxar — o pull pode trazer lock novo', () => {
+      const k = chaves({}, { dependenciasDesatualizadas: true });
+      expect(k.indexOf('git')).toBeLessThan(k.indexOf('instalar'));
+    });
+
+    it('o caminho completo é exatamente os três checks que o CI cobra', () => {
+      expect(chaves()).toEqual(['git', 'testes', 'gate', 'catraca', 'servidor']);
+      const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
+      const yml = readFileSync('../.github/workflows/privacy-ci-gate.yml', 'utf8');
+      for (const chave of ['testes', 'gate', 'catraca'] as const) {
+        const comando = plano().find((p) => p.chave === chave)!.comandos[0];
+        const script = comando.replace(/^npm (run )?/, '').split(' ')[0];
+        expect(pkg.scripts, comando).toHaveProperty(script === 'test' ? 'test' : script);
+      }
+      // O que a partida roda é o que o CI reprova, e não uma lista parecida:
+      // divergir aqui é descobrir a reprovação depois do push.
+      expect(yml).toContain('npm run gate:privacidade');
+      expect(yml).toContain('npm run catraca:producao');
+    });
+
+    it('testes, gate e catraca param a partida; git e servidor não', () => {
+      const p = Object.fromEntries(plano().map((x) => [x.chave, x]));
+      for (const chave of ['testes', 'gate', 'catraca']) expect(p[chave].fatal, chave).toBe(true);
+      for (const chave of ['git', 'servidor']) expect(p[chave].fatal, chave).toBe(false);
+    });
+
+    it('cada passo diz o que a falha significa, não que o comando falhou', () => {
+      for (const passo of plano({}, { dependenciasDesatualizadas: true })) {
+        expect(passo.seFalhar.length, passo.chave).toBeGreaterThan(30);
+        expect(passo.seFalhar, passo.chave).not.toMatch(/^(erro|falhou|falha)\b/i);
+      }
+    });
+
+    it('git corre na raiz; os scripts npm, em app/ — onde o package.json está', () => {
+      /**
+       * Distinção que já me confundiu ao escrever este teste: o gate **varre** o
+       * repositório inteiro, mas o comando que o dispara tem de rodar em `app/`,
+       * senão o npm não acha o `package.json`. Quem resolve a raiz é o próprio
+       * `scripts/gate.ts`, com `..` como padrão — e é lá que essa garantia mora.
+       */
+      expect(plano().find((p) => p.chave === 'git')!.ondeRodar).toBe('repositorio');
+      for (const chave of ['instalar', 'testes', 'gate', 'catraca', 'servidor'] as const) {
+        const passo = plano({}, { dependenciasDesatualizadas: true }).find((p) => p.chave === chave)!;
+        expect(passo.ondeRodar, chave).toBe('app');
+      }
+      expect(readFileSync('scripts/gate.ts', 'utf8')).toContain("process.argv[2] ?? '..'");
+    });
+  });
+
+  describe('unidade — as bandeiras que mudam o alvo', () => {
+    it('--rapido sobe sem check nenhum', () => {
+      expect(chaves({ rapido: true })).toEqual(['servidor']);
+    });
+
+    it('--rapido não desliga a catraca quando o alvo é o artefato de produção', () => {
+      /**
+       * `--producao --rapido` sem a catraca serviria o `dist-producao/` de
+       * ontem e chamaria isso de prova das quatro premissas. Servir artefato
+       * velho é pior que não servir: parece verificação.
+       */
+      expect(chaves({ rapido: true, producao: true })).toEqual(['catraca', 'servidor']);
+      const k = chaves({ producao: true });
+      expect(k.indexOf('catraca')).toBeLessThan(k.indexOf('servidor'));
+    });
+
+    it('--producao serve dist-producao, e é a recusa que aparece na tela', () => {
+      const s = plano({ producao: true }).find((p) => p.chave === 'servidor')!;
+      expect(s.comandos[0]).toContain('dist-producao');
+      expect(s.comandos[0]).toContain('preview');
+      expect(s.titulo).toContain('recusa');
+    });
+
+    it('--sem-navegador tira o --open, e só ele', () => {
+      for (const producao of [false, true]) {
+        const com = plano({ producao }).find((p) => p.chave === 'servidor')!.comandos[0];
+        const sem = plano({ producao, semNavegador: true }).find((p) => p.chave === 'servidor')!.comandos[0];
+        expect(com, String(producao)).toContain('--open');
+        expect(sem, String(producao)).not.toContain('--open');
+      }
+    });
+  });
+
+  describe('ratchet — o que já quebrou antes não volta', () => {
+    const TODOS = () => {
+      const saida: { comando: string; contexto: string }[] = [];
+      for (const rapido of [false, true])
+        for (const semGit of [false, true])
+          for (const semNavegador of [false, true])
+            for (const producao of [false, true])
+              for (const ehRepositorio of [false, true])
+                for (const arvoreSuja of [false, true])
+                  for (const dependenciasDesatualizadas of [false, true])
+                    for (const ramo of ['main', 'x"; rm -rf /; echo "', '$(id)', '`id`', ''])
+                      for (const p of plano(
+                        { rapido, semGit, semNavegador, producao },
+                        { ehRepositorio, arvoreSuja, dependenciasDesatualizadas, ramo },
+                      ))
+                        for (const comando of p.comandos)
+                          saida.push({
+                            comando,
+                            contexto: JSON.stringify({ rapido, semGit, producao, ramo, chave: p.chave }),
+                          });
+      return saida;
+    };
+
+    it('nenhum fato do ambiente entra numa linha executada', () => {
+      /**
+       * O CLI roda com `shell: true` — é o que faz a partida funcionar em
+       * PowerShell, cmd e sh sem três caminhos de código. O preço é que uma
+       * interpolação num comando daria a um nome de ramo poder sobre o shell.
+       * O nome do ramo aparece em aviso; nunca em comando.
+       */
+      const todos = TODOS();
+      expect(todos.length).toBeGreaterThan(100);
+      for (const { comando, contexto } of todos) {
+        expect(comando, contexto).toMatch(/^(git|npm) [\w:.\- ]+$/);
+        expect(comando, contexto).not.toMatch(/[;&|$`"'\\<>]/);
+      }
+    });
+
+    it('nenhum comando do plano usa sintaxe POSIX de variável de ambiente', () => {
+      // A mesma catraca do PR 24, agora no plano: `VAR=valor comando` morre no
+      // PowerShell antes de chegar ao comando, e o CI Ubuntu não veria.
+      for (const { comando, contexto } of TODOS()) {
+        expect(comando, contexto).not.toMatch(/(^|&&\s*)[A-Z][A-Z0-9_]*=/);
+      }
+    });
+
+    it('argumento para script npm passa depois de `--`', () => {
+      /**
+       * `npm run dev --open` liga uma configuração do npm e não chega ao Vite:
+       * o servidor sobe, o navegador não abre, e a conclusão errada é que a
+       * bandeira do Vite está quebrada.
+       */
+      for (const { comando, contexto } of TODOS()) {
+        if (!comando.startsWith('npm run ')) continue;
+        expect(comando, contexto).toMatch(/^npm run [\w:]+( -- [\w:.\- ]+)?$/);
+      }
+    });
+
+    it('o lançador não muda o artefato que a catraca verifica', () => {
+      /**
+       * Defeito medido na primeira versão deste módulo: o mesmo
+       * `npm run catraca:producao` dava `index-DHE84t5H.js` com 144 kB no
+       * terminal e `index-Bh9DQDmL.js` com 330 kB disparado pela partida. O
+       * `vite-node` do CLI define `NODE_ENV`, o filho herdava, e o Vite respeita
+       * `NODE_ENV` já definido — o build de produção levava o React de
+       * desenvolvimento.
+       *
+       * O tamanho era o sintoma. O problema é a catraca aprovar um arquivo que
+       * não é o que se publica.
+       *
+       * Este teste roda dentro do vitest, que define `NODE_ENV=test`: o vazamento
+       * aqui é o mesmo do CLI, não uma imitação dele.
+       */
+      const limpo = ambienteParaFilho(process.env);
+      expect(process.env.NODE_ENV, 'o teste perdeu o que ele existe para medir').toBeTruthy();
+      expect(limpo.NODE_ENV).toBeUndefined();
+
+      const ler = (env?: Record<string, string>) =>
+        execSync('node -p "String(process.env.NODE_ENV)"', { encoding: 'utf8', env }).trim();
+      // Os dois sentidos: sem a limpeza o filho herda, com ela não.
+      expect(ler(process.env as Record<string, string>)).toBe(process.env.NODE_ENV);
+      expect(ler(limpo)).toBe('undefined');
+
+      // E o CLI usa a função em todo filho que dispara.
+      const cli = readFileSync('scripts/start.ts', 'utf8');
+      expect(cli).toContain('ambienteParaFilho(process.env)');
+      expect(cli.match(/spawnSync\(/g)!.length).toBe(cli.match(/env: AMBIENTE/g)!.length);
+    });
+
+    it('VITE_PERFIL do shell não vence o --mode do build', () => {
+      // O perfil é decidido pelo modo do build e pelo `.env.producao` que ele
+      // carrega. Uma variável exportada no terminal escolheria o perfil por trás
+      // do `--mode`, e a catraca varreria o artefato do perfil errado.
+      const limpo = ambienteParaFilho({ ...process.env, VITE_PERFIL: 'demonstracao', VITE_QUALQUER: 'x' });
+      expect(limpo.VITE_PERFIL).toBeUndefined();
+      expect(limpo.VITE_QUALQUER).toBeUndefined();
+      // E o resto do ambiente continua passando: PATH fora daqui não roda nada.
+      expect(limpo.PATH).toBe(process.env.PATH);
+    });
+
+    it('o script npm existe e aponta para este arquivo', () => {
+      const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
+      expect(pkg.scripts.start).toContain('scripts/start.ts');
+      expect(existsSync('scripts/start.ts')).toBe(true);
+    });
+
+    it('o README documenta a partida e não promete contagem que envelhece', () => {
+      const readme = readFileSync('README.md', 'utf8');
+      expect(readme).toContain('npm start');
+      // `npm test # 26 testes` era falso desde o PR 4. Número em documento é
+      // dívida: ou um teste o mantém, ou ele mente em silêncio.
+      expect(readme).not.toMatch(/#\s*\d+\s+testes/);
+    });
   });
 });

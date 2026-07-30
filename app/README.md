@@ -4,11 +4,37 @@ Reimplementação das 8 telas em **React 18 + TypeScript**, com rota real, store
 **9 regras LGPD implementadas como comportamento do sistema** — não como texto explicativo na tela.
 
 ```bash
-npm install
-npm run dev      # http://localhost:5173
-npm test         # 26 testes de comportamento
-npm run build    # bundle estático em dist/
+npm start        # o caminho completo, e é só isto que você precisa saber
 ```
+
+`npm start` atualiza a `main`, instala se o lock andou, roda os três checks que o
+CI cobra — suíte, gate de privacidade, catraca de produção — e sobe o servidor
+com o navegador aberto. Qualquer check vermelho **para a partida**: um script que
+abrisse o navegador depois de reprovar o gate ensinaria a rolar a tela para cima
+e ignorar o vermelho.
+
+```bash
+npm start -- --rapido           # sobe direto, sem check nenhum
+npm start -- --producao         # serve o artefato de produção: a tela é a recusa
+npm start -- --sem-git          # não toca no remoto (offline, ou ramo próprio)
+npm start -- --sem-navegador    # só imprime o endereço
+npm start -- --ajuda
+```
+
+Cada passo separado, quando for isso que você quer:
+
+```bash
+npm install
+npm run dev              # http://localhost:5173
+npm test                 # a suíte inteira
+npm run gate:privacidade # varre o repositório: PII fora do inventário reprova
+npm run catraca:producao # constrói e varre o artefato (RIPD §7.3)
+npm run build            # bundle estático em dist/
+```
+
+O plano da partida — quais passos, em que ordem, qual falha para tudo — é função
+pura em `src/lib/partida.ts`; `scripts/start.ts` só gasta processo. É o que
+permite provar que o servidor é sempre o último passo sem subir servidor nenhum.
 
 ---
 
