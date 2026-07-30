@@ -22,7 +22,7 @@ A auditoria (metodologia no Relatório Técnico §2) consolidou **40 riscos**: 1
 
 - **P0 (Risco-001):** o contrato de produção não tem rota de exercício para **nenhum** dos 10 direitos do titular que ele próprio enumera — inclusive o canal de oposição citado na LIA vigente. Análise de sanção no §7.2.
 - **Padrões P1:** o mock implementa o que o contrato e o schema de produção não materializam (consentimento, incidentes, revisão Art. 20); promessas de segurança sem instrumento (X-Purpose, MFA, HMAC com chave em KMS); o aparato de fiscalização não se autofiscaliza (gate varre 1 arquivo, cadeia de hash não cobre o campo mais sensível, main vermelha no commit auditado sem required checks); retenção sem motor de execução.
-- **Status de mitigação:** dos 40 riscos, **1 está parcialmente remediado** após o corte da auditoria (Risco-005: a main foi restaurada ao verde, a tela T11 foi entregue e há evidência comportamental de proteção de branch — ver Adendo no Relatório Técnico §1); os demais 39 permanecem abertos, todos com recomendação técnica concreta no Relatório Técnico §4. **38 dos 43 achados da rodada anterior de auditoria estão corrigidos com teste** — o histórico demonstra capacidade real de correção.
+- **Status de mitigação (congelado no corte; ver §7.1 e §7.5 para o estado de 2026-07-30):** dos 40 riscos, **1 está parcialmente remediado** após o corte da auditoria (Risco-005: a main foi restaurada ao verde, a tela T11 foi entregue e há evidência comportamental de proteção de branch — ver Adendo no Relatório Técnico §1); os demais 39 permanecem abertos, todos com recomendação técnica concreta no Relatório Técnico §4. **38 dos 43 achados da rodada anterior de auditoria estão corrigidos com teste** — o histórico demonstra capacidade real de correção.
 
 **Conclusão:** o desenho conceitual é maduro e acima da média (privacy by default, prova executável, fail-closed). O sistema **não está apto a produção** enquanto o P0 e os P1 estruturais (Riscos 001–015) não forem tratados; a aprovação deste RIPD deve ser condicionada ao plano de ação do §7.
 
@@ -74,7 +74,7 @@ Mapeamento finalidade → base → artigo, com a justificativa e a lacuna encont
 | Audit trail da própria plataforma | Obrigação legal | Art. 7º, II c/c Art. 37 | Declarada no inventário `.privacy/`; adequada. Resíduo: dado de colaborador no trail sem regime próprio (Risco-022) |
 | Execução de contrato (produto) | Art. 7º, V | Art. 7º, V | Modelada no catálogo; DTOs por escopo limitam o excesso |
 | Proteção ao crédito | Art. 7º, X | Art. 7º, X | Modelada nos cenários de crédito |
-| Legítimo interesse | Art. 7º, IX | Art. 7º, IX c/c Art. 10 | **Forte:** campo sob LI sem LIA vigente é bloqueado por trigger (`schema.sql:528-530`); LIA vencida derruba a base. **Resíduo:** o balanceamento cita canal de oposição inexistente (Risco-001) e mitigações de equidade sem artefato (Risco-007) |
+| Legítimo interesse | Art. 7º, IX | Art. 7º, IX c/c Art. 10 | **Forte:** campo sob LI sem LIA vigente é bloqueado por trigger (`schema.sql:528-530`); LIA vencida derruba a base. **Resíduo (congelado no corte):** o balanceamento citava canal de oposição inexistente (Risco-001) e mitigações de equidade sem artefato (Risco-007). **Adendo 2026-07-30:** o canal existe — `POST /v1/titulares/me/oposicao?lia={codigo}` no contrato e no mock (`1c310d3`), com o caminho lido de `lia.canalOposicao` e conferido letra por letra contra o `db/seed.sql` pelo teste `PR 17 · verificação — a rota existe no caminho que a LIA anuncia`; a cessação é imediata, provada em `PR 17 · validação — o titular consegue se opor, e o tratamento para`. A equidade fechou em disparidade e proxies (`0da2b08`, check `Disparidade e proxies do modelo`) e **resta** a AIA sem instrumento. |
 | Consentimento | Art. 7º, I c/c Art. 8º | Art. 7º, I; Art. 8º | Prova versionada e revogação propagante **no mock**; sem persistência por titular no contrato/schema de produção e sem cascata de eliminação (Risco-002) |
 | Dado sensível | Art. 11 | Art. 11 | **Forte:** legítimo interesse × sensível bloqueado por constraint (`schema.sql:170-173`); sensível nunca revelável em tela; sem compartilhamento externo |
 | Criança/adolescente | Consentimento (declarado) | **Art. 14 — não modelado** | `perfil_infantil` sem consentimento específico de responsável, sem registro vigente (Risco-016) |
@@ -147,54 +147,58 @@ Regra do checklist aplicada: **direito sem endpoint com prazo, autenticação e 
 
 ### 7.1 Tabela consolidada (40 riscos)
 
-Nenhum risco está mitigado nesta data. Fichas completas com recomendação técnica no Relatório Técnico §4.
+> **Nenhum risco está mitigado nesta data.** — afirmação congelada no commit auditado (`8d0548a`), preservada
+> como registro. A coluna **Fechado por** é o adendo de 2026-07-30 e diz onde ela deixou de valer: 11 riscos
+> fechados, 3 parciais com resíduo nomeado, 26 como descritos. Método e limites do adendo no §7.5.
 
-| ID | Risco | Sev. | Classe | Status | Plano de ação |
-|---|---|---|---|---|---|
-| Risco-001 | Direitos do titular sem rota de exercício no contrato de produção | P0 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-001 |
-| Risco-002 | Consentimento sem persistência por titular no desenho de produção; revogação sem cascata de eliminação | P1 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-002 |
-| Risco-003 | Gate de privacidade cego: varre 1 arquivo do repositório e aprova com 40 CPFs formatados publicados em 7 arquivos | P1 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-003 |
-| Risco-004 | Cadeia de hash do audit trail não cobre justificativa nem base legal — o campo mais exposto é adulterável sem detecção | P1 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-004 |
-| Risco-005 | Governança de mudança rompida: upload manual reverteu PR revisado, a main estava vermelha e nenhum workflow era required status check | P1 | Lacuna real | **Parcialmente remediado (pós-corte)** | Main restaurada (#19), T11 entregue (#18), proteção de branch evidenciada (#21–#25); permanecem gitleaks/CodeQL, `schedule` de vencimentos e schema/OpenAPI fora do CI — Relatório Técnico §1 (Adendo) e §4, Risco-005 |
-| Risco-006 | Retenção existe só como rótulo: sem retencao_ate, sem TTL, sem executor de expurgo — e o audit_log não tem prazo definido | P1 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-006 |
-| Risco-007 | Equidade algorítmica só declarada: teste de disparidade, remoção de proxies e AIA sem artefato executável ou versionado | P1 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-007 |
-| Risco-008 | Fornecedor não é entidade: DPA sem validação programática, expiração sem vigilância, sem chave por parceiro nem revogação com SLA | P1 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-008 |
-| Risco-009 | Processo de solicitação do titular sem etapa de verificação de identidade e sem ator titular | P1 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-009 |
-| Risco-010 | Prazo de comunicação à ANPD sem relógio: nenhum artefato conhece o prazo do Art. 48 | P1 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-010 |
-| Risco-011 | X-Purpose é regra global em prosa, mas instrumentado em 1 de 25 operações do contrato; propósito autodeclarado | P1 | Divergência | Aberto | Recomendação definida no Relatório Técnico §4, Risco-011 |
-| Risco-012 | GET /titulares/{id} devolve a ficha do titular sem finalidade e sem gravar no trail | P1 | Divergência | Aberto | Recomendação definida no Relatório Técnico §4, Risco-012 |
-| Risco-013 | Pseudonimização prometida como HMAC com chave no KMS é SHA-256 com sal público constante no bundle | P1 | Divergência | Aberto | Recomendação definida no Relatório Técnico §4, Risco-013 |
-| Risco-014 | MFA/step-up prometidos em docs, schema e contrato sem nenhuma instrumentação | P1 | Divergência | Aberto | Recomendação definida no Relatório Técnico §4, Risco-014 |
-| Risco-015 | Fluxo de incidente (Art. 48) existe só no protótipo: sem tabela incidente no schema e sem rota no contrato | P1 | Divergência | Aberto | Recomendação definida no Relatório Técnico §4, Risco-015 |
-| Risco-016 | Art. 14 não modelado: perfil infantil sob consentimento sem registro vigente e sem responsável identificado | P2 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-016 |
-| Risco-017 | Anti-enumeração e cotas incompletas: sem paginação/hard limit nas coleções, IDs sequenciais como oráculo e rate limit só na busca | P2 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-017 |
-| Risco-018 | Cinco endpoints de ingestão de CI sem identidade de máquina, assinatura HMAC, idempotência ou proteção de replay | P2 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-018 |
-| Risco-019 | Nenhuma CSP nem cabeçalho de segurança em nenhuma superfície HTML | P2 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-019 |
-| Risco-020 | O gate retranscreve o valor de PII encontrado — no finding enviado ao contrato e no terminal do CI | P2 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-020 |
-| Risco-021 | Redator não cobre nome, endereço, RG, data de nascimento nem IP — e a massa exibe endereço e IP sem redação | P2 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-021 |
-| Risco-022 | Dado pessoal de colaborador fora do regime: sem finalidade/base/retenção no schema e isento do catálogo por exceção do gate | P2 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-022 |
-| Risco-023 | Ciclo de vida do backup incompleto: chave sem cripto-shredding, sem TTL de snapshot e sem destruição auditada | P2 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-023 |
-| Risco-024 | A prova do expurgo e o espelho do KMS são mutáveis: bloqueia_mutacao cobre 3 tabelas e gov_app tem UPDATE em todas | P2 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-024 |
-| Risco-025 | O inventário do próprio repositório é subconjunto pobre do modelo que o repositório prega — e o gate valida só o nome do campo | P2 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-025 |
-| Risco-026 | Controles de LLM externo sem verificação executável: SHAP sem PII por comentário, auditoria por execução e não por chamada | P2 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-026 |
-| Risco-027 | Eliminação sem vínculo verificável entre a solicitação do titular e o expurgo que a materializa | P2 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-027 |
-| Risco-028 | Plano de resposta a incidente como runbook testável não existe: o BPMN é máquina de estados, não plano | P2 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-028 |
-| Risco-029 | /pseudonyms/resolve: contrato e implementação divergem em corpo, códigos e no vínculo de posse | P2 | Divergência | Aberto | Recomendação definida no Relatório Técnico §4, Risco-029 |
-| Risco-030 | Protótipo estático contradiz a doutrina do repositório: PII em claro no DOM, registro prometido e não feito, gate por CSS, busca inerte | P2 | Divergência | Aberto | Recomendação definida no Relatório Técnico §4, Risco-030 |
-| Risco-031 | Promessas de arquitetura sem instrumento no app: k-anonimato (k≥5) e data-hj-suppress | P2 | Divergência | Aberto | Recomendação definida no Relatório Técnico §4, Risco-031 |
-| Risco-032 | Documentos e cenários afirmam TTL/expurgo operantes que o código não contém — inclusive como evidência verde do PbD | P2 | Divergência | Aberto | Recomendação definida no Relatório Técnico §4, Risco-032 |
-| Risco-033 | READMEs negam o próprio repositório: “não há CI”, “26 testes”, “8 telas” | P2 | Divergência | Aberto | Recomendação definida no Relatório Técnico §4, Risco-033 |
-| Risco-034 | Contrato OpenAPI congelado pré-correções: as rotas dos PRs 4–13 existem só no mock | P2 | Divergência | Aberto | Recomendação definida no Relatório Técnico §4, Risco-034 |
-| Risco-035 | modoDemo=true embarcado por padrão mantém viva a rota de forja do trail e as afordâncias de ataque | P2 | Limitação de protótipo | Premissa de aceite | Condição de não-produção — ver §7.3 |
-| Risco-036 | Feed ICS: credencial estática por papel em query string, segredo no bundle, assinatura truncada, sem expiração | P2 | Limitação de protótipo | Premissa de aceite | Condição de não-produção — ver §7.3 |
-| Risco-037 | Sem autenticação real: papel por botão, sessão sem credencial — toda a matriz de acesso é cooperativa | P2 | Limitação de protótipo | Premissa de aceite | Condição de não-produção — ver §7.3 |
-| Risco-038 | Documentos de handoff carregam terceiros ao abrir (unpkg com SRI; Google Fonts sem) — fornecedores sem DPA recebendo metadados | P3 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-038 |
-| Risco-039 | Coerência do catálogo não forçada: “anonimizado” convive com base legal/LIA e a linhagem usa strings livres sem FK | P3 | Lacuna real | Aberto | Recomendação definida no Relatório Técnico §4, Risco-039 |
-| Risco-040 | PII sintética completa embarca no bundle do cliente — e o comentário do código afirma o contrário | P3 | Limitação de protótipo | Premissa de aceite | Condição de não-produção — ver §7.3 |
+Fichas completas com recomendação técnica no Relatório Técnico §4.
+
+| ID | Risco | Sev. | Classe | Status | Fechado por (adendo 2026-07-30) | Plano de ação |
+|---|---|---|---|---|---|---|
+| Risco-001 | Direitos do titular sem rota de exercício no contrato de produção | P0 | Lacuna real | **Fechado** | `bea0325` `f86020e` `1c310d3` · testes `PR 16 · as doze rotas — verificação: existem e respondem o contrato?` e `PR 17 · validação — o titular consegue se opor, e o tratamento para` | Recomendação definida no Relatório Técnico §4, Risco-001 |
+| Risco-002 | Consentimento sem persistência por titular no desenho de produção; revogação sem cascata de eliminação | P1 | Lacuna real | **Fechado** | `8f636be` `022a1d1` · testes `PR 19 · unidade — o estado é derivado dos fatos, nos limites` e `PR 20 · aceitação — a migração é completa, não parcial` | Recomendação definida no Relatório Técnico §4, Risco-002 |
+| Risco-003 | Gate de privacidade cego: varre 1 arquivo do repositório e aprova com 40 CPFs formatados publicados em 7 arquivos | P1 | Lacuna real | **Fechado** | `3fd6bf7` · teste `PR 22 · aceitação — o gate olha o repositório inteiro, e a catraca prova`; check `PII, catálogo e PbD` | Recomendação definida no Relatório Técnico §4, Risco-003 |
+| Risco-004 | Cadeia de hash do audit trail não cobre justificativa nem base legal — o campo mais exposto é adulterável sem detecção | P1 | Lacuna real | **Fechado** | `3fd6bf7` · teste `PR 22 · unidade — a cadeia cobre a base legal, e o selo cobre o texto`; check `Constraints e invariantes do banco` | Recomendação definida no Relatório Técnico §4, Risco-004 |
+| Risco-005 | Governança de mudança rompida: upload manual reverteu PR revisado, a main estava vermelha e nenhum workflow era required status check | P1 | Lacuna real | **Parcial** (a, d) | `2cf1c18` `f86020e` · sub-item (d) fechado: schema e invariantes entram no CI pelo check `Constraints e invariantes do banco`, e o contrato passa a ser lido pelo teste `PR 16 · invariante de paridade — contrato e mock, nos dois sentidos (Risco-034)`. **Resta** (b) sem gitleaks/CodeQL/`npm audit` e (c) sem `schedule` para vencimentos | Main restaurada (#19), T11 entregue (#18), proteção de branch evidenciada (#21–#25); permanecem gitleaks/CodeQL, `schedule` de vencimentos e schema/OpenAPI fora do CI — Relatório Técnico §1 (Adendo) e §4, Risco-005 |
+| Risco-006 | Retenção existe só como rótulo: sem retencao_ate, sem TTL, sem executor de expurgo — e o audit_log não tem prazo definido | P1 | Lacuna real | **Fechado** | `2cf1c18` · testes `PR 18 · unidade — retencao_ate é derivada, e por uma função só` e `PR 18 · integração — o executor elimina, prova e não repete`; check `Constraints e invariantes do banco` | Recomendação definida no Relatório Técnico §4, Risco-006 |
+| Risco-007 | Equidade algorítmica só declarada: teste de disparidade, remoção de proxies e AIA sem artefato executável ou versionado | P1 | Lacuna real | **Parcial** | `0da2b08` · teste `PR 26 · Risco-007 — equidade deixa de ser declarada e vira artefato`; check `Disparidade e proxies do modelo`. Fecha disparidade e proxies; **resta** a AIA sem instrumento e a base legal por lote na linhagem de treino | Recomendação definida no Relatório Técnico §4, Risco-007 |
+| Risco-008 | Fornecedor não é entidade: DPA sem validação programática, expiração sem vigilância, sem chave por parceiro nem revogação com SLA | P1 | Lacuna real | **Parcial** | `4aa1f78` · testes `PR 21 · unidade — a vigência do DPA, na fronteira de um dia` e `PR 21 · integração — a varredura pega o que o trigger não alcança`. Fecha entidade, DPA no banco e vigilância de expiração; **resta** a revogação com SLA — desligar parceiro destruindo a chave dele é máquina própria | Recomendação definida no Relatório Técnico §4, Risco-008 |
+| Risco-009 | Processo de solicitação do titular sem etapa de verificação de identidade e sem ator titular | P1 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-009 |
+| Risco-010 | Prazo de comunicação à ANPD sem relógio: nenhum artefato conhece o prazo do Art. 48 | P1 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-010 |
+| Risco-011 | X-Purpose é regra global em prosa, mas instrumentado em 1 de 25 operações do contrato; propósito autodeclarado | P1 | Divergência | **Fechado** | `a367a89` · testes `PR 23 · sistema — a catraca comportamental do Risco-011` e `PR 23 · aceitação — contrato e política dizem a mesma coisa` | Recomendação definida no Relatório Técnico §4, Risco-011 |
+| Risco-012 | GET /titulares/{id} devolve a ficha do titular sem finalidade e sem gravar no trail | P1 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-012 |
+| Risco-013 | Pseudonimização prometida como HMAC com chave no KMS é SHA-256 com sal público constante no bundle | P1 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-013 |
+| Risco-014 | MFA/step-up prometidos em docs, schema e contrato sem nenhuma instrumentação | P1 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-014 |
+| Risco-015 | Fluxo de incidente (Art. 48) existe só no protótipo: sem tabela incidente no schema e sem rota no contrato | P1 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-015 |
+| Risco-016 | Art. 14 não modelado: perfil infantil sob consentimento sem registro vigente e sem responsável identificado | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-016 |
+| Risco-017 | Anti-enumeração e cotas incompletas: sem paginação/hard limit nas coleções, IDs sequenciais como oráculo e rate limit só na busca | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-017 |
+| Risco-018 | Cinco endpoints de ingestão de CI sem identidade de máquina, assinatura HMAC, idempotência ou proteção de replay | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-018 |
+| Risco-019 | Nenhuma CSP nem cabeçalho de segurança em nenhuma superfície HTML | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-019 |
+| Risco-020 | O gate retranscreve o valor de PII encontrado — no finding enviado ao contrato e no terminal do CI | P2 | Lacuna real | **Fechado** | `3fd6bf7` · teste `PR 22 · unidade — o inventário decide, e o dígito verificador não` — o achado passa a citar valor mascarado | Recomendação definida no Relatório Técnico §4, Risco-020 |
+| Risco-021 | Redator não cobre nome, endereço, RG, data de nascimento nem IP — e a massa exibe endereço e IP sem redação | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-021 |
+| Risco-022 | Dado pessoal de colaborador fora do regime: sem finalidade/base/retenção no schema e isento do catálogo por exceção do gate | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-022 |
+| Risco-023 | Ciclo de vida do backup incompleto: chave sem cripto-shredding, sem TTL de snapshot e sem destruição auditada | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-023 |
+| Risco-024 | A prova do expurgo e o espelho do KMS são mutáveis: bloqueia_mutacao cobre 3 tabelas e gov_app tem UPDATE em todas | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-024 |
+| Risco-025 | O inventário do próprio repositório é subconjunto pobre do modelo que o repositório prega — e o gate valida só o nome do campo | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-025 |
+| Risco-026 | Controles de LLM externo sem verificação executável: SHAP sem PII por comentário, auditoria por execução e não por chamada | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-026 |
+| Risco-027 | Eliminação sem vínculo verificável entre a solicitação do titular e o expurgo que a materializa | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-027 |
+| Risco-028 | Plano de resposta a incidente como runbook testável não existe: o BPMN é máquina de estados, não plano | P2 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-028 |
+| Risco-029 | /pseudonyms/resolve: contrato e implementação divergem em corpo, códigos e no vínculo de posse | P2 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-029 |
+| Risco-030 | Protótipo estático contradiz a doutrina do repositório: PII em claro no DOM, registro prometido e não feito, gate por CSS, busca inerte | P2 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-030 |
+| Risco-031 | Promessas de arquitetura sem instrumento no app: k-anonimato (k≥5) e data-hj-suppress | P2 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-031 |
+| Risco-032 | Documentos e cenários afirmam TTL/expurgo operantes que o código não contém — inclusive como evidência verde do PbD | P2 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-032 |
+| Risco-033 | READMEs negam o próprio repositório: “não há CI”, “26 testes”, “8 telas” | P2 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-033 |
+| Risco-034 | Contrato OpenAPI congelado pré-correções: as rotas dos PRs 4–13 existem só no mock | P2 | Divergência | **Fechado** | `f86020e` · teste `PR 16 · invariante de paridade — contrato e mock, nos dois sentidos (Risco-034)` | Recomendação definida no Relatório Técnico §4, Risco-034 |
+| Risco-035 | modoDemo=true embarcado por padrão mantém viva a rota de forja do trail e as afordâncias de ataque | P2 | Limitação de protótipo | **Fechado** | `cada46c` · teste `PR 24 · sistema — o artefato de produção, construído e varrido`; check `PII, catálogo e PbD` | Condição de não-produção — ver §7.3 |
+| Risco-036 | Feed ICS: credencial estática por papel em query string, segredo no bundle, assinatura truncada, sem expiração | P2 | Limitação de protótipo | **Fechado** | `a367a89` · teste `PR 23 · unidade — o token do feed ICS` | Condição de não-produção — ver §7.3 |
+| Risco-037 | Sem autenticação real: papel por botão, sessão sem credencial — toda a matriz de acesso é cooperativa | P2 | Limitação de protótipo | Premissa de aceite | — | Condição de não-produção — ver §7.3 |
+| Risco-038 | Documentos de handoff carregam terceiros ao abrir (unpkg com SRI; Google Fonts sem) — fornecedores sem DPA recebendo metadados | P3 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-038 |
+| Risco-039 | Coerência do catálogo não forçada: “anonimizado” convive com base legal/LIA e a linhagem usa strings livres sem FK | P3 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-039 |
+| Risco-040 | PII sintética completa embarca no bundle do cliente — e o comentário do código afirma o contrário | P3 | Limitação de protótipo | **Fechado** | `cada46c` · teste `PR 24 · sistema — o artefato de produção, construído e varrido`; check `PII, catálogo e PbD` | Condição de não-produção — ver §7.3 |
 
 ### 7.2 Análise de sanção (Art. 52) — riscos P0
 
-**Risco-001 — Direitos do titular sem rota de exercício.** Em produção como está, um universo de ~1,2 milhão de titulares sob scoring por legítimo interesse não teria como confirmar tratamento, acessar dados, opor-se ou pedir revisão da decisão automatizada — e o canal de oposição declarado na LIA vigente aponta para rota inexistente, o que fragiliza o próprio balanceamento que sustenta a base legal (Art. 10 c/c Art. 18 §2º). Exposição direta às sanções do **Art. 52**: advertência com prazo (inciso I); **multa simples de até 2% do faturamento do grupo no Brasil, limitada a R$ 50.000.000 por infração** (inciso II); publicização da infração (inciso IV); bloqueio ou eliminação dos dados a que se refere a infração (incisos V–VI). Agravantes prováveis (Art. 52 §1º): a recorrência documental — o RIPD do próprio cenário lista a rota de revisão do Art. 20 como recomendação P0 pendente — pesa contra a boa-fé; atenuante: a adoção comprovada de política de governança (Art. 52 §1º, IX) se o plano de ação for executado. **Condição de aceite: nenhum deploy de produção antes das rotas do Art. 18 existirem com prazo, autenticação e log.**
+**Risco-001 — Direitos do titular sem rota de exercício.** Em produção como está, um universo de ~1,2 milhão de titulares sob scoring por legítimo interesse não teria como confirmar tratamento, acessar dados, opor-se ou pedir revisão da decisão automatizada — e o canal de oposição declarado na LIA vigente aponta para rota inexistente, o que fragiliza o próprio balanceamento que sustenta a base legal (Art. 10 c/c Art. 18 §2º). **[Adendo 2026-07-30: as 13 rotas do titular e o canal de oposição existem no contrato e no mock — `f86020e`, `1c310d3`; ver §7.1 e §7.5. A análise de sanção abaixo permanece como registro do que estava em risco no corte, e como o quadro a que o repositório volta se as rotas saírem.]** Exposição direta às sanções do **Art. 52**: advertência com prazo (inciso I); **multa simples de até 2% do faturamento do grupo no Brasil, limitada a R$ 50.000.000 por infração** (inciso II); publicização da infração (inciso IV); bloqueio ou eliminação dos dados a que se refere a infração (incisos V–VI). Agravantes prováveis (Art. 52 §1º): a recorrência documental — o RIPD do próprio cenário lista a rota de revisão do Art. 20 como recomendação P0 pendente — pesa contra a boa-fé; atenuante: a adoção comprovada de política de governança (Art. 52 §1º, IX) se o plano de ação for executado. **Condição de aceite: nenhum deploy de produção antes das rotas do Art. 18 existirem com prazo, autenticação e log.**
 
 Os riscos P1 002–015, embora não classificados como P0 isoladamente, compõem o mesmo quadro sancionatório se concretizados em produção (Art. 52 aplica-se por infração): em particular Risco-002 (consentimento sem prova por titular — Art. 8º §§ 1º-2º), Risco-006 (retenção sem término — Art. 15-16), Risco-010 (prazo do Art. 48 sem relógio) e Risco-013 (pseudonimização mais fraca que a declarada — Art. 46).
 
@@ -222,6 +226,64 @@ Três observações que a tabela não carrega:
 **Adendo (2026-07-29):** entre o corte da auditoria (`8d0548a`) e a publicação deste documento, a `main` avançou 7 commits: restauração do MAPA (#19, main verde), entrega da tela T11 · ciclo do achado (#18) e PRs-sonda de proteção de branch (#21–#25). O único risco afetado é o Risco-005 (ver §7.1); os demais 39 permanecem como descritos — o diff não toca contrato, schema, gate nem redator.
 
 Este RIPD deve ser reavaliado: (a) a cada release que toque contrato, schema ou gate; (b) na resolução do bloco P0/P1; (c) no máximo em **2027-01-29** (6 meses) — espelhando o campo `reavaliar_em` que o próprio schema do sistema exige dos RIPDs que gerencia.
+
+### 7.5 Adendo de reconciliação (2026-07-30) — a coluna "Fechado por"
+
+A série de remediação avançou a `main` de `8d0548a` até `3b25b46`. Este adendo anota o efeito dela sobre o §7.1
+**sem reescrever nenhuma ficha**: a descrição de cada risco continua sendo o que a auditoria encontrou, e o que
+mudou entra numa coluna nova. Ficha reescrita apagaria o achado; a auditoria deixaria de ter o que comparar na
+próxima passagem, e "estava assim" viraria uma afirmação sem lastro.
+
+**O que cada célula da coluna carrega:** o commit que fechou, e o teste ou o check de CI que impede a reabertura.
+Commit sozinho prova que alguém mexeu; teste nomeado prova que a regressão reprova. Um fechamento anotado sem
+teste é uma promessa com data — que é a forma exata do defeito que esta série passou seis PRs corrigindo.
+
+**Verificação e validação são coisas separadas, e as duas foram feitas:**
+
+- **Verificação** (mecânica, e travada por teste): o sha citado existe e é ancestral do commit sob teste, o nome
+  de teste citado existe como bloco em `app/tests/regras.test.tsx`, e o nome de check citado existe como `name:`
+  de job em `.github/workflows/`. O bloco `PR 27` da suíte reprova qualquer uma das três. Ancestralidade importa
+  porque um squash futuro trocaria os shas, e a tabela passaria a citar história que não existe mais.
+- **Validação** (de leitura, e não automatizável): o resíduo descrito corresponde ao que o código realmente não
+  faz. Foi conferido lendo o código, não a mensagem de commit — e num caso as duas divergiam: `cada46c` traz
+  "(Riscos 035, 037, 040)" no assunto, e o Risco-037 **não** fechou. Ver a observação 3 do §7.3, que já dizia
+  isso antes deste adendo.
+
+**Os três estados usados, e o que significam:**
+
+| Estado | Significa |
+|---|---|
+| **Fechado** | O risco descrito não se reproduz na `main`, e há teste ou check que reprova a volta |
+| **Parcial** | Parte do risco fechou com prova, e o que resta está nomeado na própria célula — nunca "Fechado" seco |
+| Aberto / Premissa de aceite | Como descrito no corte. Nenhuma linha foi promovida sem commit e teste |
+
+**Dois riscos entram nesta coluna sem estar na lista de escopo original desta reconciliação:** Risco-020 (o gate
+retranscrevia o valor de PII) e Risco-034 (contrato congelado pré-correções). Os dois fecharam na série, com
+teste. Deixá-los marcados "Aberto" numa passagem cujo objetivo é fazer a tabela corresponder à realidade seria o
+mesmo defeito que ela existe para corrigir, então entraram — e esta frase é o registro de que entraram por
+decisão, não por inércia.
+
+**Três riscos que a série tocou e que continuam abertos, com o motivo:**
+
+1. **Risco-037** (sem autenticação real) — a catraca do `cada46c` garante que a identidade fabricada não chega a
+   um artefato de produção. Não cria autenticação. Sem provedor de identidade real com MFA e claims de propósito
+   revogáveis, o risco permanece, e o perfil de produção segue sendo uma recusa que se explica.
+2. **Risco-016** (Art. 14 não modelado) — a migração do consentimento (`022a1d1`) deixou `m-menor` declarando
+   consentimento sem texto publicado, **de propósito**: publicar um texto ali inventaria o aceite de um
+   responsável que ninguém consultou. A exceção está numa lista fechada no teste, e o risco continua aberto.
+3. **Risco-014** (MFA/step-up sem instrumentação) — o step-up do `a367a89` é derivado da operação no servidor e
+   tem janela de recência provada nos dois lados do segundo, mas sem TOTP nem WebAuthn não há fator real.
+   `purposes[]` no token OIDC segue sendo desenho de produção: o mock não tem emissor para conferir o claim.
+
+**Residuais que nenhum destes fechamentos alcança:**
+
+- **PII sintética no histórico do git** (Risco-004 e Risco-003). O inventário `.privacy/pii-sintetica.yaml` e a
+  varredura cobrem a árvore de trabalho. Os CPFs removidos e o `exemplo.com` sanitizado continuam nos commits
+  anteriores, e reescrever o histórico é decisão de quem opera o repositório, não deste documento.
+- **Credencial em URL no feed ICS.** O token do `a367a89` tem papel e prazo, e o segredo é gerado por instância —
+  mas o token viaja no caminho porque é o desenho do protocolo iCalendar. Está declarado no §7.3.
+
+**Reavaliação:** este adendo não move a data do §7.4. Os 26 riscos que seguem abertos são o que sustenta o prazo.
 
 ---
 
