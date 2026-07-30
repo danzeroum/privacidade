@@ -4,6 +4,7 @@ import { EH_DEMONSTRACAO } from '../lib/perfil';
 import { POLITICA_PADRAO, politicaDe } from './politicas';
 import { ACESSO_SEM_FINALIDADE, campoAlcancado, recusaDeFinalidade } from './finalidade';
 import { TENTATIVAS_MAXIMAS, motivoDaFaltaDeStepUp } from './stepup';
+import { avaliarEquidade, motivoDaLiaNaoVigente } from './equidade';
 import type { FatorDeStepUp } from './stepup';
 import { ARTEFATOS, estadosDe, motivoDaRecusa, transicaoPermitida } from './estados';
 import type { Artefato, EstadoDe } from './estados';
@@ -363,6 +364,30 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
        * existência dessa salvaguarda que sustenta o balanceamento do Art. 10,
        * §3º. Só `acolhida` barra; recusada com fundamento, o tratamento volta.
        */
+      /**
+       * PR 7 · Risco-007 — a LIA precisa estar de pé, e não apenas existir.
+       *
+       * O par desta checagem no desenho de produção é o trigger
+       * `exige_lia_vigente()` (`db/schema.sql:648`), que recusa a **escrita** do
+       * campo quando a LIA está fora de `vigente`. No protótipo isso não existia:
+       * o status da LIA era decorativo, e o RIPD §3 creditava ao schema uma
+       * garantia que a camada que serve o dado não aplicava. Uma LIA vencida
+       * derrubava a base legal no papel e revelava o valor na tela.
+       *
+       * Vem **antes** da oposição de propósito. A oposição é sobre este titular;
+       * esta é sobre o tratamento inteiro. Perguntar primeiro se a pessoa se opôs
+       * a um tratamento que já não tem base legal responderia a pergunta errada.
+       */
+      const liaCaida = catalogado.baseLegal === 'legitimo_interesse'
+        ? motivoDaLiaNaoVigente(banco, catalogado.liaCodigo)
+        : null;
+      if (liaCaida) {
+        registrarNegativa(banco, ator, papel, campo, 'LIA não vigente');
+        return erro(422, liaCaida,
+          'Art. 7º, IX c/c Art. 10, §3º: legítimo interesse se sustenta no balanceamento, e balanceamento '
+          + 'cuja mitigação caiu não sustenta tratamento — a base volta quando a LIA for rebalanceada.') as Res<T>;
+      }
+
       if (catalogado.baseLegal === 'legitimo_interesse'
         && banco.oposicaoVigenteSobre(titularId, catalogado.id)) {
         registrarNegativa(banco, ator, papel, campo, 'oposicao acolhida');
@@ -633,9 +658,29 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         return ok({ camposIds: lia.camposIds }) as Res<T>;
       }
 
+      if (acao === 'equidade') return equidadeDaLia<T>(banco, req, lia.codigo);
+
       if (acao === 'assinar') {
         if (!pode(papel, 'assinar_lia')) {
           return erro(403, 'Somente o DPO assina a LIA.') as Res<T>;
+        }
+        /**
+         * PR 7 — assinar não é o caminho de volta de uma LIA que já valeu.
+         *
+         * Esta rota escreve `vigente` direto, e antes do PR 7 isso era só um
+         * atalho no caminho de autoria. Com `em_revisao` na máquina passou a ser
+         * um buraco: a LIA cairia por disparidade e voltaria a vigente com uma
+         * assinatura, sem rebalancear — devolvendo vigência a um balanceamento
+         * cuja mitigação continua caída.
+         *
+         * A recusa é 409 e não 422 porque o problema é sequência, não conteúdo, e
+         * a frase vem da própria tabela de estados: um segundo texto aqui
+         * divergiria do que a máquina diz.
+         */
+        const jaValeu: string[] = ['em_revisao', 'vencida'];
+        if (jaValeu.includes(lia.status)) {
+          return erro(409, motivoDaRecusa('lia', lia.status, 'vigente'),
+            'Sequência, não conteúdo: a LIA volta por balanceamento, e assinar de novo não refaz o balanceamento.') as Res<T>;
         }
         const semJustificativa = lia.alternativas.filter((a) => a.justificativa.trim().length < 20);
         if (semJustificativa.length > 0) {
@@ -1441,6 +1486,49 @@ function exigenciasDe(
   }
   if (de === para) return null;
   return null;
+}
+
+/**
+ * `POST /lias/{id}/equidade` — o teste de disparidade e a consequência dele.
+ *
+ * O corpo da requisição não é lido, e isso é a regra: a razão é **derivada no
+ * servidor** sobre a massa versionada. Cliente que informasse o próprio
+ * resultado estaria alegando, e alegação não sustenta o balanceamento do
+ * Art. 10, §3º — é a mesma razão pela qual o nível de step-up sai da operação e
+ * não do cabeçalho.
+ */
+function equidadeDaLia<T>(banco: BancoMock, req: Req, codigo: string): Res<T> {
+  const avaliacao = avaliarEquidade(banco, { ator: req.ator, papel: req.papel });
+
+  if (avaliacao.situacao === 'sem_registro') {
+    return erro(503, avaliacao.mensagem,
+      'Sem registro não há queda: a ordem é gravar, depois mover. O estado da LIA não mudou.') as Res<T>;
+  }
+  if (avaliacao.situacao === 'sem_medicao') {
+    return erro(422, avaliacao.achados.map((a) => a.mensagem.replace(/\s+/g, ' ').trim()).join(' '),
+      'Contrato ou massa que não sustentam medição reprovam em vez de virar razão 1,000 — '
+      + 'aprovar por não ter tido o que medir é o Risco-003 com outro nome.') as Res<T>;
+  }
+
+  const { medicao, contrato } = avaliacao;
+  const lia = banco.cenario.lias.find((l) => l.codigo === codigo);
+
+  return ok({
+    lia: contrato.lia,
+    // Sai sempre, verde inclusive: sem ela um 200 seria lido como atestado de
+    // equidade do modelo, e não há modelo aqui para atestar.
+    natureza: contrato.natureza.replace(/\s+/g, ' ').trim(),
+    atende_piso: medicao.atendePiso,
+    razao: medicao.razaoMilesimos / 1000,
+    piso: medicao.pisoMilesimos / 1000,
+    menor_grupo: medicao.menor.grupo,
+    maior_grupo: medicao.maior.grupo,
+    status_da_lia: lia?.status ?? '—',
+    transicao: avaliacao.situacao === 'reprovada' && avaliacao.de !== avaliacao.para
+      ? `${avaliacao.de}→${avaliacao.para}`
+      : null,
+    grupos: medicao.grupos.map((g) => ({ grupo: g.grupo, total: g.total, aprovadas: g.aprovadas })),
+  }) as Res<T>;
 }
 
 export function transitar<T>(

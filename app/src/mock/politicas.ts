@@ -518,6 +518,16 @@ export const POLITICAS: PoliticaRota[] = [
       + 'que fala o vocabulário do catálogo — por isso a permissão é a de engenharia.',
   },
   {
+    metodo: 'POST', caminho: /^lias\/[^/]+\/equidade$/,
+    tipo: 'escrita', foraDeEscopo: '403',
+    finalidade: 'dispensada',
+    motivoDaDispensa:
+      'Mede disparidade sobre massa agregada por grupo e decide o estado da LIA. Não lê registro de '
+      + 'pessoa nenhuma: a entrada são contagens versionadas, e a saída é o status de um artefato jurídico. '
+      + 'A finalidade do Art. 37 responde por que alguém olhou o dado de um titular, e aqui ninguém olhou.',
+    nota: 'Teste de disparidade da LIA (Risco-007). Escrita porque muda o estado do artefato.',
+  },
+  {
     metodo: 'POST', caminho: /^lias\/[^/]+\/(campos|assinar)$/,
     tipo: 'escrita', foraDeEscopo: '403',
     finalidade: 'dispensada',

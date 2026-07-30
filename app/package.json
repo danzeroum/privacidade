@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "gate:privacidade": "vite-node scripts/gate.ts",
+    "equidade": "vite-node scripts/equidade.ts",
     "varredura:segredos": "vite-node scripts/segredos.ts",
     "build:producao": "vite build --mode producao --outDir dist-producao",
     "catraca:producao": "npm run build:producao && vite-node scripts/catraca.ts"
@@ -19,6 +20,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0",
+    "yaml": "^2.9.0",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
@@ -32,7 +34,6 @@
     "jsdom": "^25.0.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.3",
-    "vitest": "^3.2.7",
-    "yaml": "^2.9.0"
+    "vitest": "^3.2.7"
   }
 }

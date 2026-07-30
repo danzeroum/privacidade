@@ -1,0 +1,68 @@
+# Equidade algorítmica (PR 7) — Risco-007.
+#
+# A LIA-SCORING-001 sustenta o legítimo interesse do scoring citando teste de
+# disparate impact e remoção de features proxy, e o RIPD §5 usa as duas no
+# balanceamento do Art. 10 §3º. Enquanto eram texto de seed, o balanceamento se
+# apoiava em prova que ninguém conseguia apresentar — o próprio RIPD do cenário
+# listava o job como pendência.
+#
+# Workflow próprio, e não etapa dentro do gate de privacidade: *required status
+# check* se marca por **nome de job**, e etapa embutida em job existente não é
+# marcável separadamente. Quem quer que o vermelho daqui impeça o merge precisa
+# de um check com nome próprio.
+#
+# O que este job **não** afirma: que o modelo é justo. Não há modelo neste
+# repositório. Ele mede a massa sintética versionada em `.privacy/` contra o piso
+# declarado no mesmo lugar, e o relatório imprime essa natureza em toda execução,
+# verde inclusive. Um pipeline verde que fosse lido como atestado de equidade
+# seria pior que nenhum pipeline: daria à mitigação da LIA a aparência de prova.
+#
+# Como nos outros três, nenhuma etapa aqui tolera falha, e a palavra que faria
+# isso não aparece no arquivo — de propósito, para que uma varredura simples
+# confirme a ausência. E, como nos outros, enquanto o job não estiver marcado
+# como required na proteção da `main`, ele informa o vermelho sem impedir o
+# merge: a marcação é configuração do repositório, não commit.
+#
+# A regra roda em `app/src/lib/equidade.ts` e é exercitada por teste. O protótipo
+# lê os **mesmos bytes** de `.privacy/`, e um teste de paridade cobra que os dois
+# cheguem à mesma razão — número calculado em dois lugares é número que diverge.
+name: Equidade algorítmica
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: equidade-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  equidade:
+    name: Disparidade e proxies do modelo
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      # A raiz é o repositório: o contrato e a massa vivem em `.privacy/`, e os
+      # fatores do modelo no fonte do protótipo. Reprova abaixo do piso nomeando
+      # os grupos e a razão, e reprova também quando um fator novo casa proxy da
+      # lista fechada — com arquivo e linha.
+      - name: Teste de disparidade
+        run: npm run equidade

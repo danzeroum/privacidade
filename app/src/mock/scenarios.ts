@@ -1,6 +1,7 @@
 import { sha256, hashCpf, hashEncadeado } from '../lib/sha256';
 import { aplicar } from './decisoes';
 import { canalDeOposicao } from './rotas';
+import { LIA_DA_EQUIDADE, PISO_DECLARADO } from '../lib/equidade-versionada';
 import type { Fornecedor } from './fornecedor';
 import type { Obrigacao, Trilha, TipoObrigacao } from './calendario';
 import type { Epico, Papel, Ripd } from './types';
@@ -46,8 +47,21 @@ export const LINDDUN_BASE: LinddunItem[] = [
     mitigacao: 'Remover features proxy (CEP, nome da mãe, canal de atendimento) do conjunto de treino.' },
   { chave: 'disclosure', rotulo: 'Disclosure', canonico: 'Disclosure of information', ativo: true,
     mitigacao: 'DTO por escopo com allowlist de campos; nenhuma entidade do ORM é serializada direta.' },
+  /**
+   * PR 7 · Risco-007 — a mitigação passa a citar o comando, e o piso vem do
+   * contrato.
+   *
+   * Antes: "limiar 0,8–1,2 bloqueando o release". Duas coisas erradas na mesma
+   * frase. A faixa é assimétrica — sob razão menor/maior, o teto equivalente a um
+   * piso de 0,8 é 1,25 —, e "bloqueando o release" descrevia um bloqueio que não
+   * existia em lugar nenhum do repositório. O número agora é lido de
+   * `.privacy/equidade.yaml`: documento com número próprio envelhece contra o
+   * instrumento sem ninguém notar.
+   */
   { chave: 'discrimination', rotulo: 'Discrimination', canonico: 'Non-compliance (Art. 6º, IX)', ativo: true,
-    mitigacao: 'Teste de disparate impact com limiar 0,8–1,2 bloqueando o release do modelo.' },
+    mitigacao: `Teste de disparidade com piso ${PISO_DECLARADO} de razão de aprovação entre grupos, `
+      + `executável em \`npm run equidade\` e reprovando o pipeline abaixo do piso. Estourado, derruba a `
+      + `${LIA_DA_EQUIDADE} para em_revisao e o campo sob ela deixa de ser revelável.` },
   { chave: 'unauthorized', rotulo: 'Unauthorized', canonico: 'Linkability + Identifiability', ativo: true,
     mitigacao: 'Autorização por objeto com checagem de posse; 404 uniforme em vez de 403.' },
   { chave: 'nonrepudiation', rotulo: 'Non-repudiation', canonico: 'Non-repudiation', ativo: true,
@@ -596,7 +610,7 @@ const banco: Cenario = {
     alternativas: [
       { alternativa: 'Anonimização', situacao: 'rejeitado', justificativa: 'A agregação com k-anonimato destrói o sinal individual: queda de 31 p.p. de AUC no teste de jul/2026.' },
       { alternativa: 'Pseudonimização', situacao: 'atendido', justificativa: 'CPF vira token HMAC-SHA256 com chave no KMS antes de qualquer uso analítico ou envio ao LLM.' },
-      { alternativa: 'Escopo menor', situacao: 'atendido', justificativa: 'Removidas as features cep, nome_mae e canal_atendimento por serem proxies discriminatórios.' },
+      { alternativa: 'Escopo menor', situacao: 'atendido', justificativa: 'Removidas as features cep, nome_mae e canal_atendimento por serem proxies discriminatórios. A lista é fechada em .privacy/equidade.yaml e `npm run equidade` reprova com arquivo e linha se alguma delas voltar como fator.' },
       { alternativa: 'Retenção menor', situacao: 'atendido', justificativa: 'Janela reduzida de 24 para 6 meses de histórico, com perda de apenas 1,2 p.p. de AUC.' },
       { alternativa: 'Agregação', situacao: 'nao_aplicavel', justificativa: 'A decisão é individual por titular; dado agregado não sustenta a finalidade.' },
       { alternativa: 'Consentimento', situacao: 'rejeitado', justificativa: 'Condicionaria a análise de crédito à aceitação, tornando o consentimento não livre.' },

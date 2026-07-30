@@ -26,7 +26,7 @@ export type Artefato =
 export type EstadoParecer = 'rascunho' | 'emitido' | 'homologado' | 'vigente' | 'devolvido';
 export type EstadoRipd =
   | 'triagem' | 'dispensado' | 'elaboracao' | 'parecer_juridico' | 'deliberado' | 'vigente' | 'em_revisao';
-export type EstadoLia = 'rascunho' | 'balanceamento' | 'assinada' | 'vigente' | 'vencida';
+export type EstadoLia = 'rascunho' | 'balanceamento' | 'assinada' | 'vigente' | 'em_revisao' | 'vencida';
 export type EstadoRisco = 'identificado' | 'avaliado' | 'em_tratamento' | 'mitigado' | 'aceito';
 export type EstadoSolicitacao = 'recebida' | 'em_analise' | 'concluida' | 'recusada_com_fundamento';
 export type EstadoAchado =
@@ -79,12 +79,29 @@ const RIPD: Maquina<EstadoRipd> = {
   em_revisao: ['elaboracao'],
 };
 
-/** Vencida nunca volta direto a vigente: renovar exige rebalanceamento. */
+/**
+ * Vencida nunca volta direto a vigente: renovar exige rebalanceamento.
+ *
+ * `em_revisao` entra no PR 7 e **não** é sinônimo de `balanceamento`. Os dois
+ * significam trabalho aberto sobre a LIA, mas por caminhos opostos:
+ * `balanceamento` é autoria — a LIA sendo escrita, ainda sem vigência —, e
+ * `em_revisao` é vigência puxada de volta, o que só acontece com uma LIA que
+ * estava valendo e cuja mitigação caiu. Colapsar os dois apagaria a diferença
+ * entre "nunca sustentou nada" e "sustentava e parou de sustentar", que é
+ * justamente a distinção que uma fiscalização quer ver.
+ *
+ * A saída é única, e é para `balanceamento`: pela mesma razão que `vencida` não
+ * volta direto a `vigente`, uma LIA cuja mitigação estourou não se recarimba —
+ * rebalancear é o único caminho de volta. O vocabulário passa a espelhar o
+ * `CHECK` de `db/schema.sql:602`, que já tinha `em_revisao` desde o desenho de
+ * produção; era o mock que estava com uma máquina própria.
+ */
 const LIA: Maquina<EstadoLia> = {
   rascunho: ['balanceamento'],
   balanceamento: ['assinada'],
   assinada: ['vigente'],
-  vigente: ['vencida'],
+  vigente: ['em_revisao', 'vencida'],
+  em_revisao: ['balanceamento'],
   vencida: ['balanceamento'],
 };
 
@@ -180,6 +197,8 @@ const MOTIVOS: Partial<Record<Artefato, Record<string, string>>> = {
   },
   lia: {
     'vencida→vigente': 'Renovar exige rebalanceamento, não recarimbo: a LIA vencida volta para balanceamento.',
+    'em_revisao→vigente': 'A mitigação que sustentava o balanceamento caiu — devolver a vigência sem '
+      + 'rebalancear seria afirmar de novo o que deixou de ser verdade. A volta é por balanceamento.',
   },
   solicitacao: {
     'recebida→concluida': 'Conclusão sem análise não tem o que provar ao titular.',

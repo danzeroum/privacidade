@@ -43,7 +43,7 @@ INSERT INTO lia (id, tenant_id, codigo, titulo, finalidade, categoria_finalidade
    'Enriquecimento do modelo de scoring com histórico de compras',
    'Elevar a acurácia do scoring reduzindo recusa indevida de crédito','analise_credito',
    3,2,'media',
-   'Pseudonimização HMAC pré-prompt; retenção de 180 dias; exclusão do CEP como feature; teste de disparate impact a cada release.',
+   'Pseudonimização HMAC pré-prompt; retenção de 180 dias; exclusão do CEP como feature; teste de disparidade com piso 0,80 de razão de aprovação entre grupos, executável em npm run equidade e reprovando o pipeline abaixo do piso — estourado, esta LIA cai para em_revisao e o campo sob ela deixa de ser revelável.',
    'Aviso de privacidade, seção 4 "Como decidimos seu crédito", e tela de resultado da proposta.',
    'POST /v1/titulares/me/oposicao?lia=LIA-SCORING-001',
    'sustenta_com_mitigacao','vigente', DATE '2026-02-01', DATE '2027-02-01',
@@ -54,7 +54,7 @@ INSERT INTO lia (id, tenant_id, codigo, titulo, finalidade, categoria_finalidade
 INSERT INTO lia_alternativa (lia_id, alternativa, situacao, justificativa) VALUES
   ('66666666-6666-4666-8666-000000000001','anonimizacao','rejeitado','A agregação com k-anonimato destrói o sinal individual necessário para o scoring; testado em jul/2026 com queda de 31 p.p. de AUC.'),
   ('66666666-6666-4666-8666-000000000001','pseudonimizacao','atendido','CPF substituído por token HMAC-SHA256 com chave no KMS antes de qualquer uso analítico ou envio a LLM.'),
-  ('66666666-6666-4666-8666-000000000001','escopo_menor','atendido','Removidas as features cep, nome_mae e canal_atendimento por serem proxies discriminatórios detectados no teste de disparidade.'),
+  ('66666666-6666-4666-8666-000000000001','escopo_menor','atendido','Removidas as features cep, nome_mae e canal_atendimento por serem proxies discriminatórios detectados no teste de disparidade. A lista é fechada em .privacy/equidade.yaml e npm run equidade reprova com arquivo e linha se alguma delas voltar como fator.'),
   ('66666666-6666-4666-8666-000000000001','retencao_menor','atendido','Janela reduzida de 24 para 6 meses de histórico de compras sem perda relevante de acurácia (−1,2 p.p. de AUC).'),
   ('66666666-6666-4666-8666-000000000001','agregacao','nao_aplicavel','A decisão é individual por titular; agregado não sustenta a finalidade.'),
   ('66666666-6666-4666-8666-000000000001','consentimento','rejeitado','Consentimento condicionaria a análise de crédito à aceitação, tornando-o não livre; a via legítima aqui é o balanceamento com oposição facilitada.');
@@ -170,7 +170,7 @@ INSERT INTO ripd_recomendacao (ripd_id, prioridade, descricao, evidencia_esperad
   ('aaaaaaaa-aaaa-4aaa-8aaa-000000000001','P0','Pseudonimizar CPF com HMAC antes de qualquer envio ao LLM','Commit no PR #1234 + teste de integração verde','@eng-maria',DATE '2026-08-04',true, now() - INTERVAL '2 days'),
   ('aaaaaaaa-aaaa-4aaa-8aaa-000000000001','P0','Publicar endpoint de revisão de decisão automatizada','Rota /me/decisoes/{id}/revisao documentada no OpenAPI','@eng-maria',DATE '2026-08-11',false,NULL),
   ('aaaaaaaa-aaaa-4aaa-8aaa-000000000001','P0','Assinar SCC da ANPD com a OpenAI','dpa/openai-scc.pdf versionado com hash','@juridico-ana',DATE '2026-08-04',true, now() - INTERVAL '5 days'),
-  ('aaaaaaaa-aaaa-4aaa-8aaa-000000000001','P1','Teste de disparate impact no pipeline do modelo','Job ci-disparate-test com limiar 0.8–1.2','@ml-joao',DATE '2026-08-18',false,NULL),
+  ('aaaaaaaa-aaaa-4aaa-8aaa-000000000001','P1','Teste de disparate impact no pipeline do modelo','Job ci-disparate-test com piso 0.8 de razão de aprovação — a faixa 0.8–1.2 era assimétrica: sob razão menor/maior o teto equivalente é 1.25','@ml-joao',DATE '2026-08-18',false,NULL),
   ('aaaaaaaa-aaaa-4aaa-8aaa-000000000001','P2','Diferencial privacy nas agregações de BI','Relatório com épsilon declarado','@squad-dados',DATE '2026-09-30',false,NULL);
 
 -- ---------- matriz de risco (R1..R10 do risk-matrix.csv) --------------------

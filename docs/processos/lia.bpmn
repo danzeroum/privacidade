@@ -17,7 +17,7 @@
     id="definicoes-lia"
     targetNamespace="https://lastro.exemplo/processos">
   <bpmn:process id="lia" name="PR-04 · Legítimo interesse (LIA)" isExecutable="false">
-    <bpmn:documentation>Vencida nunca volta direto a vigente: renovar exige rebalanceamento, não recarimbo.</bpmn:documentation>
+    <bpmn:documentation>Vencida nunca volta direto a vigente: renovar exige rebalanceamento, não recarimbo. em_revisao é vigência puxada de volta quando a mitigação cai (PR 7, Risco-007) — não é sinônimo de balanceamento, que é autoria; e também não volta direto a vigente.</bpmn:documentation>
     <bpmn:startEvent id="inicio" name="Legítimo interesse (LIA) aberto">
       <bpmn:outgoing>flow-inicio</bpmn:outgoing>
     </bpmn:startEvent>
@@ -28,6 +28,7 @@
     <bpmn:task id="balanceamento" name="balanceamento">
       <bpmn:incoming>flow-rascunho-balanceamento</bpmn:incoming>
       <bpmn:incoming>flow-vencida-balanceamento</bpmn:incoming>
+      <bpmn:incoming>flow-em_revisao-balanceamento</bpmn:incoming>
       <bpmn:outgoing>flow-balanceamento-assinada</bpmn:outgoing>
     </bpmn:task>
     <bpmn:task id="assinada" name="assinada">
@@ -36,7 +37,12 @@
     </bpmn:task>
     <bpmn:task id="vigente" name="vigente">
       <bpmn:incoming>flow-assinada-vigente</bpmn:incoming>
+      <bpmn:outgoing>flow-vigente-em_revisao</bpmn:outgoing>
       <bpmn:outgoing>flow-vigente-vencida</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="em_revisao" name="em_revisao">
+      <bpmn:incoming>flow-vigente-em_revisao</bpmn:incoming>
+      <bpmn:outgoing>flow-em_revisao-balanceamento</bpmn:outgoing>
     </bpmn:task>
     <bpmn:task id="vencida" name="vencida">
       <bpmn:incoming>flow-vigente-vencida</bpmn:incoming>
@@ -46,6 +52,8 @@
     <bpmn:sequenceFlow id="flow-rascunho-balanceamento" sourceRef="rascunho" targetRef="balanceamento" name="balancear" />
     <bpmn:sequenceFlow id="flow-balanceamento-assinada" sourceRef="balanceamento" targetRef="assinada" name="assinar" />
     <bpmn:sequenceFlow id="flow-assinada-vigente" sourceRef="assinada" targetRef="vigente" name="publicar" />
+    <bpmn:sequenceFlow id="flow-vigente-em_revisao" sourceRef="vigente" targetRef="em_revisao" name="mitigação caiu (teste de disparidade abaixo do piso)" />
+    <bpmn:sequenceFlow id="flow-em_revisao-balanceamento" sourceRef="em_revisao" targetRef="balanceamento" name="rebalancear" />
     <bpmn:sequenceFlow id="flow-vigente-vencida" sourceRef="vigente" targetRef="vencida" name="vencer" />
     <bpmn:sequenceFlow id="flow-vencida-balanceamento" sourceRef="vencida" targetRef="balanceamento" name="renovar com rebalanceamento" />
   </bpmn:process>

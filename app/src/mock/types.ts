@@ -340,6 +340,22 @@ export interface Lia {
    * `db/seed.sql` e contra a rota servida.
    */
   canalOposicao: string;
+  /**
+   * Por que esta LIA saiu de `vigente` — quando foi o teste de disparidade
+   * (Risco-007) que a derrubou.
+   *
+   * Existe para a recusa poder nomear a razão de aprovação em vez de dizer
+   * apenas "LIA não vigente". O status sozinho diria que o tratamento parou; não
+   * diria que parou porque a mitigação que sustentava o balanceamento do Art. 10
+   * §3º deixou de valer, que é a informação de que o DPO precisa para rebalancear.
+   */
+  equidade?: {
+    razaoMilesimos: number;
+    pisoMilesimos: number;
+    menorGrupo: string;
+    maiorGrupo: string;
+    motivo: string;
+  };
 }
 
 export type DesfechoSolicitacao = 'atendido' | 'atendido_parcialmente' | 'recusado_com_fundamento';

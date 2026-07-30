@@ -159,6 +159,22 @@ export const REGRAS: RegraDaFila[] = [
     travado: '{codigo} venceu: {campos} campo(s) ficaram sem base legal e o gate de CI bloqueia os PRs que os tocam.',
     proximaAcao: 'Reabrir o balanceamento e renovar — vencida não volta direto a vigente',
     proximo: 'a assinatura devolve a base legal e libera o gate' },
+  /**
+   * PR 7 · Risco-007 — a LIA que caiu por disparidade precisa aparecer como
+   * trabalho de alguém.
+   *
+   * Sem esta linha, a queda seria silenciosa na T0: o campo pararia de ser
+   * revelável, o pipeline ficaria vermelho, e nenhum item diria a quem cabe
+   * rebalancear. Urgência `agora`, e não `30d` como a renovação: enquanto a LIA
+   * está aqui o tratamento está parado. Prazo de renovação é planejamento; base
+   * legal caída é interrupção, e interrupção não espera trinta dias na fila.
+   */
+  { artefato: 'lia', estado: 'em_revisao', acao: 'assinar_lia', quando: 'sempre', urgencia: 'agora',
+    tipo: 'Base legal', tela: '/t8',
+    travado: '{codigo} caiu para revisão: a mitigação de equidade que sustentava o balanceamento estourou o piso, '
+      + '{campos} campo(s) deixaram de ser reveláveis e `npm run equidade` reprova o pipeline.',
+    proximaAcao: 'Reabrir o balanceamento — assinar de novo não refaz o balanceamento',
+    proximo: 'com a disparidade corrigida e a LIA rebalanceada, a base legal volta e o gate libera' },
   { artefato: 'lia', estado: 'vigente', acao: 'assinar_lia', quando: 'vencendo', urgencia: '30d',
     tipo: 'Base legal', tela: '/t8',
     travado: '{codigo} vence em {dias} dia(s) e cobre {campos} campo(s).',
