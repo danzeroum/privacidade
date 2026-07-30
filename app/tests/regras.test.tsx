@@ -33,6 +33,7 @@ import {
   CATEGORIAS, GATILHOS, TABELAS, TABELAS_IDS, aplicar, condicoesDe, nivelDoRisco,
   reproduzir, tomDoRisco, ultimaDecisao, vigenteDe,
 } from '../src/mock/decisoes';
+import type { TabelaId } from '../src/mock/decisoes';
 import { TENTATIVAS_MAXIMAS, motivoDaFaltaDeStepUp, stepUpVigente } from '../src/mock/stepup';
 import { recusaDeFinalidade } from '../src/mock/finalidade';
 import { SEGREDOS_HISTORICOS, varrerBundle, varrerFonte } from '../src/lib/segredos';
@@ -41,8 +42,8 @@ import {
   planoDePartida, textoDeAjuda, type Fatos, type Opcoes,
 } from '../src/lib/partida';
 import {
-  CABECALHO_DA_MASSA, casaProxy, descreverDisparidade, lerContrato, lerMassa, medir, pisoEmMilesimos,
-  relatorioDeEquidade, rodarEquidade, varrerFatores,
+  CABECALHO_DA_MASSA, CAMINHO_DO_CONTRATO, casaProxy, descreverDisparidade, lerContrato, lerMassa,
+  medir, pisoEmMilesimos, relatorioDeEquidade, rodarEquidade, varrerFatores,
 } from '../src/lib/equidade';
 import { PISO_DECLARADO } from '../src/lib/equidade-versionada';
 import { BYTES_VERSIONADOS, avaliarEquidade } from '../src/mock/equidade';
@@ -3110,7 +3111,13 @@ describe('PR 10 · o calendário como dado, e a promoção à fila', () => {
   it('toda obrigação semeada declara consequência, antecedência e ação', () => {
     for (const id of ['banco', 'varejo', 'midia']) {
       const b = novoBanco(id);
-      expect(b.cenario.obrigacoes.length, id).toBe(22);
+      /**
+       * 23 no banco, 22 nos outros dois. A 23ª é a reavaliação da AIA do
+       * credit-scoring (PR 28, Risco-007), e ela vive só onde o modelo existe:
+       * obrigação genérica nos três prometeria três AIAs e entregaria uma, e a
+       * fila exibiria trabalho sobre artefato inexistente.
+       */
+      expect(b.cenario.obrigacoes.length, id).toBe(id === 'banco' ? 23 : 22);
       const codigos = new Set<string>();
       for (const o of b.cenario.obrigacoes) {
         expect(o.seFalhar.length, `${o.codigo}: consequência`).toBeGreaterThan(20);
@@ -4160,8 +4167,9 @@ describe('PR 13 · declarado × derivado, travado como invariante', () => {
     expect(naFilaDo('engenharia')).toContain(de('Trilha técnica').codigo);
     expect(naFilaDo('seguranca')).toContain(de('Tabletop').codigo);
 
-    // Nenhuma sumiu do calendário: a titularidade mudou, o ano não.
-    expect(cargaDoAno(b.cenario.obrigacoes).reduce((s, c) => s + c.obrigacoes.length, 0)).toBe(22);
+    // Nenhuma sumiu do calendário: a titularidade mudou, o ano não. 23 porque
+    // este bloco roda no cenário do banco, o único com AIA.
+    expect(cargaDoAno(b.cenario.obrigacoes).reduce((s, c) => s + c.obrigacoes.length, 0)).toBe(23);
   });
 
   it('a fila filtra pela abstração, não pelo papel concreto nem pela natureza', () => {
@@ -8836,6 +8844,268 @@ describe('PR 27 · aceitação — a reconciliação da auditoria é conferível
       // E a separação que o método exige.
       expect(secao).toContain('Verificação');
       expect(secao).toContain('Validação');
+    });
+  });
+});
+
+describe('PR 28 · Risco-007 — a AIA é documento conferido, não anexo', () => {
+  const CAMINHO = join('..', '.privacy', 'aia-credit-scoring.md');
+  const BRUTO = readFileSync(CAMINHO, 'utf8').replace(/\r\n/g, '\n');
+
+  /**
+   * A fronteira que faz este documento funcionar: cabeçalho conferido por
+   * máquina, corpo escrito para gente.
+   *
+   * O cabeçalho transcreve com catraca — `modelo`, `fatores` e a razão medida
+   * aparecem como valor, e divergir da fonte reprova. O corpo **aponta** e não
+   * repete número de taxa. Sem essa separação, ou o documento não é conferível,
+   * ou ele repete números que envelhecem em silêncio.
+   */
+  const partes = BRUTO.split(/^---$/m);
+  const CABECALHO = partes[1] ?? '';
+  const CORPO = partes.slice(2).join('---');
+
+  interface Aia {
+    versao: number;
+    modelo: string;
+    declarado_em: string;
+    lia: string;
+    fatores: string[];
+    proxies_declarados_em: string;
+    piso_declarado_em: string;
+    medicao: { em: string; razao_milesimos: number; massa: string; comando: string };
+    revisao_humana: { pedido_do_titular: string; ato_do_controlador: string };
+    exigida_por: { tabela: string; saida: string };
+    reavaliacao: { obrigacao: string; condicoes: { codigo: string; condicao: string }[] };
+  }
+  const AIA = parseYaml(CABECALHO) as Aia;
+
+  const SECOES = [
+    '1 · Finalidade e base legal',
+    '2 · Fatores do modelo',
+    '3 · Proxies removidos',
+    '4 · Medição de disparidade',
+    '5 · Revisão humana (Art. 20)',
+    '6 · Gatilho de reavaliação',
+    '7 · Exigida por',
+  ];
+
+  const ler = (rel: string) => {
+    const abs = join('..', rel);
+    return existsSync(abs) ? readFileSync(abs, 'utf8') : null;
+  };
+  const contrato = (() => {
+    const r = lerContrato(readFileSync(join('..', '.privacy', 'equidade.yaml'), 'utf8'), CAMINHO_DO_CONTRATO);
+    if (!r.ok) throw new Error('o contrato de equidade não parseia');
+    return r.contrato;
+  })();
+  const fatoresDoCodigo = () => new Set(varrerFatores(contrato, ler).fatores.map((f) => f.nome));
+
+  describe('estrutura — ausência reprova, e diz qual', () => {
+    it('o documento existe e tem cabeçalho separado do corpo', () => {
+      expect(BRUTO.startsWith('---\n'), 'sem cabeçalho não há o que conferir').toBe(true);
+      expect(CABECALHO.length, 'cabeçalho vazio').toBeGreaterThan(200);
+      expect(CORPO.length, 'corpo vazio: um cabeçalho sozinho não é AIA').toBeGreaterThan(500);
+    });
+
+    it('as sete seções mínimas estão presentes, cada uma nomeada', () => {
+      // Falha fechada e específica: "documento incompleto" manda a pessoa
+      // procurar; "falta a §5" manda a pessoa escrever.
+      for (const secao of SECOES) {
+        expect(CORPO, `seção mínima ausente: ${secao}`).toContain(`## ${secao}`);
+      }
+    });
+
+    it('cada campo do cabeçalho existe — nenhum cai por omissão', () => {
+      for (const campo of ['versao', 'modelo', 'declarado_em', 'lia', 'fatores',
+        'proxies_declarados_em', 'piso_declarado_em', 'medicao', 'revisao_humana',
+        'exigida_por', 'reavaliacao'] as const) {
+        expect(AIA[campo], `campo ausente no cabeçalho: ${campo}`).toBeTruthy();
+      }
+      expect(AIA.fatores.length).toBeGreaterThan(0);
+      expect(AIA.reavaliacao.condicoes.length, 'gatilho sem condição é prosa').toBeGreaterThan(2);
+    });
+  });
+
+  describe('verificação — a AIA confere com os artefatos?', () => {
+    it('a versão do modelo é a mesma nos três lugares onde ela é escrita', () => {
+      /**
+       * `.privacy/equidade.yaml`, o SHAP semeado e o `db/seed.sql`. Três lugares
+       * é o fato, não a escolha: mudar o modelo em um e esquecer os outros é o
+       * defeito, e a AIA é o quarto ponto que amarra os três.
+       */
+      const onde = [
+        ['.privacy/equidade.yaml', contrato.fatoresDoModelo.modelo],
+        ['app/src/mock/scenarios.ts', ler('app/src/mock/scenarios.ts')!.includes(`'${AIA.modelo}'`) ? AIA.modelo : '(ausente)'],
+        ['db/seed.sql', ler('db/seed.sql')!.includes(`'${AIA.modelo}'`) ? AIA.modelo : '(ausente)'],
+      ] as const;
+      for (const [arquivo, valor] of onde) {
+        expect(valor, `${arquivo}: versão do modelo divergente da AIA ("${AIA.modelo}")`).toBe(AIA.modelo);
+      }
+    });
+
+    it('a lista de fatores confere com o SHAP, nos dois sentidos', () => {
+      // Só código→documento deixaria a AIA prometer fator que já saiu do modelo;
+      // só documento→código deixaria fator entrar sem passar por revisão.
+      const doCodigo = fatoresDoCodigo();
+      expect(doCodigo.size, 'sem fator no código a prova é vazia').toBeGreaterThan(1);
+      expect([...AIA.fatores].sort(), 'fatores da AIA divergem do SHAP').toEqual([...doCodigo].sort());
+    });
+
+    it('o piso e os proxies são ponteiros que resolvem', () => {
+      for (const campo of ['piso_declarado_em', 'proxies_declarados_em'] as const) {
+        const alvo = ler(AIA[campo]);
+        expect(alvo, `${campo}: ponteiro quebrado — ${AIA[campo]}`).not.toBeNull();
+      }
+      // E o alvo é contrato de verdade: um ponteiro para arquivo ilegível
+      // resolveria e não provaria nada.
+      const r = lerContrato(ler(AIA.piso_declarado_em)!, AIA.piso_declarado_em);
+      expect(r.ok, 'o ponteiro do piso aponta para arquivo que não parseia como contrato').toBe(true);
+      expect(r.ok && r.contrato.metrica.pisoMilesimos).toBeGreaterThan(0);
+      expect(r.ok && r.contrato.proxiesRemovidos.length).toBeGreaterThan(0);
+    });
+
+    it('a razão datada confere com a massa versionada', () => {
+      /**
+       * O que faz esta AIA ser documento vivo. Mudar a massa sem redatar a
+       * medição reprova o build — é a diferença entre um retrato de um dia e uma
+       * avaliação que acompanha o que ela avalia.
+       */
+      const massa = lerMassa(ler(AIA.medicao.massa)!, AIA.medicao.massa);
+      expect(massa.ok).toBe(true);
+      const m = massa.ok ? medir(massa.grupos, contrato, AIA.medicao.massa) : null;
+      expect(m?.ok).toBe(true);
+      const recalculada = m?.ok ? m.medicao.razaoMilesimos : -1;
+      expect(AIA.medicao.razao_milesimos, `medição datada em ${AIA.medicao.em} divergente da massa`)
+        .toBe(recalculada);
+    });
+
+    it('o corpo não carrega literal de taxa — o número mora no cabeçalho travado', () => {
+      /**
+       * A regra é estreita de propósito: proíbe decimal entre zero e um, que é a
+       * classe de número que apodrece (piso, razão, taxa). Não proíbe `v2.3.1`
+       * nem "Art. 20, §1º", porque esses não são medida.
+       *
+       * O comentário do cabeçalho cita "0,8–1,2" ao explicar o que mudou, e por
+       * isso a varredura é só do corpo: declaração histórica não é promessa
+       * vigente — a mesma distinção do PR 26.
+       */
+      const achado = /\b0[.,]\d/.exec(CORPO);
+      expect(achado, `literal de taxa no corpo: "${achado?.[0]}" — aponte para o contrato em vez de repetir`)
+        .toBeNull();
+    });
+
+    it('a LIA citada existe no cenário, e é a que o contrato de equidade derruba', () => {
+      const banco = new BancoMock('banco');
+      expect(banco.cenario.lias.some((l) => l.codigo === AIA.lia), `LIA inexistente: ${AIA.lia}`).toBe(true);
+      expect(AIA.lia, 'a AIA e o contrato de equidade apontam para LIAs diferentes').toBe(contrato.lia);
+    });
+
+    it('as duas rotas do Art. 20 estão no contrato e servidas', () => {
+      const doContrato = new Set(OPERACOES.map((o) => `${o.metodo} ${o.contrato}`));
+      for (const rota of [AIA.revisao_humana.pedido_do_titular, AIA.revisao_humana.ato_do_controlador]) {
+        expect(doContrato.has(rota), `rota citada e inexistente no contrato: ${rota}`).toBe(true);
+      }
+      // E são rotas diferentes: pedido e ato não são a mesma coisa.
+      expect(AIA.revisao_humana.pedido_do_titular).not.toBe(AIA.revisao_humana.ato_do_controlador);
+    });
+
+    it('a decisão que exige a AIA existe, e alguma regra dela a exige', () => {
+      /**
+       * Fecha a ponta que a recomendação original do §4 pedia: a D3 respondia
+       * `analiseAlgoritmica=true` e não apontava para artefato nenhum. Uma AIA
+       * que se declarasse exigida por uma decisão que nunca a exige seria
+       * voluntária com aparência de obrigatória.
+       */
+      expect(TABELAS_IDS, `tabela citada e inexistente: ${AIA.exigida_por.tabela}`)
+        .toContain(AIA.exigida_por.tabela as TabelaId);
+      const d = aplicar(AIA.exigida_por.tabela as TabelaId, { gatilhos: ['T3'], gatilhosCriticos: 1, gatilhosTotal: 2 });
+      expect(Object.keys(d.saida), `saída citada e inexistente: ${AIA.exigida_por.saida}`)
+        .toContain(AIA.exigida_por.saida);
+      expect(d.saida[AIA.exigida_por.saida], 'a decisão citada não exige análise algorítmica em nenhum caminho')
+        .toBe(true);
+    });
+  });
+
+  describe('validação — ela responde o que o Art. 20 exige?', () => {
+    it('o gatilho é dado com data, responsável e consequência — não prosa', () => {
+      const banco = new BancoMock('banco');
+      const dela = banco.cenario.obrigacoes.filter((o) => o.curto === AIA.reavaliacao.obrigacao);
+      expect(dela, `obrigação citada e inexistente: ${AIA.reavaliacao.obrigacao}`).toHaveLength(1);
+      const o = dela[0];
+      expect(o.vence).toMatch(/^\d{4}-11-16$/);
+      expect(o.responsavel, 'obrigação sem responsável declarado').toBeTruthy();
+      expect(o.seFalhar.length, 'obrigação sem consequência escrita').toBeGreaterThan(40);
+      expect(o.antecedenciaDias, 'sem antecedência ela nunca vira item de fila').toBeGreaterThan(0);
+
+      /**
+       * "Não nasce cumprida", de forma estável: a obrigação vence **depois** da
+       * data em que a AIA foi declarada.
+       *
+       * Asserção óbvia seria `cumpridaEm` indefinido — e ela quebraria sozinha em
+       * 17 de novembro, porque `obr()` marca como cumprido o que já passou e o ano
+       * da grade vem do relógio. Um teste que reprova por passagem do tempo é um
+       * teste que a equipe aprende a ignorar.
+       */
+      expect(o.vence > AIA.declarado_em, 'a reavaliação vence antes de a AIA ser declarada: nasce cumprida').toBe(true);
+    });
+
+    it('a obrigação vive só onde o modelo existe', () => {
+      for (const id of ['varejo', 'midia']) {
+        const b = new BancoMock(id);
+        expect(b.cenario.obrigacoes.some((o) => o.curto === AIA.reavaliacao.obrigacao), id).toBe(false);
+      }
+      expect(new BancoMock('banco').cenario.obrigacoes).toHaveLength(23);
+    });
+
+    it('a reavaliação chega à fila de quem responde por ela', () => {
+      // Obrigação que não vira item de trabalho é entrada de planilha. A fila é
+      // derivada, então isto prova a ponta inteira.
+      const banco = new BancoMock('banco');
+      const o = banco.cenario.obrigacoes.find((x) => x.curto === AIA.reavaliacao.obrigacao)!;
+      const dentroDaJanela = new Date(`${o.vence}T12:00:00Z`).getTime() - (o.antecedenciaDias - 1) * 86_400_000;
+      const itens = minhaFila(derivarFila(banco.cenario, dentroDaJanela), o.responsavel);
+      const item = itens.find((i) => i.id === o.codigo);
+      expect(item, `${o.codigo} não chega à fila de ${o.responsavel}`).toBeTruthy();
+      expect(item!.travado).toContain('análise algorítmica');
+    });
+
+    it('as condições do gatilho cobrem as quatro fontes de mudança, com código próprio', () => {
+      const codigos = AIA.reavaliacao.condicoes.map((c) => c.codigo);
+      expect(new Set(codigos).size, 'condição sem código próprio, ou código repetido').toBe(codigos.length);
+      for (const c of AIA.reavaliacao.condicoes) {
+        expect(c.condicao.length, `${c.codigo}: condição sem texto que dê para conferir`).toBeGreaterThan(25);
+      }
+      // As quatro que o build cobra, mais o relógio.
+      const juntas = AIA.reavaliacao.condicoes.map((c) => c.condicao).join(' ').toLowerCase();
+      for (const fonte of ['versão do modelo', 'fator', 'piso', 'massa', 'vencimento']) {
+        expect(juntas, `nenhuma condição cobre: ${fonte}`).toContain(fonte);
+      }
+    });
+
+    it('a AIA declara o que ela não cobre — fechamento que não nomeia o resto é citado inteiro', () => {
+      expect(CORPO).toContain('O que esta AIA não cobre');
+      // O resíduo exato do Risco-007 que continua aberto depois deste documento.
+      expect(CORPO).toContain('linhagem de treino');
+      /**
+       * E não afirma o que nenhuma medição daqui autoriza.
+       *
+       * A regra olha **frase por frase**, e não o documento inteiro: a primeira
+       * versão deste teste reprovava a própria negação — "nenhuma afirmação aqui
+       * autoriza dizer que o scoring é justo" casava o padrão. É o defeito que o
+       * gate cometeu contra o próprio comentário no PR 4, e a correção é a mesma:
+       * distinguir a declaração da infração em vez de abrir exceção.
+       */
+      // Quebra de linha do markdown não é fim de frase: o texto envolve, e a
+      // negação costuma ficar na linha anterior. Colapsar antes de dividir.
+      const frases = CORPO.toLowerCase().replace(/\s+/g, ' ').split(/[.;!?]/);
+      const sobreJustica = frases.filter((f) => /\bjust[oa]\b/.test(f));
+      expect(sobreJustica.length, 'nenhuma frase sobre justiça: a ressalva desapareceu').toBeGreaterThan(0);
+      for (const f of sobreJustica) {
+        expect(/\bn(ã|a)o\b|\bnenhum/.test(f), `afirmação sobre justiça do modelo sem negação: "${f.trim()}"`)
+          .toBe(true);
+      }
+      expect(CORPO).toContain('não hospeda modelo');
     });
   });
 });
