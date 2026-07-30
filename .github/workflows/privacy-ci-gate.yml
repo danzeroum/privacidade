@@ -86,7 +86,8 @@ jobs:
         working-directory: app
 
       # RIPD §7.3 — as quatro premissas de aceite viram condição de build. O
-      # artefato de produção é gerado com `VITE_PERFIL=producao` e varrido: se
+      # artefato de produção é gerado com `--mode producao`, que carrega o
+      # `.env.producao` com `VITE_PERFIL`, e varrido: se
       # encontrar modo demonstração, rota de forja, papel por botão ou PII
       # sintética, reprova nomeando o risco, o arquivo e a linha.
       #

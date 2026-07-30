@@ -40,6 +40,13 @@ import {
   BANDEIRAS, OPCOES_PADRAO, ambienteParaFilho, dependenciasDesatualizadas, interpretarArgumentos,
   planoDePartida, textoDeAjuda, type Fatos, type Opcoes,
 } from '../src/lib/partida';
+import {
+  CABECALHO_DA_MASSA, casaProxy, descreverDisparidade, lerContrato, lerMassa, medir, pisoEmMilesimos,
+  relatorioDeEquidade, rodarEquidade, varrerFatores,
+} from '../src/lib/equidade';
+import { PISO_DECLARADO } from '../src/lib/equidade-versionada';
+import { BYTES_VERSIONADOS, avaliarEquidade } from '../src/mock/equidade';
+import { LINDDUN_BASE } from '../src/mock/scenarios';
 import { execSync } from 'node:child_process';
 import {
   EH_DEMONSTRACAO, SELO_DE_DEMONSTRACAO, SELO_DO_SELETOR_DE_PAPEL, perfilDe,
@@ -2114,7 +2121,10 @@ describe('PR 7 · a tabela é a única autoridade sobre sequência', () => {
     const doMapa: Record<Artefato, string[]> = {
       parecer: ['rascunho', 'emitido', 'homologado', 'vigente', 'devolvido'],
       ripd: ['triagem', 'dispensado', 'elaboracao', 'parecer_juridico', 'deliberado', 'vigente', 'em_revisao'],
-      lia: ['rascunho', 'balanceamento', 'assinada', 'vigente', 'vencida'],
+      // `em_revisao` entra no PR 7 (Risco-007) e espelha o CHECK de
+      // `db/schema.sql`, que já a tinha. Não é sinônimo de `balanceamento`:
+      // balanceamento é autoria, em_revisao é vigência puxada de volta.
+      lia: ['rascunho', 'balanceamento', 'assinada', 'vigente', 'em_revisao', 'vencida'],
       risco: ['identificado', 'avaliado', 'em_tratamento', 'mitigado', 'aceito'],
       solicitacao: ['recebida', 'em_analise', 'concluida', 'recusada_com_fundamento'],
       achado: ['aberto', 'causa_raiz', 'plano', 'executado', 'verificado', 'encerrado', 'reaberto'],
@@ -4297,7 +4307,10 @@ describe('PR 14 · verificação — o documento corresponde ao código?', () =>
     expect(ARTEFATOS.filter((a) => estadosDe(a).length > 7)).toEqual([]);
     expect(secao.replace(/\s+/g, ' ')).toContain('seis das oito máquinas cabiam nele');
     expect(ARTEFATOS.filter((a) => estadosDe(a).length <= 6), 'cabiam no limite antigo').toHaveLength(6);
-    expect(ARTEFATOS.filter((a) => estadosDe(a).length <= 5), 'cinco estados ou menos').toHaveLength(5);
+    // Quatro, e não cinco: a LIA ganhou `em_revisao` no PR 7 e passou de cinco
+    // para seis estados. Continua cabendo no limite antigo — a afirmação do
+    // documento, "seis das oito máquinas cabiam nele", segue verdadeira.
+    expect(ARTEFATOS.filter((a) => estadosDe(a).length <= 5), 'cinco estados ou menos').toHaveLength(4);
   });
 
   it('o MAPA declara o próprio estatuto e traz a subseção que faltava', () => {
@@ -7980,6 +7993,621 @@ describe('PR 25 · partida local — o passo a passo virou plano executável', (
       // `npm test # 26 testes` era falso desde o PR 4. Número em documento é
       // dívida: ou um teste o mantém, ou ele mente em silêncio.
       expect(readme).not.toMatch(/#\s*\d+\s+testes/);
+    });
+  });
+});
+
+describe('PR 26 · Risco-007 — equidade deixa de ser declarada e vira artefato', () => {
+  const CONTRATO_BOM = `
+versao: 1
+natureza: >
+  Massa sintética versionada. Não há modelo neste repositório, e nenhuma saída
+  daqui afirma que o scoring é justo.
+lia: LIA-SCORING-001
+metrica:
+  nome: razao_de_aprovacao
+  definicao: menor taxa sobre maior taxa
+  piso: 0.80
+  fundamento_do_piso: regra dos quatro quintos, o mesmo 0,8 do modelo de ameaças
+  minimo_por_grupo: 30
+atributo_de_grupo:
+  nome: regiao_do_cep
+  valores: [centro, periferia]
+  por_que_permanece: medir disparidade exige conhecer o grupo
+fatores_do_modelo:
+  modelo: teste
+  declarados: [renda]
+  varrer:
+    - fonte.ts
+proxies_removidos:
+  - termo: cep
+    por_que: proxy racial e de classe mais direto do crédito brasileiro
+massa: massa.csv
+`.trimStart();
+
+  const contratoDe = (bruto = CONTRATO_BOM) => {
+    const r = lerContrato(bruto, '.privacy/equidade.yaml');
+    if (!r.ok) throw new Error(`fixture inválida: ${r.achados.map((a) => a.mensagem).join('; ')}`);
+    return r.contrato;
+  };
+
+  const massa = (linhas: string[]) => [CABECALHO_DA_MASSA, ...linhas].join('\n');
+  const grupos = (linhas: string[]) => {
+    const r = lerMassa(massa(linhas), 'massa.csv');
+    if (!r.ok) throw new Error(`fixture inválida: ${r.achados.map((a) => a.mensagem).join('; ')}`);
+    return r.grupos;
+  };
+  const regras = (achados: { regra: string }[]) => achados.map((a) => a.regra).sort();
+
+  describe('unidade — a razão, e a fronteira em inteiros', () => {
+    it('0,79 reprova e 0,80 exato passa — a fronteira que ponto flutuante perde', () => {
+      /**
+       * O par que justifica a aritmética inteira. `79/100 ÷ 100/100` e `0.8` são
+       * dois arredondamentos binários diferentes de números que ninguém escolheu,
+       * e `>=` entre eles é sorte. A comparação é
+       * `aMin · tMax · 1000 ≥ piso‰ · tMin · aMax`.
+       */
+      const c = contratoDe();
+      const abaixo = medir(grupos(['centro,100,100', 'periferia,100,79']), c, 'massa.csv');
+      expect(abaixo.ok && abaixo.medicao.atendePiso).toBe(false);
+      expect(abaixo.ok && abaixo.medicao.razaoMilesimos).toBe(790);
+
+      const exato = medir(grupos(['centro,100,100', 'periferia,100,80']), c, 'massa.csv');
+      expect(exato.ok && exato.medicao.atendePiso, '0,80 exato tem de passar').toBe(true);
+      expect(exato.ok && exato.medicao.razaoMilesimos).toBe(800);
+    });
+
+    it('a fronteira vale também quando nenhuma das taxas é redonda', () => {
+      // 221/340 = 0,65 e 300/400 = 0,75 → 0,8667. A razão não passa por nenhuma
+      // divisão até a hora de exibir.
+      const m = medir(grupos(['centro,400,300', 'periferia,340,221']), contratoDe(), 'massa.csv');
+      expect(m.ok && m.medicao.razaoMilesimos).toBe(867);
+      expect(m.ok && m.medicao.atendePiso).toBe(true);
+      expect(m.ok && m.medicao.menor.grupo).toBe('periferia');
+      expect(m.ok && m.medicao.maior.grupo).toBe('centro');
+    });
+
+    it('a recusa nomeia grupos e razão — número faltando não é acionável', () => {
+      const m = medir(grupos(['centro,100,100', 'periferia,100,79']), contratoDe(), 'massa.csv');
+      const frase = m.ok ? descreverDisparidade(m.medicao) : '';
+      expect(frase).toContain('0,790');
+      expect(frase).toContain('0,800');
+      expect(frase).toContain('periferia 79/100');
+      expect(frase).toContain('centro 100/100');
+    });
+
+    it('amostra abaixo do mínimo reprova em vez de informar um número', () => {
+      const m = medir(grupos(['centro,29,29', 'periferia,100,80']), contratoDe(), 'massa.csv');
+      expect(m.ok).toBe(false);
+      expect(!m.ok && regras(m.achados)).toContain('massa/amostra-pequena');
+      // E o mínimo exato passa: a fronteira é `<`, não `<=`.
+      const naFronteira = medir(grupos(['centro,30,30', 'periferia,100,80']), contratoDe(), 'massa.csv');
+      expect(naFronteira.ok).toBe(true);
+    });
+
+    it('um grupo só é vacuidade, e vacuidade reprova', () => {
+      /**
+       * Um grupo produziria razão 1,000 e um verde que não olhou nada — a mesma
+       * família do Risco-003, onde "nenhum achado" era verdade sobre um recorte
+       * de um arquivo.
+       */
+      const r = lerMassa(massa(['centro,100,80']), 'massa.csv');
+      const m = medir(r.ok ? r.grupos : [], contratoDe(), 'massa.csv');
+      expect(m.ok).toBe(false);
+      expect(!m.ok && regras(m.achados)).toEqual(['massa/grupo-declarado-ausente', 'massa/vacuidade']);
+    });
+
+    it('recusa uniforme não é paridade', () => {
+      // 0/100 e 0/100 dariam 0/0. Aprovar isso chamaria "ninguém passa" de
+      // igualdade.
+      const m = medir(grupos(['centro,100,0', 'periferia,100,0']), contratoDe(), 'massa.csv');
+      expect(m.ok).toBe(false);
+      expect(!m.ok && regras(m.achados)).toEqual(['massa/nenhuma-aprovacao']);
+    });
+
+    it('grupo que o contrato não conhece, e grupo declarado que a massa não traz', () => {
+      // Os dois sentidos. Sem o segundo, tirar uma linha da massa mudaria quem
+      // entra na razão sem nenhum vermelho.
+      const extra = medir(grupos(['centro,100,90', 'periferia,100,85', 'sul,100,50']), contratoDe(), 'massa.csv');
+      expect(!extra.ok && regras(extra.achados)).toEqual(['massa/grupo-nao-declarado']);
+
+      const faltando = medir(grupos(['centro,100,90']), contratoDe(), 'massa.csv');
+      expect(!faltando.ok && regras(faltando.achados)).toContain('massa/grupo-declarado-ausente');
+    });
+  });
+
+  describe('unidade — o piso não é arredondado por ninguém', () => {
+    it('0,80 vira 800 milésimos', () => {
+      expect(pisoEmMilesimos(0.8)).toBe(800);
+      expect(pisoEmMilesimos(0.799)).toBe(799);
+      expect(pisoEmMilesimos(1)).toBe(1000);
+    });
+
+    it('mais de três casas é recusado, não truncado', () => {
+      // Truncar `0.8005` para 800 em silêncio é decidir o limiar pelo autor dele.
+      expect(pisoEmMilesimos(0.8005)).toBeNull();
+      expect(pisoEmMilesimos(0.12345)).toBeNull();
+    });
+
+    it('fora de (0, 1] não é razão de aprovação', () => {
+      for (const v of [0, -0.5, 1.2, Number.NaN, Number.POSITIVE_INFINITY, '0.8', null, undefined]) {
+        expect(pisoEmMilesimos(v), String(v)).toBeNull();
+      }
+    });
+  });
+
+  describe('unidade — proxy casa por token, e a declaração não é a infração', () => {
+    it('recepcao e conceito não são cep', () => {
+      /**
+       * `includes('cep')` casaria `recepcao`, `conceito` e `excepcional`. Vermelho
+       * falso ensina a equipe a ignorar justamente este teste — foi o que
+       * aconteceu com o score de três dígitos no PR 6.
+       */
+      for (const falso of ['recepcao', 'recepção', 'conceito', 'excepcional', 'cepa_de_teste_x']) {
+        expect(casaProxy(falso, 'cep'), falso).toBe(false);
+      }
+    });
+
+    it('cep casa em qualquer separador, com acento ou sem', () => {
+      for (const verdadeiro of ['cep', 'CEP', 'cep_do_titular', 'faixa-de-cep', 'regiao do cep']) {
+        expect(casaProxy(verdadeiro, 'cep'), verdadeiro).toBe(true);
+      }
+    });
+
+    it('nome_mae e "nome da mãe" são o mesmo proxy', () => {
+      for (const forma of ['nome_mae', 'nome da mãe', 'nome-da-mae', 'NOME DA MAE', 'nomeDaMae']) {
+        expect(casaProxy(forma, 'nome_mae'), forma).toBe(true);
+      }
+      // E não casa o que só tem uma das duas palavras.
+      expect(casaProxy('nome_completo', 'nome_mae')).toBe(false);
+      expect(casaProxy('mae_solteira', 'nome_mae')).toBe(false);
+    });
+
+    it('a varredura lê `feature:`, e não a prosa que declara a remoção', () => {
+      /**
+       * A frase "removidas as features cep, nome_mae e canal_atendimento" vive
+       * neste repositório de propósito: é a declaração da mitigação. Uma regra
+       * que a confundisse com a infração obrigaria a inventar exceção por
+       * arquivo — foi o defeito que o PR 4 cometeu contra o comentário do próprio
+       * gate.
+       */
+      const fonte = [
+        "// Removidas as features cep, nome_mae e canal_atendimento por serem proxies.",
+        "shap: [{ feature: 'renda', impacto: 0.12 }]",
+      ].join('\n');
+      const r = varrerFatores(contratoDe(), (p) => (p === 'fonte.ts' ? fonte : null));
+      expect(r.achados).toEqual([]);
+      expect(r.fatores.map((f) => f.nome)).toEqual(['renda']);
+    });
+
+    it('fator novo casando proxy reprova com arquivo e linha', () => {
+      const fonte = [
+        "shap: [{ feature: 'renda', impacto: 0.1 }]",
+        "// comentário qualquer",
+        "shap: [{ feature: 'cep_do_titular', impacto: -0.4 }]",
+      ].join('\n');
+      const r = varrerFatores(contratoDe(), (p) => (p === 'fonte.ts' ? fonte : null));
+      const proxy = r.achados.find((a) => a.regra === 'proxy/em-fator')!;
+      expect(proxy.arquivo).toBe('fonte.ts');
+      expect(proxy.linha, 'sem linha o achado não é conferível no diff').toBe(3);
+      expect(proxy.mensagem).toContain('cep_do_titular');
+      // E o motivo escrito no contrato viaja com o achado: recusa que não ensina
+      // é recusa que a pessoa contorna.
+      expect(proxy.mensagem).toContain('proxy racial');
+    });
+
+    it('proxy no atributo de grupo é aceito — e exigido', () => {
+      /**
+       * A assimetria que faz o contrato ter duas listas. `regiao_do_cep` é o
+       * próprio proxy que a LIA declara removido, e ele permanece como dimensão
+       * de medição: apagar o atributo de onde ele mede não elimina a
+       * discriminação, elimina a capacidade de detectá-la.
+       */
+      const c = contratoDe();
+      expect(casaProxy(c.atributoDeGrupo.nome, 'cep'), 'o atributo é o proxy, de propósito').toBe(true);
+      const r = varrerFatores(c, (p) => (p === 'fonte.ts' ? "feature: 'renda'" : null));
+      expect(r.achados, 'o atributo de grupo não é varrido como fator').toEqual([]);
+      // E o contrato real exige o atributo com motivo escrito.
+      const real = contratoDe(readFileSync(join('..', '.privacy', 'equidade.yaml'), 'utf8'));
+      expect(real.atributoDeGrupo.valores.length).toBeGreaterThan(1);
+      expect(real.atributoDeGrupo.porQuePermanece.length).toBeGreaterThan(40);
+    });
+
+    it('fator fora da lista fechada, e declaração morta — os dois sentidos', () => {
+      const novo = varrerFatores(contratoDe(), () => "feature: 'tempo_emprego'");
+      expect(regras(novo.achados)).toEqual(['fatores/declaracao-morta', 'fatores/nao-declarado']);
+    });
+
+    it('caminho ilegível e nenhum `feature:` reprovam — varredura vazia não prova nada', () => {
+      expect(regras(varrerFatores(contratoDe(), () => null).achados)).toContain('fatores/caminho-ilegivel');
+      expect(regras(varrerFatores(contratoDe(), () => '// arquivo sem fator nenhum').achados))
+        .toContain('fatores/nenhum-encontrado');
+    });
+  });
+
+  describe('unidade — falha fechada em toda porta', () => {
+    it('contrato ausente reprova, e o relatório não finge natureza', () => {
+      const r = rodarEquidade(() => null);
+      expect(r.aprovado).toBe(false);
+      expect(regras(r.achados)).toEqual(['contrato/ausente']);
+      expect(r.medicao).toBeNull();
+      expect(relatorioDeEquidade(r)).toContain('Sem medição');
+    });
+
+    it('contrato ilegível reprova em vez de virar contrato vazio', () => {
+      const r = lerContrato('isto: [não fecha', '.privacy/equidade.yaml');
+      expect(r.ok).toBe(false);
+      expect(!r.ok && regras(r.achados)).toEqual(['contrato/ilegivel']);
+    });
+
+    it('cada campo ausente é nomeado, um por um', () => {
+      for (const campo of ['natureza', 'lia', 'metrica', 'atributo_de_grupo', 'fatores_do_modelo',
+        'proxies_removidos', 'massa']) {
+        const doc = parseYaml(CONTRATO_BOM) as Record<string, unknown>;
+        delete doc[campo];
+        const r = lerContrato(JSON.stringify(doc), '.privacy/equidade.yaml');
+        expect(r.ok, `sem ${campo} o contrato passou`).toBe(false);
+      }
+    });
+
+    it('proxy sem motivo escrito reprova — item que ninguém revisa não é lista fechada', () => {
+      const r = lerContrato(CONTRATO_BOM.replace('por_que: proxy racial e de classe mais direto do crédito brasileiro', 'por_que: sim'), '.privacy/equidade.yaml');
+      expect(r.ok).toBe(false);
+    });
+
+    it('massa com cabeçalho errado, coluna a menos, não inteiro, grupo repetido e aprovadas > total', () => {
+      const casos: [string, string][] = [
+        ['grupo,total\ncentro,100', 'massa/cabecalho'],
+        [`${CABECALHO_DA_MASSA}\ncentro,100`, 'massa/colunas'],
+        [`${CABECALHO_DA_MASSA}\ncentro,100,oitenta`, 'massa/nao-inteiro'],
+        [`${CABECALHO_DA_MASSA}\ncentro,100,80\ncentro,100,20`, 'massa/grupo-repetido'],
+        [`${CABECALHO_DA_MASSA}\ncentro,80,100`, 'massa/aprovadas-acima-do-total'],
+      ];
+      for (const [bruto, regra] of casos) {
+        const r = lerMassa(bruto, 'massa.csv');
+        expect(r.ok, regra).toBe(false);
+        expect(!r.ok && regras(r.achados), regra).toContain(regra);
+      }
+    });
+
+    it('CRLF não corrompe a última coluna', () => {
+      // A lição do #36: num clone Windows `'80\r'` deixa de ser número, e sem
+      // mensagem de erro nenhuma.
+      const r = lerMassa(`${CABECALHO_DA_MASSA}\r\ncentro,100,80\r\nperiferia,100,90\r\n`, 'massa.csv');
+      expect(r.ok).toBe(true);
+      expect(r.ok && r.grupos[0].aprovadas).toBe(80);
+    });
+  });
+
+  describe('integração — a queda da LIA, e o que ela bloqueia', () => {
+    let banco: BancoMock;
+    beforeEach(() => { banco = new BancoMock('banco'); });
+
+    const liaDe = () => banco.cenario.lias.find((l) => l.codigo === 'LIA-SCORING-001')!;
+
+    /**
+     * Revelar passa pelo step-up desde o PR 5 — a janela é de 10 minutos e sai da
+     * operação, não do cabeçalho. O helper cumpre o desafio de verdade para o
+     * 422 do PR 7 ser sobre a LIA, e não sobre autenticação.
+     */
+    const revelar = (campo: string) => {
+      const desafio = request<{ id: string }>(banco, {
+        metodo: 'POST', caminho: '/v1/step-up', papel: 'dpo', ator: 'marcela', body: { fator: 'totp' },
+      });
+      request(banco, {
+        metodo: 'POST', caminho: `/v1/step-up/${desafio.body.id}/confirmar`, papel: 'dpo', ator: 'marcela',
+        body: { codigo: banco.codigoDoDesafio(desafio.body.id) },
+      });
+      return request<{ erro?: string; valor?: string }>(banco, {
+        metodo: 'POST',
+        caminho: '/v1/pseudonyms/resolve',
+        papel: 'dpo',
+        ator: 'marcela',
+        purpose: 'auditoria',
+        body: {
+          titularId: 't1',
+          campo,
+          protocolo: '2026-0731',
+          justificativa: 'Atendimento da solicitação 2026-0731 do titular',
+        },
+      });
+    };
+    const bytesCom = (linhas: string[]) => ({
+      contrato: readFileSync(join('..', '.privacy', 'equidade.yaml'), 'utf8'),
+      massa: [CABECALHO_DA_MASSA, ...linhas].join('\n'),
+    });
+    const REPROVA = ['centro,400,400', 'intermediaria,400,360', 'periferia,400,316'];
+
+    it('a massa versionada aprova, e a LIA fica de pé', () => {
+      const r = avaliarEquidade(banco, { ator: 'ci', papel: 'engenharia' });
+      expect(r.situacao).toBe('aprovada');
+      expect(liaDe().status).toBe('vigente');
+    });
+
+    it('estouro: vigente → em_revisao, gravado no trail ANTES da resposta', () => {
+      /**
+       * A ordem é gravar, depois mover — a mesma do `transitar` genérico. LIA que
+       * cai sem linha no trail é queda que a auditoria não reconstitui, e
+       * reconstituir é o que o Art. 37 pede.
+       */
+      const antes = banco.auditoria.length;
+      const r = avaliarEquidade(banco, { ator: 'ci', papel: 'engenharia' }, bytesCom(REPROVA));
+      expect(r.situacao).toBe('reprovada');
+      expect(liaDe().status).toBe('em_revisao');
+
+      const linhas = banco.auditoria;
+      expect(linhas.length).toBe(antes + 1);
+      const linha = linhas[linhas.length - 1];
+      expect(linha.acao).toBe('EQUIDADE_ABAIXO_DO_PISO');
+      expect(linha.recursoId).toBe('LIA-SCORING-001');
+      expect(linha.campos).toContain('vigente→em_revisao');
+      // A razão medida entra no registro: sem ela a linha diria que caiu, não
+      // por quanto.
+      expect(linha.campos?.some((c: string) => c.startsWith('razao='))).toBe(true);
+      expect(banco.auditVerificar().integro, 'a cadeia continua íntegra').toBe(true);
+    });
+
+    it('se o trail recusar a linha, o estado NÃO muda', () => {
+      // `simularFalhaDeLog` é o mesmo interruptor que a Regra 3 usa: a falha vem
+      // de dentro do `auditAppend`, e não de um dublê que substitui o método.
+      banco.simularFalhaDeLog = true;
+      const r = avaliarEquidade(banco, { ator: 'ci', papel: 'engenharia' }, bytesCom(REPROVA));
+      expect(r.situacao).toBe('sem_registro');
+      expect(liaDe().status, 'LIA que cai sem registro não caiu').toBe('vigente');
+    });
+
+    it('caída, o campo sob a LIA deixa de ser revelável — com a razão na recusa', () => {
+      avaliarEquidade(banco, { ator: 'ci', papel: 'engenharia' }, bytesCom(REPROVA));
+      const res = revelar('historico');
+      expect(res.status).toBe(422);
+      expect(res.body.erro).toContain('LIA-SCORING-001');
+      expect(res.body.erro, 'a recusa nomeia a razão medida').toContain('0,7');
+      expect(res.regra).toContain('Art. 10');
+    });
+
+    it('a queda não alcança campo de outra base legal', () => {
+      // A recusa é sobre o tratamento que a LIA sustenta, não sobre o titular:
+      // `renda` está sob execução de contrato e continua revelável.
+      avaliarEquidade(banco, { ator: 'ci', papel: 'engenharia' }, bytesCom(REPROVA));
+      expect(revelar('renda').status).toBe(200);
+    });
+
+    it('em_revisao não volta a vigente: nem pela transição, nem assinando de novo', () => {
+      avaliarEquidade(banco, { ator: 'ci', papel: 'engenharia' }, bytesCom(REPROVA));
+
+      const direto = request<{ erro: string }>(banco, {
+        metodo: 'POST',
+        caminho: '/v1/estados/lia/LIA-SCORING-001',
+        papel: 'dpo',
+        ator: 'marcela',
+        body: { para: 'vigente' },
+      });
+      expect(direto.status, 'sequência é 409, não 422').toBe(409);
+      // `erro` diz o quê, `regra` diz por quê — a convenção da casa.
+      expect(direto.body.erro).toContain('em_revisao');
+      expect(direto.regra).toContain('balanceamento');
+
+      // E o atalho pela assinatura, que existia antes de `em_revisao` entrar na
+      // máquina, também fecha.
+      const assinando = request<{ erro: string }>(banco, {
+        metodo: 'POST',
+        caminho: `/v1/lias/${liaDe().id}/assinar`,
+        papel: 'dpo',
+        ator: 'marcela',
+        body: {},
+      });
+      expect(assinando.status).toBe(409);
+      expect(assinando.body.erro).toContain('rebalancear');
+      expect(liaDe().status).toBe('em_revisao');
+
+      // O caminho que existe é rebalancear.
+      const rebalanceando = request(banco, {
+        metodo: 'POST',
+        caminho: '/v1/estados/lia/LIA-SCORING-001',
+        papel: 'dpo',
+        ator: 'marcela',
+        body: { para: 'balanceamento' },
+      });
+      expect(rebalanceando.status).toBe(200);
+      expect(liaDe().status).toBe('balanceamento');
+    });
+
+    it('a queda vira item de trabalho na fila, e para hoje', () => {
+      /**
+       * Sem isto a queda seria silenciosa na T0: o campo pararia de ser
+       * revelável, o pipeline ficaria vermelho, e nenhum item diria a quem cabe
+       * rebalancear. Urgência `agora` porque o tratamento está parado — prazo de
+       * renovação é planejamento, base legal caída é interrupção.
+       */
+      const fila = () => minhaFila(derivarFila(banco.cenario, Date.now()), 'dpo');
+      const antes = fila().filter((i) => i.tipo === 'Base legal');
+      expect(antes.some((i) => i.travado.includes('caiu para revisão'))).toBe(false);
+
+      avaliarEquidade(banco, { ator: 'ci', papel: 'engenharia' }, bytesCom(REPROVA));
+
+      const item = fila().find((i) => i.travado.includes('caiu para revisão'));
+      expect(item, 'a LIA caída não apareceu na fila de ninguém').toBeTruthy();
+      expect(item!.prazo.urgencia).toBe('agora');
+      expect(item!.proximaAcao).toContain('balanceamento');
+      expect(item!.travado).toContain('npm run equidade');
+    });
+
+    it('medir duas vezes não empilha linha idêntica no trail', () => {
+      avaliarEquidade(banco, { ator: 'ci', papel: 'engenharia' }, bytesCom(REPROVA));
+      const depoisDaPrimeira = banco.auditoria.length;
+      const r = avaliarEquidade(banco, { ator: 'ci', papel: 'engenharia' }, bytesCom(REPROVA));
+      expect(r.situacao).toBe('reprovada');
+      expect(banco.auditoria.length).toBe(depoisDaPrimeira);
+    });
+  });
+
+  describe('integração — a rota, e o que o corpo dela não carrega', () => {
+    let banco: BancoMock;
+    beforeEach(() => { banco = new BancoMock('banco'); });
+    const id = () => new BancoMock('banco').cenario.lias.find((l) => l.codigo === 'LIA-SCORING-001')!.id;
+
+    const chamar = (body: Record<string, unknown> = {}) => request<Record<string, any>>(banco, {
+      metodo: 'POST',
+      caminho: `/v1/lias/${id()}/equidade`,
+      papel: 'engenharia',
+      ator: 'ci',
+      body,
+    });
+
+    it('responde a medição com a natureza declarada, e o verde não diz que o modelo é justo', () => {
+      const res = chamar();
+      expect(res.status).toBe(200);
+      expect(res.body.atende_piso).toBe(true);
+      expect(res.body.razao).toBeCloseTo(0.867, 3);
+      expect(res.body.piso).toBeCloseTo(0.8, 3);
+      expect(res.body.status_da_lia).toBe('vigente');
+      expect(res.body.transicao).toBeNull();
+      expect(String(res.body.natureza)).toContain('não hospeda modelo');
+      expect(JSON.stringify(res.body).toLowerCase(), 'nenhuma saída afirma justiça do modelo')
+        .not.toMatch(/modelo (é|e) justo|modelo justo/);
+    });
+
+    it('a razão é derivada no servidor: o corpo não muda o resultado', () => {
+      /**
+       * Cliente que informa o próprio número está alegando, não provando — a
+       * mesma regra do step-up, onde o nível sai da operação e não do cabeçalho.
+       */
+      const mentindo = chamar({ razao: 0.1, atende_piso: false, grupos: [{ grupo: 'x', total: 1, aprovadas: 0 }] });
+      expect(mentindo.status).toBe(200);
+      expect(mentindo.body.atende_piso).toBe(true);
+      expect(mentindo.body.razao).toBeCloseTo(0.867, 3);
+      expect(banco.cenario.lias.find((l) => l.codigo === 'LIA-SCORING-001')!.status).toBe('vigente');
+    });
+
+    it('LIA inexistente é 404, não medição', () => {
+      const res = request<{ erro: string }>(banco, {
+        metodo: 'POST', caminho: '/v1/lias/nao-existe/equidade', papel: 'engenharia', ator: 'ci', body: {},
+      });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe('sistema — o CLI sobre os arquivos versionados', () => {
+    it('`npm run equidade` aprova a massa do repositório, e imprime a natureza', () => {
+      const saida = execSync('npx vite-node scripts/equidade.ts', { encoding: 'utf8' });
+      expect(saida).toContain('Teste de disparidade');
+      expect(saida).toContain('não hospeda modelo');
+      expect(saida).toContain('Nenhum achado');
+      // O número medido aparece: relatório sem razão não é conferível.
+      expect(saida).toContain('0,867');
+      expect(saida).toContain('0,800');
+    }, 60_000);
+
+    it('paridade CLI × mock: os mesmos bytes, a mesma razão', () => {
+      /**
+       * O que este teste impede é a redigitação. Antes de `?raw`, o número do
+       * protótipo seria uma constante semeada, e o dia em que divergisse do
+       * pipeline ninguém saberia qual dos dois estava certo.
+       */
+      const doDisco = {
+        contrato: readFileSync(join('..', '.privacy', 'equidade.yaml'), 'utf8'),
+        massa: readFileSync(join('..', '.privacy', 'equidade-decisoes.csv'), 'utf8'),
+      };
+      expect(BYTES_VERSIONADOS.contrato.replace(/\r\n/g, '\n')).toBe(doDisco.contrato.replace(/\r\n/g, '\n'));
+      expect(BYTES_VERSIONADOS.massa.replace(/\r\n/g, '\n')).toBe(doDisco.massa.replace(/\r\n/g, '\n'));
+
+      const pelaLib = rodarEquidade((rel) => {
+        const abs = join('..', rel);
+        return existsSync(abs) ? readFileSync(abs, 'utf8') : null;
+      });
+      const banco = new BancoMock('banco');
+      const peloMock = avaliarEquidade(banco, { ator: 'teste', papel: 'engenharia' });
+
+      expect(pelaLib.aprovado).toBe(true);
+      expect(peloMock.situacao).toBe('aprovada');
+      const razaoDoMock = peloMock.situacao === 'aprovada' ? peloMock.medicao.razaoMilesimos : -1;
+      expect(razaoDoMock).toBe(pelaLib.medicao!.razaoMilesimos);
+      expect(pelaLib.medicao!.pisoMilesimos).toBe(800);
+    });
+
+    it('o piso da prosa é lido do contrato, não redigitado', () => {
+      // A mitigação do modelo de ameaças cita o comando e o número vem do YAML.
+      const item = LINDDUN_BASE.find((l) => l.chave === 'discrimination')!;
+      expect(item.mitigacao).toContain('npm run equidade');
+      expect(item.mitigacao).toContain(PISO_DECLARADO);
+      expect(PISO_DECLARADO).toBe('0,80');
+      /**
+       * E a faixa assimétrica saiu de onde era promessa: das mitigações. O
+       * comentário do código continua citando "0,8–1,2" para explicar o que
+       * mudou e por quê — declaração histórica não é promessa vigente, e uma
+       * regra que confundisse as duas obrigaria a apagar a explicação.
+       */
+      for (const l of LINDDUN_BASE) expect(l.mitigacao, l.chave).not.toContain('0,8–1,2');
+      for (const c of Object.values(CENARIOS)) {
+        for (const lia of c.lias) {
+          for (const alt of lia.alternativas) expect(alt.justificativa, lia.codigo).not.toContain('0,8–1,2');
+        }
+      }
+    });
+  });
+
+  describe('aceitação — o instrumento é cobrado onde a mitigação é prometida', () => {
+    it('o workflow existe, roda o comando e nenhuma etapa tolera falha', () => {
+      const yml = readFileSync(join('..', '.github', 'workflows', 'equidade.yml'), 'utf8');
+      expect(yml).toContain('npm run equidade');
+      expect(yml).not.toContain('continue-on-error');
+      // Job com nome próprio: *required check* se marca por nome de job, e etapa
+      // dentro de job existente não é marcável separadamente.
+      expect(yml).toContain('name: Equidade algorítmica');
+      expect(yml).toMatch(/jobs:\s*\n\s*equidade:/);
+    });
+
+    it('o script npm existe e aponta para o CLI', () => {
+      const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
+      expect(pkg.scripts.equidade).toContain('scripts/equidade.ts');
+    });
+
+    it('a LIA do seed cita o comando, e o do repositório aponta para o mesmo piso', () => {
+      const seed = readFileSync(join('..', 'db', 'seed.sql'), 'utf8');
+      expect(seed).toContain('npm run equidade');
+      expect(seed).toContain('em_revisao');
+      // A faixa assimétrica não é mais prometida como limiar em lugar nenhum.
+      expect(seed).not.toContain('limiar 0.8–1.2');
+    });
+
+    it('o CHECK do schema e o vocabulário do mock dizem a mesma coisa sobre a LIA', () => {
+      /**
+       * O `types.ts` afirma que o vocabulário do mock espelha os enums de
+       * `db/schema.sql`. Para a LIA isso era falso: o schema tinha `em_revisao`
+       * desde o desenho de produção, e o mock tinha uma máquina própria. Este
+       * teste é a catraca dessa afirmação.
+       */
+      const schema = readFileSync(join('..', 'db', 'schema.sql'), 'utf8');
+      const bloco = schema.slice(schema.indexOf('CREATE TABLE lia ('));
+      const check = /status\s+TEXT NOT NULL DEFAULT 'rascunho'\s*\n?\s*CHECK \(status IN \(([^)]*)\)\)/.exec(bloco);
+      expect(check, 'o CHECK do status da LIA mudou de forma').not.toBeNull();
+      const doSchema = new Set(check![1].split(',').map((s) => s.trim().replace(/'/g, '')));
+      const doMock = new Set(estadosDe('lia') as string[]);
+      // `em_revisao` é o estado que este PR alinha, e ele tem de estar nos dois.
+      expect(doSchema.has('em_revisao')).toBe(true);
+      expect(doMock.has('em_revisao')).toBe(true);
+      // O que o mock tem e o schema não: os dois estados de autoria, que o
+      // desenho de produção resolve com `rascunho`. Lista fechada e visível.
+      expect([...doMock].filter((e) => !doSchema.has(e)).sort()).toEqual(['assinada', 'balanceamento']);
+      expect([...doSchema].filter((e) => !doMock.has(e)).sort()).toEqual(['revogada']);
+    });
+
+    it('em_revisao tem saída única, e ela é rebalancear', () => {
+      expect(proximosDe('lia', 'em_revisao')).toEqual(['balanceamento']);
+      expect(transicaoPermitida('lia', 'vigente', 'em_revisao')).toBe(true);
+      expect(transicaoPermitida('lia', 'em_revisao', 'vigente')).toBe(false);
+      expect(motivoDaRecusa('lia', 'em_revisao', 'vigente')).toContain('rebalancear');
+      // E não é sinônimo de balanceamento: os dois existem, e por caminhos
+      // opostos — autoria contra vigência puxada de volta.
+      expect(estadosDe('lia')).toContain('balanceamento');
+    });
+
+    it('o comentário do gate de privacidade não afirma o contrário do código', () => {
+      // `VITE_PERFIL=producao` no comentário ficou falso no #36, que trocou a
+      // sintaxe POSIX por `--mode`.
+      const yml = readFileSync(join('..', '.github', 'workflows', 'privacy-ci-gate.yml'), 'utf8');
+      expect(yml).not.toContain('VITE_PERFIL=producao');
+      expect(yml).toContain('--mode producao');
     });
   });
 });

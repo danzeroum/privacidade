@@ -120,6 +120,9 @@ export const OPERACOES: Operacao[] = [
     nota: 'Vincula campo à LIA; sensível é recusado (Art. 11).' },
   { metodo: 'POST', contrato: '/lias/{id}/assinar', superficie: 'console', mock: '/v1/lias/nao-existe/assinar', papel: 'dpo',
     nota: 'Assina e gera o LIA.md.' },
+  { metodo: 'POST', contrato: '/lias/{id}/equidade', superficie: 'console', mock: '/v1/lias/nao-existe/equidade', papel: 'engenharia',
+    nota: 'Risco-007. Mede a massa versionada contra o piso e derruba a vigência abaixo dele. '
+      + 'A razão é derivada no servidor: o corpo não carrega número nenhum.' },
 
   // ── Step-up de autenticação (Risco-011) ──────────────────────────────────
   { metodo: 'POST', contrato: '/step-up', superficie: 'console', mock: '/v1/step-up', papel: 'dpo',

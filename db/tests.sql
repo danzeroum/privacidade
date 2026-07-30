@@ -69,6 +69,30 @@ SELECT assert_falha($$
           'Personalização','legitimo_interesse','66666666-6666-4666-8666-0000000000ff','P90D')
 $$, 'legítimo interesse com LIA em rascunho');
 
+-- PR 7 · Risco-007 — a LIA que caiu por disparidade barra igual à que nunca valeu.
+--
+-- `em_revisao` já estava no CHECK do status desde o desenho de produção; o que
+-- não havia era prova de que o trigger a trata como não vigente. É o par exato
+-- do 422 que o protótipo passa a devolver quando o teste de disparidade estoura:
+-- lá a leitura é recusada, aqui a escrita.
+--
+-- O estado sai de `vigente`, e não direto para `em_revisao`, porque é assim que
+-- a queda acontece — uma LIA que nunca valeu não tem vigência para perder.
+UPDATE lia SET status = 'vigente', assinatura_dpo = 'sig:teste', vigencia_fim = current_date + 180
+ WHERE id = '66666666-6666-4666-8666-0000000000ff';
+UPDATE lia SET status = 'em_revisao' WHERE id = '66666666-6666-4666-8666-0000000000ff';
+
+SELECT assert_igual(
+  (SELECT status FROM lia WHERE id = '66666666-6666-4666-8666-0000000000ff'),
+  'em_revisao'::text,
+  'em_revisao é status aceito pelo CHECK da LIA');
+
+SELECT assert_falha($$
+  INSERT INTO campo (dataset_id, nome, tipo_armazenado, categoria, sensivel, finalidade, base_legal, lia_id, retencao)
+  VALUES ('55555555-5555-4555-8555-000000000003','perfil_navegacao_2','hmac','pseudonimizado',false,
+          'Personalização','legitimo_interesse','66666666-6666-4666-8666-0000000000ff','P90D')
+$$, 'legítimo interesse com LIA em revisão por disparidade');
+
 -- ---------------------------------------------------------------------
 -- Art. 12 — hash de CPF não é anonimização
 -- ---------------------------------------------------------------------

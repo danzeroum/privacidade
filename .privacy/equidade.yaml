@@ -1,0 +1,99 @@
+# Equidade algorítmica — o contrato do teste de disparidade (Risco-007).
+#
+# A LIA-SCORING-001 sustenta o legítimo interesse do scoring citando três
+# mitigações: teste de disparate impact, remoção de features proxy e AIA. Até
+# aqui as três eram texto de seed. O RIPD §5 usa as duas primeiras no
+# balanceamento do Art. 10 §3º — então mitigação sem instrumento não é apenas
+# documentação otimista: é a base legal apoiada em prova que ninguém consegue
+# apresentar.
+#
+# Este arquivo é a entrada, a métrica e o limiar. `npm run equidade` lê daqui,
+# mede a massa versionada e reprova abaixo do piso; o mesmo arquivo é lido pelo
+# protótipo, pelos mesmos bytes, para que o número na tela e o número do
+# pipeline não possam divergir.
+#
+# Falha fechada, como no gate de privacidade: arquivo ausente, ilegível ou sem
+# um dos campos **reprova**. Nunca vira lista vazia, e nunca passa por não ter
+# tido o que medir.
+versao: 1
+
+# Impressa em TODA execução, verde inclusive. Sem ela, "aprovado" seria lido
+# como "o modelo é justo" — e não há modelo neste repositório para dizer isso.
+natureza: >
+  Este repositório não hospeda modelo. A massa abaixo é sintética e versionada:
+  decisões agregadas por grupo, escritas à mão para exercer o instrumento. Um
+  verde aqui significa "esta massa, sob este piso, não apresenta disparidade
+  além do declarado" — e nada além disso. Não há AUC medida, não há inferência
+  sobre o modelo real, e nenhuma saída deste artefato afirma que o scoring é
+  justo.
+
+# Qual LIA cai quando o piso estoura. O código é conferido contra o seed e
+# contra o cenário: apontar para uma LIA inexistente derrubaria nada.
+lia: LIA-SCORING-001
+
+metrica:
+  nome: razao_de_aprovacao
+  definicao: >
+    Menor taxa de aprovação dividida pela maior, entre os grupos da massa. Uma
+    razão só, sempre menor ou igual a 1, e por isso o limiar é um piso.
+  piso: 0.80
+  fundamento_do_piso: >
+    Regra dos quatro quintos, o mesmo 0,8 que o modelo de ameaças desta
+    organização já declarava. A prosa anterior prometia a faixa "0,8–1,2", que é
+    assimétrica: sob razão menor/maior o teto equivalente a um piso de 0,8 é
+    1,25, não 1,2. Um instrumento que calcula uma coisa ao lado de um documento
+    que promete outra é a divergência que este PR existe para não criar, então a
+    faixa saiu e ficou o piso.
+  # Razão calculada sobre punhado de decisões é ruído com aparência de medida.
+  # Abaixo disto o artefato reprova em vez de informar um número.
+  minimo_por_grupo: 30
+
+# O atributo protegido — e ele é EXIGIDO aqui, não proibido.
+#
+# É a assimetria que faz este arquivo ter duas listas em vez de uma: não se mede
+# disparidade sem o atributo protegido. `cep` é proibido como FATOR do modelo e
+# necessário como DIMENSÃO de medição. Lista única faria o artefato reprovar a
+# própria massa, e a leitura apressada disso seria "o teste não funciona".
+atributo_de_grupo:
+  nome: regiao_do_cep
+  valores: [centro, intermediaria, periferia]
+  por_que_permanece: >
+    A região derivada do CEP é justamente o proxy que a LIA declara removido do
+    conjunto de treino. Ela permanece aqui porque medir disparidade exige
+    conhecer o grupo: apagar o atributo do lugar onde ele mede não elimina a
+    discriminação, elimina a capacidade de detectá-la.
+
+fatores_do_modelo:
+  modelo: credit-scoring v2.3.1
+  # Lista fechada. Fator no fonte que não esteja aqui reprova, e fator daqui
+  # ausente do fonte reprova também — declaração morta é o defeito que o gate de
+  # privacidade já cobra no inventário de PII.
+  declarados: [tempo_emprego, score_serasa, renda]
+  # Onde os fatores são declarados. A varredura NÃO lê o arquivo inteiro: lê as
+  # ocorrências de `feature:`, que é onde um fator entra. Varrer a prosa
+  # reprovaria o próprio texto que declara a remoção dos proxies — a frase
+  # "removidas as features cep, nome_mae e canal_atendimento" vive neste
+  # repositório de propósito, e ela é a declaração, não a infração.
+  varrer:
+    - app/src/mock/scenarios.ts
+
+# Lista fechada e visível no diff. Cada termo casa por token, com acento e
+# separador normalizados: `nome_mae` e "nome da mãe" são o mesmo proxy, e
+# `recepcao` não é `cep`.
+proxies_removidos:
+  - termo: cep
+    por_que: >
+      Endereço é o proxy racial e de classe mais direto do crédito brasileiro.
+      A LIA declara a remoção; a região derivada dele permanece só como
+      dimensão de medição, acima.
+  - termo: nome_mae
+    por_que: >
+      Sobrenome materno carrega origem familiar e regional, e o modelo não tem
+      finalidade que o justifique.
+  - termo: canal_atendimento
+    por_que: >
+      O canal por onde a pessoa chega correlaciona com renda e escolaridade —
+      agência física, aplicativo e correspondente bancário não atendem o mesmo
+      público.
+
+massa: .privacy/equidade-decisoes.csv

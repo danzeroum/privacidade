@@ -986,6 +986,72 @@ paths:
             LIA incompleta — alternativa sem justificativa. "Não aplicável" também exige
             justificativa: é a resposta que mais esconde falta de análise.
 
+  /lias/{id}/equidade:
+    post:
+      tags: [lia]
+      summary: Roda o teste de disparidade da LIA e derruba a vigência abaixo do piso
+      description: |
+        Risco-007. A LIA de scoring sustenta o legítimo interesse citando teste de disparate
+        impact e remoção de features proxy, e o RIPD usa as duas no balanceamento do
+        Art. 10, §3º. Esta operação executa a primeira.
+
+        A medição é **derivada no servidor**, sobre a massa versionada em
+        `.privacy/equidade-decisoes.csv`, contra o piso de `.privacy/equidade.yaml`. O corpo
+        não carrega razão, taxa nem contagem: cliente que informasse o próprio resultado
+        estaria alegando, e alegação não sustenta balanceamento.
+
+        Abaixo do piso a LIA vai de `vigente` para `em_revisao` — **gravado no trail antes de
+        a resposta sair** — e os campos que ela sustenta deixam de ser reveláveis, com o mesmo
+        efeito que a LIA vencida já tem no `exige_lia_vigente()` do schema. `em_revisao` não
+        volta direto a `vigente`: rebalancear é o único caminho.
+
+        Nenhuma resposta desta operação afirma que o modelo é justo. Não há modelo aqui; há
+        massa sintética versionada, e `natureza` diz isso em toda execução.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Medição concluída. `atende_piso` falso significa LIA derrubada.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lia, natureza, atende_piso, razao, piso, grupos, status_da_lia]
+                properties:
+                  lia: { type: string }
+                  natureza:
+                    type: string
+                    description: O que a medição é e o que ela não afirma. Sai sempre, verde inclusive.
+                  atende_piso: { type: boolean }
+                  razao:
+                    type: number
+                    description: Menor taxa de aprovação dividida pela maior, entre os grupos.
+                  piso: { type: number }
+                  menor_grupo: { type: string }
+                  maior_grupo: { type: string }
+                  status_da_lia: { type: string }
+                  transicao:
+                    type: string
+                    nullable: true
+                    description: '`vigente→em_revisao` quando o piso estourou nesta execução.'
+                  grupos:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        grupo: { type: string }
+                        total: { type: integer }
+                        aprovadas: { type: integer }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '422':
+          description: |
+            Contrato ou massa que não sustentam medição — ausente, ilegível, grupo não
+            declarado, amostra abaixo do mínimo. Reprova em vez de virar razão 1,000.
+        '503':
+          description: |
+            O trail não aceitou a linha da queda. O estado da LIA **não** muda: LIA que cai
+            sem registro é queda que a auditoria não pode reconstituir.
+
   /pseudonyms/resolve:
     post:
       tags: [pseudônimos]

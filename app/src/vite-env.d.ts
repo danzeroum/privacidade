@@ -14,3 +14,16 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/**
+ * `import texto from 'arquivo?raw'` — o texto do arquivo, sem transformação.
+ *
+ * Declarado aqui pela mesma razão que `ImportMetaEnv`: `types` no tsconfig está
+ * fechado, e puxar `vite/client` inteiro traz dezenas de declarações globais que
+ * ninguém revisa. O protótipo usa isto para ler o contrato de equidade e a massa
+ * de `.privacy/` — os mesmos bytes que o pipeline lê.
+ */
+declare module '*?raw' {
+  const conteudo: string;
+  export default conteudo;
+}
