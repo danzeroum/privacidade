@@ -20,7 +20,7 @@ decoração.
 
 | Camada | Onde | Como recusa | Prova |
 |---|---|---|---|
-| **Banco** | [`db/schema.sql`](db/schema.sql) | `CHECK`, índice único parcial, trigger, RLS | <!-- n:invariantes -->**82** invariantes em [`db/tests.sql`](db/tests.sql) |
+| **Banco** | [`db/schema.sql`](db/schema.sql) | `CHECK`, índice único parcial, trigger, RLS | <!-- n:invariantes -->**98** invariantes em [`db/tests.sql`](db/tests.sql) |
 | **API** | [`app/src/mock/api.ts`](app/src/mock/api.ts) | 403 · 404 · 409 · 422 · 503, com a regra citada | <!-- n:testes -->**700+** testes em [`app/tests/regras.test.tsx`](app/tests/regras.test.tsx) |
 | **Interface** | [`app/src/ui/primitivos.tsx`](app/src/ui/primitivos.tsx) | o controle **não é renderizado** | asserção de DOM na mesma suíte |
 

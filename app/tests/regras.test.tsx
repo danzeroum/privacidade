@@ -65,6 +65,9 @@ import {
   FATOR_DO_TETO, avaliarLeiaMe, numeroDeclarado, pisoHonesto, relatorioDoLeiaMe, telasDeApp,
   telasDeLeiaMe, tetoDoPiso, workflowsDeLeiaMe,
 } from '../src/lib/leia-me';
+import {
+  APPEND_ONLY, MUTAVEL_COM_MOTIVO, appendOnlyDoSchema, avaliarAppendOnly, relatorioDoAppendOnly,
+} from '../src/lib/append-only';
 import { execSync, spawnSync } from 'node:child_process';
 import {
   EH_DEMONSTRACAO, SELO_DE_DEMONSTRACAO, SELO_DO_SELETOR_DE_PAPEL, perfilDe,
@@ -10697,6 +10700,130 @@ describe('PR 33 · Risco-033 — o README conferido contra o repositório que de
     it('número sem marca reprova — apagar a marca não é o mesmo que não ter número', () => {
       const achados = avaliarLeiaMe({ ...base, readme: LEIAME.replace('<!-- n:visoes -->', '') });
       expect(achados.map((a) => a.regra)).toContain('numero-sem-marca');
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 34 · Risco-024 — o append-only chega onde a prova mora
+//
+// A ficha dizia "três tabelas protegidas, e ficam mutáveis expurgo_run,
+// expurgo_entrada, kms_acesso, solicitacao_evento e gate_finding". Medindo antes
+// de mexer, duas coisas mudaram de figura: o `audit_log` **estava** protegido,
+// por função própria que não é o `bloqueia_mutacao` genérico; e as duas tabelas
+// que a série acrescentou — consentimento e o texto aceito — são fatos imutáveis,
+// e protegê-las estava certo.
+//
+// Não havia tabela errada a destravar. Havia prova acumulada sem barreira, que é
+// coisa diferente — e é a diferença que este bloco cobra.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('PR 34 · Risco-024 — append-only onde a prova mora, e só onde ela mora', () => {
+  const SCHEMA = readFileSync(join('..', 'db', 'schema.sql'), 'utf8');
+  const TESTS_SQL = readFileSync(join('..', 'db', 'tests.sql'), 'utf8');
+
+  describe('verificação — o trigger existe onde deve?', () => {
+    it('schema e mock declaram o mesmo conjunto, nos dois sentidos', () => {
+      const achados = avaliarAppendOnly(SCHEMA);
+      expect(achados, relatorioDoAppendOnly(achados)).toEqual([]);
+    });
+
+    it('não-vacuidade: o leitor acha as duas formas de proteção, não só uma', () => {
+      /**
+       * A primeira medição desta série procurou `bloqueia_mutacao` e concluiu que
+       * o `audit_log` estava desprotegido. Ele tem função própria — a exceção
+       * estreita do expurgo de PII do operador — e um inventário que perde uma
+       * proteção existente manda fazer trabalho que já foi feito.
+       */
+      const noSchema = appendOnlyDoSchema(SCHEMA);
+      expect(noSchema.length).toBe(APPEND_ONLY.length);
+      expect(noSchema, 'a proteção por função própria do trail sumiu do leitor').toContain('audit_log');
+      expect(noSchema).toContain('gate_finding');
+      expect(Object.keys(MUTAVEL_COM_MOTIVO).length).toBeGreaterThan(3);
+    });
+
+    it('toda tabela recém-protegida tem invariante de UPDATE e de DELETE', () => {
+      // Trigger sem invariante é trigger que ninguém provou; e no dia em que
+      // alguém o remover, nada fica vermelho.
+      const novas = ['kms_acesso', 'solicitacao_evento', 'consentimento_revogacao', 'achado_evidencia',
+        'lia_evidencia', 'ripd_aprovacao', 'gate_finding', 'metric_snapshot'];
+      for (const t of novas) {
+        expect(SCHEMA, `${t}: sem trigger`).toContain(`BEFORE UPDATE OR DELETE ON ${t}`);
+        expect(TESTS_SQL, `${t}: sem invariante de UPDATE`).toContain(`'UPDATE em ${t}'`);
+        expect(TESTS_SQL, `${t}: sem invariante de DELETE`).toContain(`'DELETE em ${t}'`);
+      }
+    });
+  });
+
+  describe('validação — a prova é de fato imutável no caminho todo?', () => {
+    it('o estado operacional continua mutável, e o SQL prova nas duas direções', () => {
+      /**
+       * Só a metade que barra seria compatível com um `bloqueia_mutacao` aplicado
+       * às 48 tabelas: passaria nas dezesseis asserções acima e quebraria o
+       * executor de expurgo. A seção de invariantes carrega o sentido inverso
+       * porque é ele que separa "seletivo" de "indiscriminado".
+       */
+      expect(TESTS_SQL).toContain('UPDATE expurgo_run SET status');
+      expect(TESTS_SQL).toContain('UPDATE expurgo_entrada SET verificado_em');
+      for (const t of Object.keys(MUTAVEL_COM_MOTIVO)) {
+        expect(SCHEMA, `${t} foi protegida apesar de declarada mutável`)
+          .not.toContain(`BEFORE UPDATE OR DELETE ON ${t}`);
+      }
+    });
+
+    it('as invariantes não passam por vacuidade — tabela vazia não dispara trigger de linha', () => {
+      /**
+       * `BEFORE UPDATE ... FOR EACH ROW` só dispara se houver linha, e três das
+       * oito não tinham massa. Um `UPDATE` numa tabela vazia passa, e o
+       * `assert_falha` reprovaria por vacuidade em vez de por defeito — foi assim
+       * que este caso apareceu, com a suíte de banco vermelha por um motivo que
+       * não era o trigger.
+       */
+      expect(TESTS_SQL).toContain('a invariante de append-only passaria por vacuidade');
+      expect(TESTS_SQL).toContain('INSERT INTO solicitacao_evento');
+      expect(TESTS_SQL).toContain('INSERT INTO achado_evidencia');
+      expect(TESTS_SQL).toContain('INSERT INTO ripd_aprovacao');
+    });
+
+    it('cada recusa de proteção tem motivo com corpo, não rótulo', () => {
+      for (const [t, motivo] of Object.entries(MUTAVEL_COM_MOTIVO)) {
+        expect(motivo.length, `${t}: motivo curto demais`).toBeGreaterThan(40);
+        // O motivo nomeia a coluna que exige escrita posterior: "é mutável"
+        // sozinho é a exceção sem registro que este repositório recusa.
+        expect(motivo, `${t}: motivo sem a coluna que o sustenta`).toMatch(/`\w+`/);
+      }
+    });
+  });
+
+  describe('injeção — a paridade reprova o que promete reprovar', () => {
+    it('tabela protegida no banco e ausente do mock reprova', () => {
+      const comExtra = SCHEMA + `
+CREATE TRIGGER raci_imutavel
+  BEFORE UPDATE OR DELETE ON raci
+  FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
+`;
+      const achados = avaliarAppendOnly(comExtra);
+      expect(achados.map((a) => a.regra)).toContain('no-schema-e-nao-no-mock');
+      expect(relatorioDoAppendOnly(achados)).toContain('raci');
+    });
+
+    it('tabela no mock e sem trigger no banco reprova', () => {
+      const semUm = SCHEMA.replace(
+        /CREATE TRIGGER gate_finding_imutavel[\s\S]*?bloqueia_mutacao\(\);/,
+        '',
+      );
+      const achados = avaliarAppendOnly(semUm);
+      expect(achados.map((a) => a.regra)).toContain('no-mock-e-nao-no-schema');
+      expect(relatorioDoAppendOnly(achados)).toContain('gate_finding');
+    });
+
+    it('a proteção por função própria do trail não pode ser lida como ausente', () => {
+      // A injeção que reproduz o erro da primeira medição: se o leitor voltasse a
+      // procurar só `bloqueia_mutacao`, o `audit_log` sumiria do conjunto e a
+      // paridade acusaria — em vez de o repositório concluir, de novo, que o
+      // trail está desprotegido.
+      const soGenerico = SCHEMA.replace('FOR EACH ROW EXECUTE FUNCTION audit_log_expurgo_de_pii();', ';');
+      expect(appendOnlyDoSchema(soGenerico)).not.toContain('audit_log');
+      expect(avaliarAppendOnly(soGenerico).map((a) => a.regra)).toContain('no-mock-e-nao-no-schema');
     });
   });
 });
