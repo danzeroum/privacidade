@@ -148,8 +148,8 @@ Regra do checklist aplicada: **direito sem endpoint com prazo, autenticação e 
 ### 7.1 Tabela consolidada (40 riscos)
 
 > **Nenhum risco está mitigado nesta data.** — afirmação congelada no commit auditado (`8d0548a`), preservada
-> como registro. A coluna **Fechado por** é o adendo de 2026-07-30 e diz onde ela deixou de valer: 14 riscos
-> fechados, 0 parciais, 26 como descritos. Método e limites do adendo no §7.5.
+> como registro. A coluna **Fechado por** é o adendo de 2026-07-30 e diz onde ela deixou de valer: 15 riscos
+> fechados, 0 parciais, 25 como descritos. Método e limites do adendo no §7.5.
 
 Fichas completas com recomendação técnica no Relatório Técnico §4.
 
@@ -187,7 +187,7 @@ Fichas completas com recomendação técnica no Relatório Técnico §4.
 | Risco-030 | Protótipo estático contradiz a doutrina do repositório: PII em claro no DOM, registro prometido e não feito, gate por CSS, busca inerte | P2 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-030 |
 | Risco-031 | Promessas de arquitetura sem instrumento no app: k-anonimato (k≥5) e data-hj-suppress | P2 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-031 |
 | Risco-032 | Documentos e cenários afirmam TTL/expurgo operantes que o código não contém — inclusive como evidência verde do PbD | P2 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-032 |
-| Risco-033 | READMEs negam o próprio repositório: “não há CI”, “26 testes”, “8 telas” | P2 | Divergência | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-033 |
+| Risco-033 | READMEs negam o próprio repositório: “não há CI”, “26 testes”, “8 telas” | P2 | Divergência | **Fechado** | Fechado — `89593bf`. Provas: `PR 33 · Risco-033 — o README conferido contra o repositório que descreve`; os números do README passaram a ser mantidos, não redigitados. **Transcrição travada nos dois sentidos:** a tabela de telas contra `TELAS` em `App.tsx` (o array que monta o trilho — tela fora dele não é alcançável, e por isso ele é a definição operante) e a de workflows contra `.github/workflows`. **Contagem exata derivada** para tabelas, visões, invariantes e operações do contrato, cada uma marcada por `<!-- n:rotulo -->` colado ao número: casar por vizinhança de palavra conferiria o número errado assim que a frase fosse reescrita. **Piso com ordem de grandeza** só para a contagem da suíte, que é a única vinda de execução — travá-la no exato faria o README mudar a cada PR, e arquivo que muda a cada PR deixa de ser lido; `26` passa no piso e reprova no teto, que é o defeito literal desta ficha. A frase do CI virou seção com os seis workflows, e não é só o contrário da antiga: nomeia `Varreduras de prazo` como o job que **não** deve ser marcado. **Escopo declarado:** `docs/01-arquitetura.md` e `docs/02-wireframes.md` mantêm “T1..T8” de propósito — descrevem o desenho de então, e documento que narra o projeto daquele momento não nega o repositório. | Recomendação definida no Relatório Técnico §4, Risco-033 |
 | Risco-034 | Contrato OpenAPI congelado pré-correções: as rotas dos PRs 4–13 existem só no mock | P2 | Divergência | **Fechado** | `f86020e` · teste `PR 16 · invariante de paridade — contrato e mock, nos dois sentidos (Risco-034)` | Recomendação definida no Relatório Técnico §4, Risco-034 |
 | Risco-035 | modoDemo=true embarcado por padrão mantém viva a rota de forja do trail e as afordâncias de ataque | P2 | Limitação de protótipo | **Fechado** | `cada46c` · teste `PR 24 · sistema — o artefato de produção, construído e varrido`; check `PII, catálogo e PbD` | Condição de não-produção — ver §7.3 |
 | Risco-036 | Feed ICS: credencial estática por papel em query string, segredo no bundle, assinatura truncada, sem expiração | P2 | Limitação de protótipo | **Fechado** | `a367a89` · teste `PR 23 · unidade — o token do feed ICS` | Condição de não-produção — ver §7.3 |
