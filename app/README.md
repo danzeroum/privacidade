@@ -1,6 +1,6 @@
 # Protótipo navegável — guia de exploração
 
-Reimplementação das 8 telas em **React 18 + TypeScript**, com rota real, store, API mock e as
+Reimplementação das telas em **React 18 + TypeScript**, com rota real, store, API mock e as
 **9 regras LGPD implementadas como comportamento do sistema** — não como texto explicativo na tela.
 
 ```bash
@@ -51,7 +51,7 @@ src/
 │   └── permissoes.ts    ABAC por ação; o que um papel não tem, não é renderizado
 ├── store/sessao.ts      papel, cenário, chamadas à API e avisos
 ├── ui/                  primitivos, incluindo CampoPII (mascaramento com registro)
-└── screens/T1..T8.tsx
+└── screens/            uma tela por rota — a lista está no README da raiz
 ```
 
 **A regra não mora na tela.** `src/mock/api.ts` recusa a operação; a interface apenas não oferece o
