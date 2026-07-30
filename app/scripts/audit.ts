@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { avaliarAuditoria, lerPolitica, relatorioDaAuditoria } from '../src/lib/auditoria';
 
 /**
@@ -12,9 +12,26 @@ import { avaliarAuditoria, lerPolitica, relatorioDaAuditoria } from '../src/lib/
  * ruído crônico que ensina a equipe a ignorar vermelho. Quem decide é a política,
  * e o código de saída do `npm` é só o sinal de que o relatório saiu.
  *
- * `--relatorio=` aceita um JSON pronto. É o que permite ao teste injetar um
- * advisory `high` sem depender de a árvore de dependências ter um — e sem esperar
- * que o mundo publique a vulnerabilidade certa no dia certo.
+ * ## O relatório entra por stdin, e o caminho não entra por argumento
+ *
+ * O teste precisa injetar um advisory `high` sem depender de a árvore de
+ * dependências ter um, e sem esperar que o mundo publique a vulnerabilidade certa
+ * no dia certo. A primeira versão aceitava `--relatorio=<caminho>` e `--raiz=`, e
+ * o CodeQL reprovou o PR com dois alertas `high` de **path injection**: caminho
+ * vindo de `process.argv` chegando a `readFileSync`.
+ *
+ * Discutir com a ferramenta seria fácil — quem passa o caminho é quem executa o
+ * comando, e essa pessoa já pode ler o arquivo direto. Mas dispensar alerta à mão
+ * é a exceção sem registro que este repositório recusa em todo lugar, e a
+ * alternativa era melhor de qualquer forma: o relatório entra por **stdin**,
+ * `--raiz` sai (nunca foi usado), e não sobra caminho vindo de argumento. Menos
+ * botão, menos sink, nada a dispensar.
+ *
+ * A leitura de stdin é **explícita**, por `--stdin`, e não adivinhada por
+ * `isTTY`. A primeira tentativa adivinhava, e quebrou na hora: `readFileSync(0)`
+ * lança `EAGAIN` quando stdin é um cano não-bloqueante que ninguém fechou, e o
+ * CLI passou a falhar conforme o ambiente de quem o chamou. Heurística sobre
+ * stdin é a classe de código que funciona na máquina de quem escreveu.
  */
 
 const argumento = (nome: string): string | null => {
@@ -22,8 +39,10 @@ const argumento = (nome: string): string | null => {
   return p ? p.slice(nome.length + 3) : null;
 };
 
-const raiz = resolve(argumento('raiz') ?? '..');
-const caminhoDaPolitica = join(raiz, '.privacy', 'audit-excecoes.yaml');
+// A raiz é o repositório, e não é configurável: o CLI mora em `app/scripts/` e o
+// arquivo de política em `.privacy/`. Um flag de raiz seria caminho vindo de
+// argumento sem nenhum uso real.
+const caminhoDaPolitica = resolve('..', '.privacy', 'audit-excecoes.yaml');
 
 if (!existsSync(caminhoDaPolitica)) {
   process.stderr.write(`\n  ${caminhoDaPolitica} não existe. Ausente reprova em vez de passar por omissão.\n`);
@@ -36,10 +55,21 @@ if (!lida.ok) {
   process.exit(1);
 }
 
-const deArquivo = argumento('relatorio');
 let relatorio: unknown;
-if (deArquivo) {
-  relatorio = JSON.parse(readFileSync(deArquivo, 'utf8'));
+if (process.argv.includes('--stdin')) {
+  let daEntrada = '';
+  try {
+    daEntrada = readFileSync(0, 'utf8');
+  } catch (e) {
+    process.stderr.write(`\n  --stdin pedido e a entrada não pôde ser lida: ${e instanceof Error ? e.message : e}\n`);
+    process.exit(1);
+  }
+  try {
+    relatorio = JSON.parse(daEntrada);
+  } catch {
+    process.stderr.write('\n  A entrada padrão não é JSON. Sem relatório não há veredito.\n');
+    process.exit(1);
+  }
 } else {
   const r = spawnSync('npm', ['audit', '--json'], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
   if (!r.stdout) {

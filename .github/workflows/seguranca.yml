@@ -8,10 +8,19 @@
 #     quem abriu o PR.
 #   - **Dependências vulneráveis** — reprova, no limiar declarado em
 #     `.privacy/audit-excecoes.yaml`.
-#   - **CodeQL** — **informa**. O `analyze` falha por erro de varredura, não por
-#     achado: alerta aberto vai para a aba Security e o check continua verde.
-#     Marcar CodeQL como *required* não impede merge de código com alerta, e quem
-#     marcar precisa saber disso.
+#   - **CodeQL** — reprova **alerta novo**, e só ele. A distinção é sutil e eu a
+#     escrevi errado na primeira versão deste arquivo, então vale ser exato:
+#
+#       * o job `CodeQL` abaixo executa a varredura e falha apenas por erro de
+#         execução — achado não derruba o `analyze`;
+#       * o GitHub cria um **segundo check, também chamado `CodeQL`**, vindo do
+#         code scanning, e esse reprova quando o PR **introduz** alerta novo.
+#
+#     Ou seja: alerta que já existia no código não bloqueia ninguém.
+#     Alerta que o diff acrescenta, sim. Descobri isso do jeito difícil — este PR nasceu
+#     com dois alertas `high` de path injection no CLI de auditoria, e o check
+#     ficou vermelho contra a frase que eu tinha acabado de escrever dizendo que
+#     ele não bloquearia.
 #
 # ## Por que não há `schedule` no audit
 #
@@ -20,8 +29,10 @@
 # não é defeito do diff, e vermelho diário treina a equipe a ignorar vermelho.
 # Advisory novo é pendência do mundo, e pertence ao relógio.
 #
-# O CodeQL tem semanal porque ele não reprova: varredura nova sobre código velho
-# acrescenta alerta, e alerta não bloqueia ninguém.
+# O CodeQL tem semanal porque a varredura melhora sem o código mudar: consulta
+# nova encontra em código velho o que a anterior não via. Esses alertas aparecem
+# na aba Security e **não** reprovam PR nenhum — só o que o diff acrescenta
+# reprova. É a mesma separação entre "mudou o mundo" e "mudou o diff".
 #
 # ## O que o gitleaks acrescenta ao que já existia
 #

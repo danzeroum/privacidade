@@ -9698,34 +9698,61 @@ excecoes:
       expect(SEGURANCA).toContain('pertence ao relógio');
     });
 
-    it('o CodeQL informa e não bloqueia — declarado no YAML', () => {
+    it('o CodeQL reprova alerta NOVO, e o YAML diz exatamente isso', () => {
       /**
-       * O `analyze` falha por erro de varredura, não por achado: alerta aberto vai
-       * para a aba Security e o check continua verde. Marcar CodeQL como required
-       * prometeria uma barreira que ele não é.
+       * A primeira versão deste bloco travava a frase errada — "informa, não
+       * bloqueia" — e o CodeQL reprovou o próprio PR que a introduziu, com dois
+       * alertas `high` de path injection no CLI de auditoria.
+       *
+       * O que é verdade: o job `analyze` falha só por erro de execução, e um
+       * **segundo** check homônimo, vindo do code scanning, reprova quando o diff
+       * **acrescenta** alerta. Alerta pré-existente não bloqueia; alerta novo, sim.
+       *
+       * Travar a frase errada é pior que não travar nada: o teste passava a
+       * garantir que o documento continuasse mentindo.
        */
-      expect(SEGURANCA).toContain('**informa**');
-      expect(SEGURANCA).toContain('não impede merge de código com alerta');
+      expect(SEGURANCA).toContain('reprova **alerta novo**');
+      expect(SEGURANCA).toContain('alerta que já existia no código não bloqueia');
+      expect(SEGURANCA).toContain('Alerta que o diff acrescenta, sim');
       expect(SEGURANCA).toContain('languages: javascript-typescript');
       expect(SEGURANCA).toContain("cron: '0 6 * * 1'");
       const job = SEGURANCA.slice(SEGURANCA.indexOf('  codeql:'));
       expect(job, 'o CodeQL é o único que roda no semanal').not.toContain("if: github.event_name != 'schedule'");
     });
 
-    it('o CLI aplica a política sobre um relatório injetado', () => {
-      const rel = join(tmpdir(), 'audit-relatorio-teste.json');
-      writeFileSync(rel, JSON.stringify(relatorio([{ source: 7, severity: 'critical', name: 'p' }])), 'utf8');
-      const r = spawnSync('npx', ['vite-node', 'scripts/audit.ts', '--', `--relatorio=${rel}`, '--hoje=2026-07-30'],
-        { encoding: 'utf8' });
-      expect(r.status, 'critical sem exceção tem de reprovar').toBe(1);
-      expect(r.stdout).toContain('audit/sem-excecao');
+    it('o CLI aplica a política sobre um relatório injetado por stdin', () => {
+      /**
+       * Por stdin, e não por `--relatorio=<caminho>`: a primeira versão levava
+       * caminho de `process.argv` até `readFileSync`, e o CodeQL reprovou com dois
+       * alertas `high` de path injection. Dispensar o alerta à mão seria a exceção
+       * sem registro que este repositório recusa; tirar o caminho do argumento
+       * resolve e ainda deixa o CLI com menos botão.
+       */
+      const rodar = (r: unknown) => spawnSync(
+        'npx', ['vite-node', 'scripts/audit.ts', '--', '--stdin', '--hoje=2026-07-30'],
+        { encoding: 'utf8', input: JSON.stringify(r) },
+      );
 
-      writeFileSync(rel, JSON.stringify(relatorio([{ source: 7, severity: 'low', name: 'p' }])), 'utf8');
-      const verde = spawnSync('npx', ['vite-node', 'scripts/audit.ts', '--', `--relatorio=${rel}`, '--hoje=2026-07-30'],
-        { encoding: 'utf8' });
-      expect(verde.status).toBe(0);
-      rmSync(rel, { force: true });
-    }, 120_000);
+      const vermelho = rodar(relatorio([{ source: 7, severity: 'critical', name: 'p' }]));
+      expect(vermelho.status, 'critical sem exceção tem de reprovar').toBe(1);
+      expect(vermelho.stdout).toContain('audit/sem-excecao');
+
+      expect(rodar(relatorio([{ source: 7, severity: 'low', name: 'p' }])).status).toBe(0);
+
+      // Entrada que não é JSON não vira relatório vazio: sem relatório não há
+      // veredito, e veredito por omissão é o Risco-003 com outro nome.
+      const lixo = spawnSync('npx', ['vite-node', 'scripts/audit.ts', '--', '--stdin'], { encoding: 'utf8', input: 'nao-e-json' });
+      expect(lixo.status).toBe(1);
+    }, 180_000);
+
+    it('o CLI não aceita caminho vindo de argumento', () => {
+      // A regra que o alerta do CodeQL ensinou: caminho de `process.argv` chegando
+      // a `readFileSync` é sink, e a resposta foi tirar o parâmetro em vez de
+      // dispensar o alerta.
+      const cli = readFileSync(join('scripts', 'audit.ts'), 'utf8');
+      expect(cli, 'caminho de argumento voltou ao CLI').not.toMatch(/argumento\('(raiz|relatorio)'\)/);
+      expect(cli).toContain('readFileSync(0');
+    });
 
     it('o script npm existe e aponta para o CLI', () => {
       const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
