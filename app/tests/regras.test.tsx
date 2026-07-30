@@ -8796,7 +8796,11 @@ describe('PR 27 · aceitação — a reconciliação da auditoria é conferível
       // O 005 saiu daqui no PR 30: os quatro sub-itens fecharam, e o que sobrou
       // dele — dois moderate abaixo do limiar — está na célula, não como
       // parcialidade do risco.
-      expect(parciais.map((l) => l.risco).sort()).toEqual(['Risco-008']);
+      // O 008 saiu daqui no PR 31: a revogação com SLA era a faceta que faltava,
+      // e o que sobrou dele — chave como registro versionado, não material em
+      // KMS — está na célula. A lista ficou vazia, e o `for` abaixo passa a não
+      // ter o que iterar: a asserção que vale é a igualdade com `[]`.
+      expect(parciais.map((l) => l.risco).sort()).toEqual([]);
       for (const l of parciais) {
         expect(l.fechadoPor, `${l.risco}: parcial sem o que resta`).toMatch(/\*\*Resta\*\*|\*\*resta\*\*/);
       }
