@@ -5,6 +5,10 @@ import { POLITICA_PADRAO, politicaDe } from './politicas';
 import { ACESSO_SEM_FINALIDADE, campoAlcancado, recusaDeFinalidade } from './finalidade';
 import { TENTATIVAS_MAXIMAS, motivoDaFaltaDeStepUp } from './stepup';
 import { avaliarEquidade, motivoDaLiaNaoVigente } from './equidade';
+import {
+  fimDaJanela, janelaVencida, loteDaDestruicao, motivoDaRecusaDoDesligamento,
+} from './fornecedor';
+import type { Fornecedor } from './fornecedor';
 import type { FatorDeStepUp } from './stepup';
 import { ARTEFATOS, estadosDe, motivoDaRecusa, transicaoPermitida } from './estados';
 import type { Artefato, EstadoDe } from './estados';
@@ -636,6 +640,15 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
         banco.auditAppend({ ator, atorPapel: papel, acao: 'RIPD_RENDERIZADO', recursoTipo: 'ripd', recursoId: ripd.codigo });
         return ok({ markdown: renderRipd(banco, ripd.id) }) as Res<T>;
       }
+      break;
+    }
+
+    // ── Risco-008 — desligamento de parceiro com SLA ──────────────────────
+    case 'POST fornecedores': {
+      const f = banco.cenario.fornecedores.find((x) => x.slug === partes[1]);
+      if (!f) return erro(404, 'Não encontrado.') as Res<T>;
+      if (partes[2] === 'desligamento') return decidirDesligamento<T>(banco, req, f);
+      if (partes[2] === 'chave' && partes[3] === 'destruicao') return destruirChave<T>(banco, req, f);
       break;
     }
 
@@ -1486,6 +1499,114 @@ function exigenciasDe(
   }
   if (de === para) return null;
   return null;
+}
+
+/**
+ * `POST /fornecedores/{slug}/desligamento` — a decisão de encerrar a relação.
+ *
+ * Sequência pela máquina genérica (409 fora dela), conteúdo aqui (422), e
+ * registro antes de aplicar. A janela é obrigatória mesmo de zero dia, e não
+ * pode exceder o que o DPA promete no encerramento — é o campo que faz "cumprimos
+ * o contrato" ser conferível em vez de afirmado.
+ */
+function decidirDesligamento<T>(banco: BancoMock, req: Req, f: Fornecedor): Res<T> {
+  const body = (req.body ?? {}) as Record<string, any>;
+
+  const fora = guardaDeSequencia<'fornecedor', T>('fornecedor', `O parceiro ${f.nome}`, f.estado, 'desligando');
+  if (fora) return fora;
+
+  const motivo = String(body.motivo ?? '');
+  const janelaDias = body.janela_dias ?? body.janelaDias;
+  const recusa = motivoDaRecusaDoDesligamento(f, motivo, janelaDias);
+  if (recusa) {
+    return erro(422, recusa,
+      'A transição é legal; o que falta é o conteúdo que a sustenta.') as Res<T>;
+  }
+
+  const decididoEm = new Date().toISOString();
+  const janelaAte = fimDaJanela(decididoEm, janelaDias as number);
+
+  try {
+    banco.auditAppend({
+      ator: req.ator, atorPapel: req.papel, acao: 'PARCEIRO_DESLIGADO',
+      recursoTipo: 'fornecedor', recursoId: f.slug,
+      justificativa: redigir(motivo).texto,
+      campos: [`${f.estado}→desligando`, `janela=${janelaDias}`, `janela_ate=${janelaAte}`],
+    });
+  } catch (e) {
+    return erro(503, e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar o desligamento.',
+      'Sem registro não há desligamento: a ordem é gravar, depois mover.') as Res<T>;
+  }
+
+  f.estado = 'desligando';
+  f.desligamento = {
+    motivo, decididoPor: req.ator, decididoEm, janelaDias: janelaDias as number, janelaAte,
+  };
+
+  return ok({
+    slug: f.slug, estado: f.estado, janela_ate: janelaAte,
+    janela_dias: janelaDias, motivo,
+  }) as Res<T>;
+}
+
+/**
+ * `POST /fornecedores/{slug}/chave/destruicao` — a destruição, com prova.
+ *
+ * Idempotente por desenho: a segunda chamada devolve a prova **original**. Gerar
+ * prova nova a cada chamada faria a cadeia de custódia contar destruições que não
+ * aconteceram, e é o tipo de contagem que uma auditoria usa.
+ */
+function destruirChave<T>(banco: BancoMock, req: Req, f: Fornecedor): Res<T> {
+  const d = f.desligamento;
+
+  // No-op antes de qualquer guarda: já destruída não é erro de sequência, é
+  // pedido repetido — e a resposta é a mesma prova.
+  if (d?.chaveDestruidaEm && d.provaHash) {
+    return ok({
+      slug: f.slug, estado: f.estado, ja_estava_destruida: true,
+      prova: { lote: loteDaDestruicao(f.slug, d.decididoEm), hash: d.provaHash, quando: d.chaveDestruidaEm, por: d.chaveDestruidaPor },
+    }) as Res<T>;
+  }
+
+  const fora = guardaDeSequencia<'fornecedor', T>('fornecedor', `O parceiro ${f.nome}`, f.estado, 'desligado');
+  if (fora) return fora;
+  if (!d) return erro(409, `O parceiro ${f.nome} não tem desligamento aberto.`) as Res<T>;
+
+  const hoje = new Date().toISOString().slice(0, 10);
+  if (!janelaVencida(d, hoje) && d.janelaAte !== hoje) {
+    return erro(409, `A janela do desligamento de ${f.nome} vai até ${d.janelaAte}.`,
+      'A janela protege a devolução que o DPA promete: destruir antes dela apaga o que o parceiro '
+      + 'ainda tem de entregar, e o dado em trânsito não chega mais.') as Res<T>;
+  }
+
+  const lote = loteDaDestruicao(f.slug, d.decididoEm);
+  const anterior = banco.auditoria.at(-1)?.hash ?? null;
+  const provaHash = hashEncadeado(anterior, lote);
+
+  try {
+    banco.auditAppend({
+      ator: req.ator, atorPapel: req.papel, acao: 'CHAVE_DE_PARCEIRO_DESTRUIDA',
+      recursoTipo: 'fornecedor', recursoId: f.slug,
+      campos: [`desligando→desligado`, `lote=${lote}`, `prova=${provaHash}`,
+        ...(f.kmsChaveId ? [`chave=${f.kmsChaveId}`] : [])],
+    });
+  } catch (e) {
+    // 503 e nada muda: a prova precede o fato declarado.
+    return erro(503, e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a destruição.',
+      'Sem prova não há destruição: a chave continua de pé, e o parceiro continua em desligamento.') as Res<T>;
+  }
+
+  const chave = banco.cenario.chaves.find((k) => k.alias === f.kmsChaveId);
+  if (chave) chave.status = 'revogada';
+  d.chaveDestruidaEm = new Date().toISOString();
+  d.chaveDestruidaPor = req.ator;
+  d.provaHash = provaHash;
+  f.estado = 'desligado';
+
+  return ok({
+    slug: f.slug, estado: f.estado, ja_estava_destruida: false,
+    prova: { lote, hash: provaHash, quando: d.chaveDestruidaEm, por: req.ator },
+  }) as Res<T>;
 }
 
 /**

@@ -15,6 +15,10 @@ export type Acao =
   | 'exportar_auditoria'
   | 'abrir_incidente'
   | 'comunicar_incidente'
+  /** Decidir o encerramento da relação com um parceiro (Risco-008). */
+  | 'desligar_parceiro'
+  /** Destruir a chave do parceiro depois da janela. Separado de decidir. */
+  | 'destruir_chave_de_parceiro'
   | 'revogar_consentimento'
   | 'aprovar_ripd'
   | 'assinar_lia'
@@ -75,14 +79,22 @@ const MAPA: Record<Papel, Acao[]> = {
     'rodar_expurgo', 'ver_portal_titular', 'ver_total_itens', 'verificar_integridade',
     'abrir_incidente', 'gerenciar_achado', 'escrever'],
   dpo: ['revelar_pii', 'buscar_titular', 'concluir_solicitacao', 'revisar_decisao',
-    'aprovar_ripd', 'assinar_lia', 'gerenciar_risco', 'gerenciar_achado',
+    'aprovar_ripd', 'assinar_lia', 'gerenciar_risco', 'gerenciar_achado', 'desligar_parceiro',
     'ver_portal_titular', 'ver_total_itens', 'rodar_expurgo',
     'verificar_integridade', 'exportar_auditoria',
     'comunicar_incidente', 'revogar_consentimento', 'escrever'],
   produto: ['ver_portal_titular', 'verificar_integridade'],
+  /**
+   * `destruir_chave_de_parceiro` é de segurança, e `desligar_parceiro` é do DPO.
+   *
+   * Quem decide encerrar a relação responde pelo contrato; quem destrói a chave
+   * opera o KMS. Dar as duas ao mesmo papel faria a decisão e a execução caberem
+   * na mesma pessoa — e é justamente a separação que a T11 já cobra na
+   * verificação de eficácia.
+   */
   seguranca: ['ver_pipeline_rotacao', 'ver_log_kms', 'ver_gate_detalhe', 'ver_total_itens',
     'rodar_expurgo', 'verificar_integridade', 'exportar_auditoria',
-    'abrir_incidente', 'escrever'],
+    'abrir_incidente', 'destruir_chave_de_parceiro', 'escrever'],
   auditor: ['verificar_integridade', 'exportar_auditoria'],
 };
 

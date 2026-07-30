@@ -131,6 +131,17 @@ export const janelaVencida = (d: Desligamento, hojeIso: string): boolean => d.ja
 export const diasAlemDaJanela = (d: Desligamento, hojeIso: string): number =>
   Math.round((new Date(`${hojeIso}T12:00:00Z`).getTime() - new Date(`${d.janelaAte}T12:00:00Z`).getTime()) / DIA_MS);
 
+/**
+ * A chave de idempotência da destruição.
+ *
+ * Deriva de coisas **imutáveis** — o parceiro e o instante da decisão —, nunca
+ * do estado. Se derivasse do estado, a segunda chamada produziria outro lote e a
+ * cadeia de custódia passaria a contar destruições que não aconteceram. É a
+ * mesma regra do `lote_chave` do expurgo.
+ */
+export const loteDaDestruicao = (slug: string, decididoEm: string): string =>
+  `DESTRUICAO-${slug.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}-${decididoEm.slice(0, 19)}`;
+
 /** O código determinístico do achado de desligamento vencido. */
 export const codigoDoDesligamento = (slug: string): string =>
   `DESLIG-${slug.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;

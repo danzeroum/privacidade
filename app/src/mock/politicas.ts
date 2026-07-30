@@ -518,6 +518,25 @@ export const POLITICAS: PoliticaRota[] = [
       + 'que fala o vocabulário do catálogo — por isso a permissão é a de engenharia.',
   },
   {
+    metodo: 'POST', caminho: /^fornecedores\/[^/]+\/desligamento$/,
+    tipo: 'escrita', foraDeEscopo: '403', acao: 'desligar_parceiro',
+    finalidade: 'dispensada',
+    motivoDaDispensa:
+      'Encerra a relação com um parceiro. Opera sobre o contrato e sobre a chave dele, não sobre registro '
+      + 'de pessoa: a finalidade do Art. 37 responde por que alguém olhou o dado de um titular, e aqui '
+      + 'ninguém olhou.',
+    nota: 'Decisão do desligamento (Risco-008). Ação própria: desligar parceiro não é escrita genérica.',
+  },
+  {
+    metodo: 'POST', caminho: /^fornecedores\/[^/]+\/chave\/destruicao$/,
+    tipo: 'escrita', foraDeEscopo: '403', acao: 'destruir_chave_de_parceiro',
+    finalidade: 'dispensada',
+    motivoDaDispensa:
+      'Destrói a chave do parceiro. É operação de KMS sobre material criptográfico, não leitura de dado '
+      + 'de titular.',
+    nota: 'Destruição da chave, separada da decisão: quem decide encerrar não é quem executa.',
+  },
+  {
     metodo: 'POST', caminho: /^lias\/[^/]+\/equidade$/,
     tipo: 'escrita', foraDeEscopo: '403',
     finalidade: 'dispensada',
