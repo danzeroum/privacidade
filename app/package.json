@@ -11,7 +11,7 @@
     "test:watch": "vitest",
     "gate:privacidade": "vite-node scripts/gate.ts",
     "varredura:segredos": "vite-node scripts/segredos.ts",
-    "build:producao": "VITE_PERFIL=producao vite build --outDir dist-producao",
+    "build:producao": "vite build --mode producao --outDir dist-producao",
     "catraca:producao": "npm run build:producao && vite-node scripts/catraca.ts"
   },
   "dependencies": {

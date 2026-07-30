@@ -1,0 +1,19 @@
+# Fim de linha nos arquivos que um teste lê linha a linha.
+#
+# Num clone Windows com `core.autocrlf=true` (o padrão), estes três chegam com
+# CRLF. Quatorze testes os separam por linha, e cada campo termina com um `\r`
+# invisível: o `esperado` do CSV de paridade vira `"2026-07-29\r"`, o cabeçalho
+# vira `esperado\r`, e a comparação cai em `null`. O CI é Ubuntu, então nunca viu
+# — a suíte declarava verde uma paridade que, naquele ambiente, não valia.
+#
+# A defesa principal está no leitor: o parser normaliza CRLF sozinho, e por isso
+# funciona também em quem clonou antes desta linha existir. Isto aqui é a segunda
+# camada, para o problema não voltar por um fixture novo.
+#
+# Deliberadamente cirúrgico, e não `* text=auto eol=lf`: `README.md` e
+# `api/openapi.yaml` já estão versionados COM CRLF, e a regra global os
+# renormalizaria — um diff de milhares de linhas em cima de uma correção de
+# quatro arquivos. Converter os dois é decisão própria, para outro PR.
+db/retencao-casos.csv                                text eol=lf
+docs/processos/README.md                             text eol=lf
+docs/design_handoff_lastro_correcoes/MAPA-PROCESSOS.md text eol=lf
