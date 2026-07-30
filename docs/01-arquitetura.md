@@ -1,5 +1,11 @@
 # Arquitetura — Plataforma de Governança de Privacidade (LGPD)
 
+> **Documento histórico — 2026-07-30.** Descreve o desenho **original**, de 8 telas
+> (`T1`–`T8`). O app hoje tem outras, e a lista vigente está na seção **As telas** do
+> [`README.md`](../README.md) da raiz, transcrita por teste do array que monta o trilho de navegação.
+> Este arquivo é mantido como registro do que foi projetado, e **não** é atualizado: reescrevê-lo
+> apagaria a diferença entre o que se planejou e o que se construiu.
+
 > Sistema que **operacionaliza** os 12 artefatos de privacidade já definidos (catálogo, LINDDUN,
 > gates de CI/CD, triagem de RIPD, redator de PII, pseudonimizador, expurgo, rotação de KMS,
 > coletor de métricas, matriz de risco, parecer técnico, LIA) em uma interface única para

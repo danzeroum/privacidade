@@ -62,8 +62,8 @@ import {
   MINIMO_DO_MOTIVO, avaliarMatriz, jobsDe, nomeDeCheck, relatorioDaMatriz,
 } from '../src/lib/matriz-ci';
 import {
-  avaliarLeiaMe, numeroDeclarado, pisoHonesto, relatorioDoLeiaMe, telasDeApp, telasDeLeiaMe,
-  workflowsDeLeiaMe,
+  FATOR_DO_TETO, avaliarLeiaMe, numeroDeclarado, pisoHonesto, relatorioDoLeiaMe, telasDeApp,
+  telasDeLeiaMe, tetoDoPiso, workflowsDeLeiaMe,
 } from '../src/lib/leia-me';
 import { execSync, spawnSync } from 'node:child_process';
 import {
@@ -9466,7 +9466,13 @@ describe('PR 29 · Risco-005(c) — o relógio do programa dispara sem sessão a
       expect(yml).toContain('workflow_dispatch:');
       // Um job só, e nenhuma condição por gatilho: é o que faz o disparo manual
       // reproduzir o agendado byte a byte.
-      expect(yml.match(/^  [a-z_-]+:\n    name:/gm) ?? []).toHaveLength(1);
+      //
+      // Contado pelo `jobsDe`, e não por regex de duas linhas coladas: a versão
+      // anterior exigia `name:` **imediatamente** depois da chave do job, e
+      // quebrou quando o marcador `# sustenta:` entrou entre as duas. Contar zero
+      // job e afirmar "um job só" teria passado a ser possível — a asserção
+      // reprovou, mas por acidente de forma, não por defeito de conteúdo.
+      expect(jobsDe(yml)).toHaveLength(1);
       /**
        * A varredura é do YAML **executável**, a partir de `jobs:` — o comentário
        * do cabeçalho cita `github.event_name` justamente para explicar a regra, e
@@ -10424,10 +10430,17 @@ describe('PR 33 · Risco-033 — o README conferido contra o repositório que de
    */
   const ARQUIVOS_COBERTOS = ['README.md', 'app/README.md'];
 
-  const WORKFLOWS = readdirSync(join('..', '.github', 'workflows')).sort().map((arquivo) => {
+  // Uma entrada por job, com o controle que ele sustenta — a mesma granularidade
+  // da tabela do README, para a comparação produzir um achado por linha.
+  const WORKFLOWS = readdirSync(join('..', '.github', 'workflows')).sort().flatMap((arquivo) => {
     const yml = readFileSync(join('..', '.github', 'workflows', arquivo), 'utf8');
-    return { arquivo, jobs: jobsDe(yml).map((j) => j.nome!).filter(Boolean) };
+    return jobsDe(yml).filter((j) => j.nome).map((j) => ({ arquivo, job: j.nome!, sustenta: j.sustenta }));
   });
+
+  /** Os dois documentos que mantêm "T1..T8" por decisão declarada. */
+  const HISTORICOS = ['01-arquitetura.md', '02-wireframes.md'].map((arquivo) => ({
+    arquivo, texto: readFileSync(join('..', 'docs', arquivo), 'utf8'),
+  }));
 
   // Contagens derivadas de arquivo versionado — nenhuma redigitada aqui.
   const SCHEMA = readFileSync(join('..', 'db', 'schema.sql'), 'utf8');
@@ -10469,11 +10482,78 @@ describe('PR 33 · Risco-033 — o README conferido contra o repositório que de
       expect(telasDeLeiaMe(LEIAME).length).toBe(telasDeApp(APP_TSX).length);
       expect(WORKFLOWS.length).toBeGreaterThan(4);
       expect(workflowsDeLeiaMe(LEIAME).length).toBe(WORKFLOWS.length);
+      // E todo job declara o que sustenta: um `null` viraria "(sem sustenta)" nos
+      // dois lados da comparação, e as listas continuariam iguais — a divergência
+      // sumiria justamente por ser total.
+      for (const w of WORKFLOWS) expect(w.sustenta, `${w.arquivo} · ${w.job} sem # sustenta`).toBeTruthy();
       for (const c of CONTAGENS) expect(c.real, `contagem "${c.rotulo}" zerada`).toBeGreaterThan(0);
     });
 
     it('os arquivos cobertos são lista fechada — ampliar a exceção é desligar a catraca', () => {
       expect(ARQUIVOS_COBERTOS).toEqual(['README.md', 'app/README.md']);
+    });
+
+    it('os dois docs históricos datam-se e apontam para o README vigente', () => {
+      /**
+       * A exceção deles não pode ser silenciosa. Um leitor que abre
+       * `02-wireframes.md` e lê "as 8 telas" precisa saber, na primeira tela do
+       * arquivo, que está lendo um registro e onde está a lista de hoje.
+       */
+      for (const { arquivo, texto } of HISTORICOS) {
+        expect(texto, `${arquivo} sem cabeçalho histórico`).toContain('**Documento histórico —');
+        expect(texto, `${arquivo} sem data no cabeçalho`).toMatch(/\*\*Documento histórico — \d{4}-\d{2}-\d{2}\.\*\*/);
+        expect(texto, `${arquivo} não aponta para o README vigente`).toContain('README.md');
+        // O cabeçalho vem antes de tudo: um aviso no rodapé é um aviso que
+        // chega depois da afirmação que ele qualifica.
+        expect(texto.indexOf('**Documento histórico —'), `${arquivo}: cabeçalho fora do topo`)
+          .toBeLessThan(400);
+      }
+    });
+
+    it('o corpo histórico continua histórico — se modernizar, a exceção deixa de valer', () => {
+      /**
+       * O que justifica a exceção é o conteúdo ser de então. Se alguém atualizar
+       * os dois para as telas de hoje, a justificativa cai junto — e o teste
+       * acusa em vez de deixar a exceção sobreviver ao motivo dela.
+       *
+       * Não é congelamento por hash: correção de erro continua permitida. O que
+       * a catraca prende é a **natureza** do documento, que é o que a decisão de
+       * escopo declarou.
+       */
+      for (const { arquivo, texto } of HISTORICOS) {
+        expect(texto, `${arquivo} deixou de ser o desenho original — reveja ARQUIVOS_COBERTOS`)
+          .toMatch(/T1\.\.T8|as 8 telas/);
+      }
+    });
+
+    it('o teto da faixa é derivado do piso — nenhum literal solto na regra', () => {
+      /**
+       * O achado R-03 da revisão do #45: o teto era `piso * 2`, com o `2` escrito
+       * à mão dentro de `pisoHonesto`. Número literal no meio da regra é a mesma
+       * classe das cinco frases que este bloco removeu do README — só que em
+       * código, que é onde ninguém confere.
+       *
+       * A catraca é sobre o fonte, e não sobre o resultado: um teto correto
+       * calculado por um literal continuaria correto até alguém mudar um dos dois
+       * lugares.
+       */
+      const fonte = readFileSync(join('src', 'lib', 'leia-me.ts'), 'utf8');
+      const corpo = (nome: string) => fonte.slice(fonte.indexOf(`export const ${nome} =`))
+        .split('\n').slice(0, 3).join('\n');
+      expect(corpo('pisoHonesto'), 'literal numérico de volta em pisoHonesto').not.toMatch(/[*/]\s*\d/);
+      expect(corpo('pisoHonesto')).toContain('tetoDoPiso(piso)');
+      expect(corpo('tetoDoPiso')).toContain('FATOR_DO_TETO');
+      // E `tetoDoPiso` também: a primeira versão desta catraca só olhava
+      // `pisoHonesto`, e `piso * FATOR_DO_TETO * 2` passava — o literal tinha
+      // apenas mudado de função. A injeção que deveria pegá-lo não pegou, e o
+      // furo era meu, não dela.
+      expect(corpo('tetoDoPiso'), 'literal numérico em tetoDoPiso').not.toMatch(/[*/]\s*\d/);
+      // Declarado num lugar só: uma segunda atribuição seria a cópia que a
+      // constante existe para eliminar.
+      expect((fonte.match(/FATOR_DO_TETO =/g) ?? []).length).toBe(1);
+      // E o número não vaza para o README, que é o outro lugar onde ele poderia
+      // ser redigitado.
+      expect(tetoDoPiso(700)).toBe(700 * FATOR_DO_TETO);
     });
   });
 
@@ -10537,10 +10617,27 @@ describe('PR 33 · Risco-033 — o README conferido contra o repositório que de
     it('workflow novo sem linha no README reprova, nomeando o job ausente', () => {
       const achados = avaliarLeiaMe({
         ...base,
-        workflows: [...WORKFLOWS, { arquivo: 'novo.yml', jobs: ['Coisa nova'] }],
+        workflows: [...WORKFLOWS, { arquivo: 'novo.yml', job: 'Coisa nova', sustenta: 'um controle qualquer' }],
       });
       expect(achados.map((a) => a.regra)).toContain('workflows');
       expect(relatorioDoLeiaMe(achados)).toContain('ausente(s) do README: novo.yml · Coisa nova');
+    });
+
+    it('job sem `# sustenta:` no YAML reprova por conta própria', () => {
+      // Sem esta regra, um job sem marcador viraria "(sem sustenta)" nos dois
+      // lados e a comparação passaria — o buraco fecharia a si mesmo, que é a
+      // forma mais confortável de uma catraca falhar.
+      const achados = avaliarLeiaMe({
+        ...base,
+        workflows: [...WORKFLOWS, { arquivo: 'novo.yml', job: 'Coisa nova', sustenta: null }],
+      });
+      expect(achados.map((a) => a.regra)).toContain('job-sem-sustenta');
+    });
+
+    it('controle reescrito no YAML e não no README reprova como divergência de linha', () => {
+      const workflows = WORKFLOWS.map((w) => (w.job === 'CodeQL' ? { ...w, sustenta: 'outra coisa' } : w));
+      const achados = avaliarLeiaMe({ ...base, workflows });
+      expect(relatorioDoLeiaMe(achados)).toContain('CodeQL · outra coisa');
     });
 
     it('linha no README sem workflow correspondente reprova no sentido inverso', () => {

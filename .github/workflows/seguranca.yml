@@ -69,6 +69,7 @@ permissions:
 
 jobs:
   segredos:
+    # sustenta: segredo de fornecedor no diff e em todo o histórico do git
     name: Segredos no diff e no histórico
     # A condição existe porque o gatilho semanal é do CodeQL. Rodar a varredura de
     # segredo toda semana sobre um histórico que não mudou produziria o mesmo
@@ -104,6 +105,7 @@ jobs:
     # chamava `spawnSync('npm', …)` sem shell, e em Windows o alvo é `npm.cmd`,
     # que o Node recusa executar sem `shell: true` desde a correção da
     # CVE-2024-27980. O relatório voltava vazio e o CLI reprovava culpando o npm.
+    # sustenta: o limiar de advisory declarado, com exceção datada e motivo
     name: Dependências vulneráveis${{ matrix.sufixo }}
     if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
@@ -136,6 +138,7 @@ jobs:
         run: npm run audit:politica
 
   codeql:
+    # sustenta: alerta novo que o diff acrescenta — o pré-existente aparece na aba Security sem bloquear
     name: CodeQL
     # fora-da-matriz: também por semântica, e por uma colisão concreta. O CodeQL
     # analisa o mesmo fonte com as mesmas queries em qualquer runner, então o

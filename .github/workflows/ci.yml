@@ -40,6 +40,7 @@ jobs:
     #
     # O leg Windows entra como check novo, marcável pelo dono quando quiser — e
     # até lá informa o vermelho sem impedir merge, como todo check novo aqui.
+    # sustenta: as nove regras LGPD como comportamento, e a tipagem que as sustenta
     name: Tipos e testes${{ matrix.sufixo }}
     runs-on: ${{ matrix.os }}
     strategy:

@@ -29,6 +29,7 @@ permissions:
 
 jobs:
   invariantes:
+    # sustenta: os CHECK, triggers e colunas GENERATED que o schema apresenta como prova de conformidade
     name: Constraints e invariantes do banco
     # fora-da-matriz: limite físico, e não escolha. `services:` sobe container
     # Docker, e runner Windows do GitHub não executa container Linux; o job ainda

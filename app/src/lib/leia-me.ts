@@ -86,16 +86,21 @@ export const telasDeLeiaMe = (readme: string): Tela[] => {
     .map((m) => ({ id: m[1], nome: m[2].trim() }));
 };
 
-/** Os workflows como o README os transcreve, na tabela marcada. */
-export const workflowsDeLeiaMe = (readme: string): { arquivo: string; jobs: string[] }[] => {
+/**
+ * Os workflows como o README os transcreve — uma linha por **job**, não por
+ * arquivo.
+ *
+ * A tabela era por arquivo até a coluna "O que sustenta" entrar. Um arquivo com
+ * três jobs tem três controles distintos, e agrupá-los numa célula obrigaria a
+ * comparar listas dentro de listas — a comparação por linha é a que produz um
+ * achado dizendo qual job diverge.
+ */
+export const workflowsDeLeiaMe = (readme: string): { arquivo: string; job: string; sustenta: string }[] => {
   const i = readme.indexOf('<!-- workflows:inicio -->');
   const f = readme.indexOf('<!-- workflows:fim -->');
   if (i < 0 || f < 0) return [];
-  return [...readme.slice(i, f).matchAll(/^\| `([^`]+\.yml)` \| ([^|]+?) \|/gm)]
-    .map((m) => ({
-      arquivo: m[1],
-      jobs: [...m[2].matchAll(/`([^`]+)`/g)].map((j) => j[1]),
-    }));
+  return [...readme.slice(i, f).matchAll(/^\| `([^`]+\.yml)` \| `([^`]+)` \| ([^|]+?) \|/gm)]
+    .map((m) => ({ arquivo: m[1], job: m[2], sustenta: m[3].trim() }));
 };
 
 /**
@@ -113,6 +118,24 @@ export const numeroDeclarado = (readme: string, rotulo: string): { valor: number
 };
 
 /**
+ * Quantas vezes o piso o valor real pode ser antes de o piso estar defasado.
+ *
+ * Declarado **aqui e em nenhum outro lugar**, e é a correção de um defeito da
+ * primeira versão deste módulo: o teto era `piso * 2`, com o `2` escrito à mão
+ * dentro de `pisoHonesto`. Um número literal solto no meio da regra é a mesma
+ * classe das cinco frases que este arquivo existe para remover — a diferença é
+ * só que estava em código em vez de em prosa, e código não é lido por quem
+ * confere o README.
+ *
+ * O README não repete este número: quem quiser a faixa exata lê o módulo. Repetir
+ * seria criar a segunda cópia que a constante acabou de eliminar.
+ */
+export const FATOR_DO_TETO = 2;
+
+/** O teto derivado do piso — a única forma de obtê-lo. */
+export const tetoDoPiso = (piso: number): number => piso * FATOR_DO_TETO;
+
+/**
  * O piso é verdadeiro **e** não está defasado por uma ordem de grandeza.
  *
  * As duas metades importam. Só o piso deixaria `1` passar para sempre; só o teto
@@ -120,7 +143,7 @@ export const numeroDeclarado = (readme: string, rotulo: string): { valor: number
  * passa na primeira e reprova na segunda.
  */
 export const pisoHonesto = (piso: number, real: number): boolean =>
-  real >= piso && real < piso * 2;
+  real >= piso && real < tetoDoPiso(piso);
 
 /**
  * Um achado por divergência, com o que confrontar.
@@ -142,7 +165,7 @@ export const avaliarLeiaMe = (entrada: {
   readme: string;
   outrosTextos: { arquivo: string; texto: string }[];
   telas: Tela[];
-  workflows: { arquivo: string; jobs: string[] }[];
+  workflows: { arquivo: string; job: string; sustenta: string | null }[];
   contagens: { rotulo: string; real: number }[];
 }): Achado[] => {
   const achados: Achado[] = [];
@@ -159,10 +182,20 @@ export const avaliarLeiaMe = (entrada: {
     telasDeLeiaMe(entrada.readme).map((t) => `${t.id} · ${t.nome}`),
   ));
 
+  // O `sustenta` entra na chave da comparação, e não numa checagem à parte: um
+  // job cujo controle foi reescrito no YAML e não no README é a mesma divergência
+  // que um job ausente, e merece o mesmo achado.
+  for (const w of entrada.workflows) {
+    if (w.sustenta === null) {
+      achados.push({ regra: 'job-sem-sustenta', detalhe: `${w.arquivo} · ${w.job}: sem \`# sustenta:\` no YAML` });
+    }
+  }
+  const chave = (w: { arquivo: string; job: string; sustenta: string | null }) =>
+    `${w.arquivo} · ${w.job} · ${w.sustenta ?? '(sem sustenta)'}`;
   achados.push(...conjunto(
     'workflows',
-    entrada.workflows.flatMap((w) => w.jobs.map((j) => `${w.arquivo} · ${j}`)),
-    workflowsDeLeiaMe(entrada.readme).flatMap((w) => w.jobs.map((j) => `${w.arquivo} · ${j}`)),
+    entrada.workflows.map(chave),
+    workflowsDeLeiaMe(entrada.readme).map(chave),
   ));
 
   for (const { rotulo, real } of entrada.contagens) {
