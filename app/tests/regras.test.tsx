@@ -4184,14 +4184,14 @@ describe('PR 13 · declarado × derivado, travado como invariante', () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe('PR 14 · verificação — o documento corresponde ao código?', () => {
-  const MAPA = readFileSync(join('..', 'docs', 'design_handoff_lastro_correcoes', 'MAPA-PROCESSOS.md'), 'utf8');
+  const MAPA = readFileSync(join('..', 'docs', 'design_handoff_lastro_correcoes', 'MAPA-PROCESSOS.md'), 'utf8').replace(/\r\n/g, '\n');
   /**
    * O markdown é quebrado em 100 colunas, então frase se parte no meio. As
    * asserções de prosa rodam sobre o texto normalizado: reformatar o arquivo não
    * pode quebrar teste, senão o teste vira obstáculo à edição que ele protege.
    */
   const prosa = MAPA.replace(/^>\s?/gm, '').replace(/\s+/g, ' ');
-  const README = readFileSync(join('..', 'docs', 'processos', 'README.md'), 'utf8');
+  const README = readFileSync(join('..', 'docs', 'processos', 'README.md'), 'utf8').replace(/\r\n/g, '\n');
 
   /** O que o MAPA escreve como código: crases e blocos cercados. */
   const codigoNoMapa = (): string[] => [
@@ -4308,7 +4308,7 @@ describe('PR 14 · verificação — o documento corresponde ao código?', () =>
 });
 
 describe('PR 14 · validação — o que o documento enuncia é o que a LGPD exige?', () => {
-  const README = readFileSync(join('..', 'docs', 'processos', 'README.md'), 'utf8');
+  const README = readFileSync(join('..', 'docs', 'processos', 'README.md'), 'utf8').replace(/\r\n/g, '\n');
   const tabela = README.slice(README.indexOf('## As exigências de conteúdo'));
 
   const semExigencia = (artefato: string, id: string, de: string, para: string) => {
@@ -4719,7 +4719,7 @@ describe('PR 15 · validação — o §1 do MAPA descreve telas que existem?', (
    * Este teste é a outra metade: **validação**. A tabela nomeia telas; as telas
    * têm de existir, e com o mesmo número e o mesmo nome.
    */
-  const mapa = readFileSync(join('..', 'docs', 'design_handoff_lastro_correcoes', 'MAPA-PROCESSOS.md'), 'utf8');
+  const mapa = readFileSync(join('..', 'docs', 'design_handoff_lastro_correcoes', 'MAPA-PROCESSOS.md'), 'utf8').replace(/\r\n/g, '\n');
   const secao1 = mapa.slice(mapa.indexOf('## 1 ·'), mapa.indexOf('## 2 ·'));
   const linhasDeTela = secao1.split('\n').filter((l: string) => /\*\*T\d+ · /.test(l));
 
@@ -5597,7 +5597,7 @@ describe('PR 17 · validação — o titular consegue se opor, e o tratamento pa
 
 /** Os casos de derivação, lidos do MESMO arquivo que o db/tests.sql consome. */
 const CASOS_DE_RETENCAO = (() => {
-  const bruto = readFileSync(join('..', 'db', 'retencao-casos.csv'), 'utf8').trim().split('\n');
+  const bruto = readFileSync(join('..', 'db', 'retencao-casos.csv'), 'utf8').trim().split(/\r?\n/);
   const cabecalho = bruto[0].split(',');
   return bruto.slice(1).map((linha) => {
     const v = linha.split(',');
@@ -7587,11 +7587,37 @@ describe('PR 24 · aceitação — o RIPD aponta para a catraca, não para prosa
 
   it('os scripts existem com o nome que o documento promete', () => {
     const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
-    expect(pkg.scripts['build:producao']).toContain('VITE_PERFIL=producao');
+    /**
+     * O perfil é selecionado pelo mecanismo do próprio Vite, em duas pontas:
+     * `--mode producao` no script, e `VITE_PERFIL` no `.env.producao` que o modo
+     * carrega. A prova cobre as duas, porque uma sozinha não seleciona nada.
+     *
+     * A versão anterior escrevia `VITE_PERFIL=producao vite build` — sintaxe
+     * POSIX, que não roda no PowerShell nem no cmd. O CI é Ubuntu e passava; em
+     * Windows o comando morria antes de construir.
+     */
+    expect(pkg.scripts['build:producao']).toContain('--mode producao');
+    expect(readFileSync('.env.producao', 'utf8')).toContain('VITE_PERFIL=producao');
     // A catraca constrói antes de varrer: varrer um artefato velho provaria o
     // estado de ontem.
     expect(pkg.scripts['catraca:producao']).toContain('build:producao');
     expect(pkg.scripts['catraca:producao']).toContain('scripts/catraca.ts');
+  });
+
+  it('nenhum script npm usa sintaxe POSIX de variável de ambiente', () => {
+    /**
+     * A catraca contra a regressão que este PR conserta.
+     *
+     * `VAR=valor comando` é do shell POSIX. No PowerShell e no cmd o
+     * interpretador tenta executar `VAR=valor` como programa e falha antes de
+     * chegar ao comando. Um script assim fica verde num CI Ubuntu e quebra para
+     * toda pessoa em Windows — que é exatamente como este defeito viveu.
+     */
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
+    for (const [nome, comando] of Object.entries(pkg.scripts)) {
+      expect(comando, `${nome}: use --mode e .env.<modo>, ou cross-env`)
+        .not.toMatch(/(^|&&\s*)[A-Z][A-Z0-9_]*=/);
+    }
   });
 
   it('o artefato de produção não é o que o repositório versiona', () => {
