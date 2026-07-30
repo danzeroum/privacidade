@@ -40,7 +40,21 @@ jobs:
         working-directory: app
 
     steps:
+      # `fetch-depth: 0` porque a suíte confere história, e não só arquivos.
+      #
+      # A reconciliação da auditoria (RIPD §7.1, coluna "Fechado por") cita o
+      # commit que fechou cada risco, e o bloco `PR 27` verifica que cada sha
+      # existe e é ancestral do commit sob teste — é o que protege contra typo
+      # numa citação e contra um squash futuro que trocaria os shas sem ninguém
+      # reler uma tabela de 40 linhas.
+      #
+      # O padrão de `actions/checkout` é profundidade 1. Num clone raso essa
+      # prova não teria como falhar: passaria por não ter olhado, que é o
+      # Risco-003 com outro nome. O teste reprova o clone raso em vez de se
+      # adaptar a ele, e esta linha é o que o mantém verde por ter história.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:

@@ -47,7 +47,7 @@ import {
 import { PISO_DECLARADO } from '../src/lib/equidade-versionada';
 import { BYTES_VERSIONADOS, avaliarEquidade } from '../src/mock/equidade';
 import { LINDDUN_BASE } from '../src/mock/scenarios';
-import { execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import {
   EH_DEMONSTRACAO, SELO_DE_DEMONSTRACAO, SELO_DO_SELETOR_DE_PAPEL, perfilDe,
 } from '../src/lib/perfil';
@@ -8608,6 +8608,234 @@ massa: massa.csv
       const yml = readFileSync(join('..', '.github', 'workflows', 'privacy-ci-gate.yml'), 'utf8');
       expect(yml).not.toContain('VITE_PERFIL=producao');
       expect(yml).toContain('--mode producao');
+    });
+  });
+});
+
+describe('PR 27 · aceitação — a reconciliação da auditoria é conferível, não declarativa', () => {
+  const RIPD = readFileSync(join('..', 'docs', 'auditoria', 'RIPD.md'), 'utf8');
+  const RELATORIO = readFileSync(join('..', 'docs', 'auditoria', 'RELATORIO-TECNICO-LGPD.md'), 'utf8');
+
+  const SECAO_71 = RIPD.slice(RIPD.indexOf('### 7.1'), RIPD.indexOf('### 7.2'));
+
+  interface Linha {
+    risco: string;
+    status: string;
+    fechadoPor: string;
+  }
+
+  /**
+   * A tabela do §7.1 lida como dado, e não como texto.
+   *
+   * Sete colunas desde o adendo de reconciliação. Ler por posição — e não por
+   * regex sobre a linha inteira — é o que faz este bloco reprovar quando alguém
+   * acrescenta uma coluna sem revisar as provas: o `assert` de largura abaixo
+   * cai antes de qualquer asserção sobre conteúdo.
+   */
+  const LINHAS: Linha[] = SECAO_71.split('\n')
+    .filter((l) => /^\| Risco-\d{3} \|/.test(l))
+    .map((l) => {
+      const c = l.replace(/^\| /, '').replace(/ \|$/, '').split(' | ');
+      expect(c.length, `${c[0]}: a tabela do §7.1 mudou de forma`).toBe(7);
+      return { risco: c[0], status: c[4], fechadoPor: c[5] };
+    });
+
+  const MOVIDOS = LINHAS.filter((l) => /Fechado|Parcial/.test(l.status));
+  const shasDe = (texto: string) => [...texto.matchAll(/`([0-9a-f]{7,40})`/g)].map((m) => m[1]);
+  const nomesDeTeste = (texto: string) => [...texto.matchAll(/`(PR \d+ · [^`]+)`/g)].map((m) => m[1]);
+  const nomesDeCheck = (texto: string) => [...texto.matchAll(/check `([^`]+)`/g)].map((m) => m[1]);
+
+  it('a tabela tem as 40 linhas, e a contagem da prosa é a da tabela', () => {
+    /**
+     * Número em documento é dívida: ou um teste o mantém, ou ele mente em
+     * silêncio. A frase do §7.1 diz quantos fecharam; aqui ela é conferida
+     * contra as próprias células.
+     */
+    expect(LINHAS).toHaveLength(40);
+    const fechados = LINHAS.filter((l) => l.status === '**Fechado**').length;
+    const parciais = LINHAS.filter((l) => l.status.startsWith('**Parcial**')).length;
+    const intactos = LINHAS.length - fechados - parciais;
+    expect(SECAO_71).toContain(`${fechados} riscos`);
+    expect(SECAO_71).toContain(`${parciais} parciais`);
+    expect(SECAO_71).toContain(`${intactos} como descritos`);
+    // Não-vacuidade: uma tabela sem nenhuma linha movida passaria em tudo abaixo.
+    expect(MOVIDOS.length, 'nenhuma linha anotada: as provas abaixo não provariam nada').toBeGreaterThan(10);
+  });
+
+  it('toda linha movida cita commit E teste ou check — commit sozinho não é prova', () => {
+    /**
+     * Commit prova que alguém mexeu. Teste nomeado prova que a regressão
+     * reprova. Um fechamento anotado sem teste é promessa com data, que é a
+     * forma exata do defeito que esta série passou seis PRs corrigindo.
+     */
+    for (const l of MOVIDOS) {
+      expect(shasDe(l.fechadoPor).length, `${l.risco}: marcado "${l.status}" sem sha de commit`)
+        .toBeGreaterThan(0);
+      const provas = nomesDeTeste(l.fechadoPor).length + nomesDeCheck(l.fechadoPor).length;
+      expect(provas, `${l.risco}: marcado "${l.status}" sem teste nem check que impeça a reabertura`)
+        .toBeGreaterThan(0);
+    }
+  });
+
+  it('nenhuma linha intacta finge fechamento pela coluna', () => {
+    // O contrário do teste acima: célula preenchida com status "Aberto" diria
+    // duas coisas ao mesmo tempo, e quem lê a tabela escolheria uma.
+    for (const l of LINHAS.filter((x) => !/Fechado|Parcial/.test(x.status))) {
+      expect(l.fechadoPor, `${l.risco}: "${l.status}" com célula de fechamento preenchida`).toBe('—');
+    }
+  });
+
+  describe('verificação — o que é citado existe?', () => {
+    it('todo sha citado existe e é ancestral do commit sob teste', () => {
+      /**
+       * Protege contra duas coisas diferentes. Typo: `2cf1c1a` em vez de
+       * `2cf1c18` seria uma citação plausível e falsa. Squash futuro: reescrever
+       * a história trocaria os shas, e a tabela passaria a apontar para commits
+       * que não existem mais — silenciosamente, porque ninguém relê uma tabela
+       * de 40 linhas.
+       *
+       * Exige história completa. `actions/checkout` clona com profundidade 1 por
+       * padrão, e num clone raso esta prova não teria como falhar — passaria por
+       * não ter olhado, que é o Risco-003 com outro nome. Daí a checagem de
+       * profundidade vir primeiro, e reprovar.
+       */
+      const raso = execSync('git rev-parse --is-shallow-repository', { encoding: 'utf8' }).trim();
+      expect(raso, 'clone raso: o CI precisa de fetch-depth: 0 para esta prova valer').toBe('false');
+
+      const citados = [...new Set(MOVIDOS.flatMap((l) => shasDe(l.fechadoPor)))];
+      expect(citados.length, 'nenhum sha citado').toBeGreaterThan(5);
+      for (const sha of citados) {
+        const existe = spawnSync('git', ['cat-file', '-e', `${sha}^{commit}`]).status === 0;
+        expect(existe, `${sha}: citado no §7.1 e inexistente no repositório`).toBe(true);
+        const ancestral = spawnSync('git', ['merge-base', '--is-ancestor', sha, 'HEAD']).status === 0;
+        expect(ancestral, `${sha}: citado no §7.1 e não é ancestral do commit sob teste`).toBe(true);
+      }
+    });
+
+    it('todo teste citado existe como bloco desta suíte', () => {
+      // Nome de teste que não existe é a mesma promessa vazia de antes, com
+      // aparência de rastreabilidade.
+      const suite = readFileSync(join('tests', 'regras.test.tsx'), 'utf8');
+      const citados = [...new Set([
+        ...MOVIDOS.flatMap((l) => nomesDeTeste(l.fechadoPor)),
+        ...nomesDeTeste(RELATORIO.slice(RELATORIO.indexOf('## 4. Fichas por risco'))),
+      ])];
+      expect(citados.length).toBeGreaterThan(15);
+      for (const nome of citados) {
+        expect(suite.includes(`describe('${nome}'`) || suite.includes(`'${nome}'`), `bloco de teste citado e inexistente: ${nome}`)
+          .toBe(true);
+      }
+    });
+
+    it('todo check citado existe como nome de job em .github/workflows', () => {
+      const nomes = new Set<string>();
+      for (const arquivo of readdirSync(join('..', '.github', 'workflows'))) {
+        const yml = readFileSync(join('..', '.github', 'workflows', arquivo), 'utf8');
+        for (const m of yml.matchAll(/^\s{4}name: (.+)$/gm)) nomes.add(m[1].trim());
+      }
+      // *Required status check* se marca por nome de job. Citar nome de workflow
+      // no lugar do nome do job produziria uma marcação que não existe.
+      const citados = [...new Set([
+        ...MOVIDOS.flatMap((l) => nomesDeCheck(l.fechadoPor)),
+        ...nomesDeCheck(RELATORIO),
+      ])];
+      expect(citados.length).toBeGreaterThan(2);
+      for (const nome of citados) {
+        expect(nomes.has(nome), `check citado e sem job com esse nome: ${nome}`).toBe(true);
+      }
+    });
+  });
+
+  describe('validação — o que é dito corresponde ao que o código faz?', () => {
+    it('parcial nunca é "Fechado" seco: a célula nomeia o que resta', () => {
+      const parciais = LINHAS.filter((l) => l.status.startsWith('**Parcial**'));
+      expect(parciais.map((l) => l.risco).sort()).toEqual(['Risco-005', 'Risco-007', 'Risco-008']);
+      for (const l of parciais) {
+        expect(l.fechadoPor, `${l.risco}: parcial sem o que resta`).toMatch(/\*\*Resta\*\*|\*\*resta\*\*/);
+      }
+    });
+
+    it('os riscos que não podem fechar sem instrumento real permanecem abertos', () => {
+      /**
+       * Lista fechada, e cada motivo é sobre o código, não sobre o documento:
+       *
+       * - 037 — a catraca impede identidade fabricada no artefato de produção;
+       *   não cria autenticação. Sem OIDC real não fecha.
+       * - 016 — `m-menor` segue sem texto publicado **de propósito**: publicar um
+       *   ali inventaria o aceite de um responsável que ninguém consultou.
+       * - 014 — o step-up é derivado da operação e tem janela provada, mas sem
+       *   TOTP nem WebAuthn não há fator real.
+       */
+      for (const risco of ['Risco-014', 'Risco-016', 'Risco-037']) {
+        const l = LINHAS.find((x) => x.risco === risco)!;
+        expect(/Fechado|Parcial/.test(l.status), `${risco} marcado "${l.status}" sem o instrumento que falta`)
+          .toBe(false);
+      }
+      // E o §7.5 diz por quê, nomeando os três.
+      const secao = RIPD.slice(RIPD.indexOf('### 7.5'), RIPD.indexOf('## 8. Aprovação'));
+      for (const risco of ['Risco-014', 'Risco-016', 'Risco-037']) {
+        expect(secao, `${risco} sem motivo no §7.5`).toContain(risco);
+      }
+    });
+
+    it('o Risco-037 é nomeado como não fechado, contra o assunto do próprio commit', () => {
+      // `cada46c` traz "(Riscos 035, 037, 040)" no assunto. O código não fecha o
+      // 037, e é o código que decide — comentário que afirma o contrário do
+      // código é defeito, e assunto de commit não é exceção.
+      const assunto = execSync('git log -1 --format=%s cada46c', { encoding: 'utf8' });
+      expect(assunto).toContain('037');
+      expect(RIPD.slice(RIPD.indexOf('### 7.3'))).toContain('O Risco-037 não está fechado');
+      expect(RELATORIO).toContain('Risco-037 não fechou');
+    });
+
+    it('as duas tabelas citam os mesmos commits para o mesmo risco', () => {
+      /**
+       * Paridade entre documentos, nos dois sentidos. Antes deste adendo, RIPD e
+       * RELATORIO já divergiam sobre o canal de oposição: um dizia inexistente
+       * enquanto a rota estava servida e testada. Duas enunciações do mesmo fato
+       * sem catraca é um segundo lugar para a história divergir.
+       */
+      const fichas = RELATORIO.slice(RELATORIO.indexOf('## 4. Fichas por risco'));
+      for (const l of MOVIDOS) {
+        const num = l.risco.replace('Risco-', '');
+        const i = fichas.indexOf(`### Risco-${num} —`);
+        expect(i, `${l.risco}: sem ficha no §4`).toBeGreaterThan(-1);
+        const fim = fichas.indexOf('\n### Risco-', i + 1);
+        const ficha = fichas.slice(i, fim === -1 ? undefined : fim);
+        const linhaDoAdendo = ficha.split('\n').find((x) => x.startsWith('| **Fechado por (adendo'));
+        expect(linhaDoAdendo, `${l.risco}: ficha do §4 sem a linha do adendo`).toBeTruthy();
+        // Conjunto, e não lista: a ficha do Risco-020 cita `3fd6bf7` duas vezes —
+        // como o commit que fechou e como a fronteira a partir da qual o valor
+        // íntegro ficou no histórico. São a mesma citação, não duas.
+        const nosDois = (t: string) => [...new Set(shasDe(t))].sort();
+        expect(nosDois(linhaDoAdendo!), `${l.risco}: RIPD e RELATORIO citam commits diferentes`)
+          .toEqual(nosDois(l.fechadoPor));
+      }
+    });
+
+    it('a afirmação congelada permanece, e não é apagada', () => {
+      // Reconciliar é anotar. Ficha reescrita apagaria o achado, e a próxima
+      // passagem da auditoria perderia o que comparar.
+      expect(SECAO_71).toContain('Nenhum risco está mitigado nesta data.');
+      expect(SECAO_71).toContain('congelada no commit auditado');
+      expect(RIPD).toContain('afirmação congelada');
+      // O canal de oposição: o registro histórico continua, com o adendo ao lado.
+      const bases = RIPD.slice(RIPD.indexOf('## 3. Bases Legais'), RIPD.indexOf('## 4.'));
+      expect(bases).toContain('citava canal de oposição inexistente');
+      expect(bases).toContain('titulares/me/oposicao');
+      expect(bases).toContain('PR 17 · verificação — a rota existe no caminho que a LIA anuncia');
+    });
+
+    it('o §7.5 declara os residuais que nenhum fechamento alcança', () => {
+      const secao = RIPD.slice(RIPD.indexOf('### 7.5'), RIPD.indexOf('## 8. Aprovação'));
+      // PII no histórico do git, e credencial em URL no feed. Fechamento que não
+      // nomeia o que ficou de fora é fechamento que alguém vai citar inteiro.
+      expect(secao).toContain('histórico do git');
+      expect(secao).toContain('iCalendar');
+      expect(secao).toContain('TOTP');
+      // E a separação que o método exige.
+      expect(secao).toContain('Verificação');
+      expect(secao).toContain('Validação');
     });
   });
 });
