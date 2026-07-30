@@ -1209,6 +1209,131 @@ CREATE TABLE achado_evidencia (
 );
 
 CREATE INDEX achado_evidencia_idx ON achado_evidencia (achado_id, id);
+-- ---------------------------------------------------------------------
+-- Incidente de segurança (Art. 48) — Risco-015
+--
+-- O fluxo existia na T9, nas rotas do contrato e no `incidente.bpmn`, e em
+-- nenhuma tabela. A ficha do Risco-015 nomeia as duas metades — "sem tabela no
+-- schema e sem rota no contrato" —, e a segunda fechou em `f86020e`, quando as
+-- seis operações entraram no `openapi.yaml`. Esta é a primeira.
+--
+-- Sem ela, o incidente que a T9 abre morre com o processo, e o prazo do Art. 48
+-- não tem de onde ser contado: um prazo que só existe em memória é um prazo que
+-- ninguém consegue provar ter cumprido.
+--
+-- ── Duas tabelas, e a razão de serem duas ──────────────────────────────────
+--
+-- `incidente` é **estado**: o `estado` avança pela máquina, e a decisão chega
+-- depois da contenção. Congelá-la pararia o fluxo no primeiro passo — critério
+-- do Risco-024, e por isso ela entra em `MUTAVEL_COM_MOTIVO`.
+--
+-- `incidente_evento` é **fato**: cada passagem de estado, com ator e instante.
+-- É o que prova que a comunicação saiu dentro do prazo, e por isso é append-only,
+-- no mesmo molde de `solicitacao_evento`.
+-- ---------------------------------------------------------------------
+
+CREATE TYPE estado_incidente AS ENUM (
+  'aberto', 'contido', 'decidido', 'comunicado', 'nao_comunicado', 'encerrado'
+);
+
+CREATE TYPE decisao_incidente AS ENUM (
+  'comunicar_anpd_e_titulares', 'comunicar_anpd', 'nao_comunicar'
+);
+
+CREATE TABLE incidente (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id           UUID NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
+  codigo              TEXT NOT NULL,
+  estado              estado_incidente NOT NULL DEFAULT 'aberto',
+  detectado_em        TIMESTAMPTZ NOT NULL,
+  origem              TEXT NOT NULL CHECK (length(btrim(origem)) > 0),
+  titulares_estimados BIGINT NOT NULL CHECK (titulares_estimados >= 0),
+  risco_id            UUID REFERENCES risco(id) ON DELETE SET NULL,
+  ripd_id             UUID REFERENCES ripd(id) ON DELETE SET NULL,
+  decisao             decisao_incidente,
+  -- Já redigido (C-04) e com corpo: "vazamento" não é fundamento de decisão
+  -- sobre comunicar ou não comunicar à autoridade.
+  fundamento          TEXT,
+  contido_por         UUID REFERENCES ator(id),
+  decidido_por        UUID REFERENCES ator(id),
+  comunicado_em       TIMESTAMPTZ,
+  encerrado_em        TIMESTAMPTZ,
+
+  -- O prazo é **derivado da detecção**, nunca digitado ao lado dela. Mesma regra
+  -- de `retencao_ate` e de `janela_ate`: data que alguém digita é data que
+  -- diverge do fato no primeiro erro de digitação — e aqui o fato é o marco legal.
+  --
+  -- `AT TIME ZONE 'UTC'` não é enfeite: `timestamptz + interval` depende do
+  -- `TimeZone` da sessão e o Postgres recusa a coluna gerada por não ser
+  -- imutável. Convertido para hora de parede em UTC, o cálculo passa a ser o
+  -- mesmo em qualquer sessão — que é o que uma prova de prazo precisa ser.
+  --
+  -- O intervalo é o **parâmetro declarado** deste repositório para o "prazo
+  -- razoável" do Art. 48, e mora aqui num lugar só: a regulamentação da ANPD é
+  -- quem o fixa, e mudá-la é mudar esta linha. Nenhum outro artefato o redigita.
+  comunicar_ate       TIMESTAMP GENERATED ALWAYS AS
+                        ((detectado_em AT TIME ZONE 'UTC') + INTERVAL '3 days') STORED,
+
+  UNIQUE (tenant_id, codigo),
+
+  -- Decidir exige a decisão e o porquê dela. Estado que avança sem o conteúdo
+  -- que o justifica é a assinatura sem documento do Risco-024.
+  --
+  -- `coalesce` e `IS NOT DISTINCT FROM` não são estilo: em SQL, um CHECK que
+  -- avalia para NULL **passa**. `length(btrim(NULL)) >= 20` é NULL, e a primeira
+  -- versão destes três deixava entrar exatamente o caso que eles existem para
+  -- barrar — decidir com `fundamento` nulo. Apareceu quando a injeção que
+  -- removia este CHECK não reprovou: outro CHECK barrava antes, e escondia que
+  -- este nunca barrava nada.
+  CONSTRAINT incidente_decide_com_fundamento CHECK (
+    estado IN ('aberto','contido')
+    OR (decisao IS NOT NULL AND length(btrim(coalesce(fundamento, ''))) >= 20)
+  ),
+  -- Não comunicar é uma decisão, e só ela leva a "nao_comunicado". O caminho
+  -- inverso — comunicar e registrar como não comunicado — apagaria a
+  -- comunicação que de fato saiu.
+  CONSTRAINT incidente_nao_comunicado_veio_da_decisao CHECK (
+    estado <> 'nao_comunicado' OR decisao IS NOT DISTINCT FROM 'nao_comunicar'::decisao_incidente
+  ),
+  CONSTRAINT incidente_comunicado_veio_da_decisao CHECK (
+    estado <> 'comunicado'
+    OR (decisao IS NOT NULL
+        AND decisao IN ('comunicar_anpd','comunicar_anpd_e_titulares')
+        AND comunicado_em IS NOT NULL)
+  ),
+  CONSTRAINT incidente_encerra_com_data CHECK (
+    estado <> 'encerrado' OR encerrado_em IS NOT NULL
+  ),
+  CONSTRAINT incidente_contido_tem_quem CHECK (
+    estado = 'aberto' OR contido_por IS NOT NULL
+  )
+);
+
+CREATE INDEX incidente_prazo_idx ON incidente (comunicar_ate)
+  WHERE estado IN ('aberto', 'contido', 'decidido');
+
+-- O escopo vem do catálogo, e não de texto digitado: quem responde ao Art. 48
+-- precisa dizer qual dado vazou, e a resposta tem de sair do inventário — senão
+-- o incidente descreve um universo que o ROPA desconhece.
+CREATE TABLE incidente_campo (
+  incidente_id UUID NOT NULL REFERENCES incidente(id) ON DELETE CASCADE,
+  campo_id     UUID NOT NULL REFERENCES campo(id) ON DELETE RESTRICT,
+  PRIMARY KEY (incidente_id, campo_id)
+);
+
+-- A trilha do incidente. Append-only: é ela que prova o cumprimento do prazo, e
+-- prova que se reescreve não prova nada.
+CREATE TABLE incidente_evento (
+  id           BIGSERIAL PRIMARY KEY,
+  incidente_id UUID NOT NULL REFERENCES incidente(id) ON DELETE CASCADE,
+  de           estado_incidente,
+  para         estado_incidente NOT NULL,
+  ator_id      UUID REFERENCES ator(id),
+  detalhe      TEXT,
+  ocorrido_em  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+
 
 -- ---------------------------------------------------------------------
 -- 10. KMS — artefato (9) kms-rotation.yml                            [Tela T7]
@@ -1555,6 +1680,12 @@ CREATE TRIGGER gate_finding_imutavel
 -- histórica que se reescreve é série que conta a história de agora.
 CREATE TRIGGER metric_snapshot_imutavel
   BEFORE UPDATE OR DELETE ON metric_snapshot
+  FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
+
+-- A trilha do incidente (Risco-015). Prova o cumprimento do prazo do Art. 48, e
+-- prazo provado por registro reescrevível não é prazo provado.
+CREATE TRIGGER incidente_evento_imutavel
+  BEFORE UPDATE OR DELETE ON incidente_evento
   FOR EACH ROW EXECUTE FUNCTION bloqueia_mutacao();
 
 -- ── Deliberadamente NÃO append-only, e por quê ──────────────────────────────

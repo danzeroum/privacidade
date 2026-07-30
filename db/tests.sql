@@ -850,6 +850,104 @@ BEGIN
   RAISE NOTICE 'OK   %  → aceito', rpad('UPDATE em expurgo_entrada (conferência)', 52);
 END $$;
 
+-- ---------------------------------------------------------------------
+-- Risco-015 — o incidente do Art. 48 tem onde persistir, e o banco cobra
+--
+-- As invariantes são sobre o que o fluxo promete: decidir exige o porquê,
+-- "não comunicado" só nasce da decisão de não comunicar, e a trilha que prova o
+-- prazo não se reescreve.
+-- ---------------------------------------------------------------------
+
+-- Não-vacuidade: sem linha, os CHECK de estado nunca são exercidos e o
+-- append-only não dispara. A lição do FOR EACH ROW do Risco-024.
+DO $$
+DECLARE n BIGINT;
+BEGIN
+  SELECT count(*) INTO n FROM incidente;
+  IF n < 2 THEN RAISE EXCEPTION 'FALHA: incidente tem % linha(s) — as invariantes precisam dos dois lados.', n; END IF;
+  SELECT count(*) INTO n FROM incidente_evento;
+  IF n = 0 THEN RAISE EXCEPTION 'FALHA: incidente_evento vazia — o append-only passaria por vacuidade.'; END IF;
+  RAISE NOTICE 'OK   %  → com linha dos dois lados', rpad('não-vacuidade do incidente', 52);
+END $$;
+
+-- O prazo do Art. 48 é derivado da detecção, e não digitado ao lado dela.
+SELECT assert_igual(
+  (SELECT comunicar_ate = (detectado_em AT TIME ZONE 'UTC') + INTERVAL '3 days'
+     FROM incidente WHERE codigo = 'INC-2026-001'),
+  true, 'comunicar_ate é derivada de detectado_em');
+
+-- Decidir sem fundamento, ou com fundamento curto, é recusado.
+SELECT assert_falha($$
+  UPDATE incidente SET estado = 'decidido', decisao = 'comunicar_anpd',
+         contido_por = (SELECT id FROM ator LIMIT 1)
+  WHERE codigo = 'INC-2026-001'
+$$, 'decidir sem fundamento');
+
+SELECT assert_falha($$
+  UPDATE incidente SET estado = 'decidido', decisao = 'comunicar_anpd', fundamento = 'vazou',
+         contido_por = (SELECT id FROM ator LIMIT 1)
+  WHERE codigo = 'INC-2026-001'
+$$, 'decidir com fundamento sem corpo');
+
+-- "Não comunicado" só nasce da decisão de não comunicar: o caminho inverso
+-- apagaria a comunicação que de fato saiu.
+SELECT assert_falha($$
+  UPDATE incidente SET estado = 'nao_comunicado', decisao = 'comunicar_anpd',
+         fundamento = 'Fundamento suficientemente longo para passar do minimo exigido.',
+         contido_por = (SELECT id FROM ator LIMIT 1)
+  WHERE codigo = 'INC-2026-001'
+$$, 'nao_comunicado com decisão de comunicar');
+
+-- Comunicar sem carimbar quando é dizer que cumpriu o prazo sem dizer quando.
+SELECT assert_falha($$
+  UPDATE incidente SET estado = 'comunicado', decisao = 'comunicar_anpd',
+         fundamento = 'Fundamento suficientemente longo para passar do minimo exigido.',
+         contido_por = (SELECT id FROM ator LIMIT 1)
+  WHERE codigo = 'INC-2026-001'
+$$, 'comunicado sem comunicado_em');
+
+-- Encerrar sem data de encerramento.
+SELECT assert_falha($$
+  UPDATE incidente SET estado = 'encerrado', decisao = 'nao_comunicar',
+         fundamento = 'Fundamento suficientemente longo para passar do minimo exigido.',
+         contido_por = (SELECT id FROM ator LIMIT 1)
+  WHERE codigo = 'INC-2026-001'
+$$, 'encerrar sem encerrado_em');
+
+-- Avançar sem dizer quem conteve: a contenção é ato de alguém, e o estado que a
+-- registra sem o ator não registra a contenção.
+SELECT assert_falha($$
+  UPDATE incidente SET estado = 'contido' WHERE codigo = 'INC-2026-001'
+$$, 'conter sem dizer quem conteve');
+
+-- Titulares estimados negativos.
+SELECT assert_falha($$
+  UPDATE incidente SET titulares_estimados = -1 WHERE codigo = 'INC-2026-001'
+$$, 'titulares estimados negativos');
+
+-- O escopo sai do catálogo: campo inexistente é recusado pela FK.
+SELECT assert_falha($$
+  INSERT INTO incidente_campo (incidente_id, campo_id)
+  VALUES ('11111111-0000-4000-8000-000000000e01', '00000000-0000-4000-8000-000000000000')
+$$, 'escopo do incidente fora do catálogo');
+
+-- E a trilha não se reescreve.
+SELECT assert_falha($$
+  UPDATE incidente_evento SET para = 'encerrado'
+$$, 'UPDATE em incidente_evento');
+SELECT assert_falha($$
+  DELETE FROM incidente_evento
+$$, 'DELETE em incidente_evento');
+
+-- Direção inversa: o incidente **é** estado, e avançar precisa continuar
+-- possível. Congelá-lo pararia o fluxo no primeiro passo.
+DO $$
+BEGIN
+  UPDATE incidente SET estado = 'contido', contido_por = (SELECT id FROM ator LIMIT 1)
+  WHERE codigo = 'INC-2026-001';
+  RAISE NOTICE 'OK   %  → aceito', rpad('UPDATE em incidente (estado, não fato)', 52);
+END $$;
+
 DO $$ BEGIN RAISE NOTICE '';
        RAISE NOTICE '=== Todas as invariantes verificadas ===';
 END $$;
