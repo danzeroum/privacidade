@@ -8757,7 +8757,10 @@ describe('PR 27 · aceitação — a reconciliação da auditoria é conferível
   describe('validação — o que é dito corresponde ao que o código faz?', () => {
     it('parcial nunca é "Fechado" seco: a célula nomeia o que resta', () => {
       const parciais = LINHAS.filter((l) => l.status.startsWith('**Parcial**'));
-      expect(parciais.map((l) => l.risco).sort()).toEqual(['Risco-005', 'Risco-007', 'Risco-008']);
+      // O 007 saiu daqui no PR 28: a AIA fechou a faceta que faltava, e o que
+      // sobrou dele — base legal por registro na linhagem — está nomeado na
+      // célula de fechamento, não como parcialidade do risco inteiro.
+      expect(parciais.map((l) => l.risco).sort()).toEqual(['Risco-005', 'Risco-008']);
       for (const l of parciais) {
         expect(l.fechadoPor, `${l.risco}: parcial sem o que resta`).toMatch(/\*\*Resta\*\*|\*\*resta\*\*/);
       }

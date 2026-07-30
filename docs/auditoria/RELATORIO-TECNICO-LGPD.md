@@ -55,7 +55,7 @@ Os achados e a numeração deste relatório estão **congelados no commit `8d054
 ### Adendo de reconciliação (2026-07-30)
 
 O adendo acima cobre 7 commits e um risco. A série de remediação que veio depois avançou a `main` de `8d0548a`
-até `3b25b46` e alterou o estado de **14** dos 40 riscos: 11 fechados, 3 parciais com resíduo nomeado.
+até `3b25b46` e alterou o estado de **14** dos 40 riscos: 11 fechados, 3 parciais com resíduo nomeado. **Atualização:** com a AIA (`9614ab3`) o Risco-007 fechou, e a conta passou a 12 fechados e 2 parciais.
 
 A anotação não reescreve ficha nenhuma. Cada uma das 14 fichas do §4 ganhou uma linha **Fechado por**, com o
 commit e o teste ou check que impede a reabertura; a tabela do §7.1 do RIPD ganhou a coluna equivalente, e o
@@ -65,8 +65,9 @@ que a próxima passagem precisa comparar, e "estava assim" viraria afirmação s
 **O que os quatro padrões sistêmicos do §1 têm de novo:** o padrão 3 ("o guardião não se vigia") fechou por
 inteiro — gate varrendo o repositório com o denominador impresso, cadeia cobrindo `justificativa` e `base_legal`,
 valor de PII mascarado no achado, e três checks *required* na `main`. O padrão da promessa sem instrumento
-fechou em quatro frentes (X-Purpose, retenção, DPA, disparidade) e permanece em duas: **MFA sem fator real**
-(Risco-014 — sem TOTP nem WebAuthn) e **AIA sem documento** (a parte do Risco-007 que não fechou).
+fechou em cinco frentes (X-Purpose, retenção, DPA, disparidade e a AIA) e permanece em uma: **MFA sem fator
+real** (Risco-014 — sem TOTP nem WebAuthn). A AIA era a última promessa desse padrão a virar artefato: `.privacy/aia-credit-scoring.md`
+é conferida contra o modelo, os fatores, a massa medida e as rotas do Art. 20, e a D3 deixou de exigir uma análise que não existia.
 
 **Um caso em que o commit e o código divergiam, e o código venceu:** `cada46c` traz "(Riscos 035, 037, 040)" no
 assunto, e o **Risco-037 não fechou**. A catraca garante que a identidade fabricada não chega a um artefato de
@@ -274,7 +275,7 @@ Uma ficha por risco, com os nove campos obrigatórios. Riscos que fundem achados
 | **Impacto** | Alto — Decisão automatizada de crédito para 1,2M de titulares em que a mitigação de discriminação que sustenta a LIA vigente (teste de disparate impact "a cada release", remoção de cep/nome_mae/canal_atendimento) é texto de seed sem nenhum job, relatório ou teste que a verifique — o próprio RIPD lista o job como pendente. Em fiscalização, o balanceamento do legítimo interesse cai por falta de evidência (Art. 6o IX, Art. 20). |
 | **Recomendação** | Criar docs/aia/AIA-credit-scoring.md versionado, referenciado pela saída analiseAlgoritmica=true da D3 (mesmo padrão dos .dmn versionados do PR 12); transformar o disparate impact em artefato: job de CI com limiar 0.8-1.2 (exatamente como seed.sql:157 descreve a evidência esperada) e relatório versionado; corrigir a medidas_mitigacao da LIA para o status real; adicionar coluna de base legal por lote na linhagem de treino com teste em db/tests.sql. |
 | **Evidência** | seed.sql:46 "teste de disparate impact a cada release" (mitigação declarada vigente) vs seed.sql:157 "'P1','Teste de disparate impact no pipeline do modelo'...,false,NULL" (pendente) |
-| **Fechado por (adendo 2026-07-30)** | Parcial — `0da2b08`. Provas: `PR 26 · Risco-007 — equidade deixa de ser declarada e vira artefato`; check `Disparidade e proxies do modelo`. **Fecharam** (1) a contradição interna — a mitigação da LIA passou a citar `npm run equidade`, com o piso lido de `.privacy/equidade.yaml` em vez de redigitado — e (3) a verificação da remoção de proxies, com lista fechada e reprovação por arquivo e linha. **Resta** (2) a AIA como documento vivo versionado e (4) a base legal por registro na linhagem de treino. A recomendação original pedia "limiar 0.8-1.2": a faixa é assimétrica e foi substituída por piso 0,80 sob razão menor/maior, com a razão do troco escrita no contrato. |
+| **Fechado por (adendo 2026-07-30)** | Fechado — `0da2b08` e `9614ab3`. Provas: `PR 26 · Risco-007 — equidade deixa de ser declarada e vira artefato`, `PR 28 · Risco-007 — a AIA é documento conferido, não anexo`; check `Disparidade e proxies do modelo`. **Fecharam** (1) a contradição interna — a mitigação da LIA passou a citar `npm run equidade`, com o piso lido de `.privacy/equidade.yaml` em vez de redigitado —, (3) a verificação da remoção de proxies, com lista fechada e reprovação por arquivo e linha, e (2) a AIA como documento vivo: `.privacy/aia-credit-scoring.md`, com cabeçalho transcrito sob catraca (modelo, fatores, razão datada), piso e proxies como ponteiros, e o corpo proibido de repetir literal de taxa. A AIA fecha também a ponta que esta recomendação pedia — ser referenciada pela saída `analiseAlgoritmica=true` da D3, que até então exigia uma análise inexistente — e traz o gatilho de reavaliação como obrigação de calendário com responsável, vencimento e consequência. **Resíduo declarado:** (4) a base legal por registro na linhagem de treino, nomeado na própria AIA. A recomendação original pedia "limiar 0.8-1.2": a faixa é assimétrica e foi substituída por piso 0,80 sob razão menor/maior, com a razão do troco escrita no contrato. |
 
 ### Risco-008 — Fornecedor não é entidade: DPA sem validação programática, expiração sem vigilância, sem chave por parceiro nem revogação com SLA
 

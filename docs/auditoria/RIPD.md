@@ -148,8 +148,8 @@ Regra do checklist aplicada: **direito sem endpoint com prazo, autenticação e 
 ### 7.1 Tabela consolidada (40 riscos)
 
 > **Nenhum risco está mitigado nesta data.** — afirmação congelada no commit auditado (`8d0548a`), preservada
-> como registro. A coluna **Fechado por** é o adendo de 2026-07-30 e diz onde ela deixou de valer: 11 riscos
-> fechados, 3 parciais com resíduo nomeado, 26 como descritos. Método e limites do adendo no §7.5.
+> como registro. A coluna **Fechado por** é o adendo de 2026-07-30 e diz onde ela deixou de valer: 12 riscos
+> fechados, 2 parciais com resíduo nomeado, 26 como descritos. Método e limites do adendo no §7.5.
 
 Fichas completas com recomendação técnica no Relatório Técnico §4.
 
@@ -161,7 +161,7 @@ Fichas completas com recomendação técnica no Relatório Técnico §4.
 | Risco-004 | Cadeia de hash do audit trail não cobre justificativa nem base legal — o campo mais exposto é adulterável sem detecção | P1 | Lacuna real | **Fechado** | `3fd6bf7` · teste `PR 22 · unidade — a cadeia cobre a base legal, e o selo cobre o texto`; check `Constraints e invariantes do banco` | Recomendação definida no Relatório Técnico §4, Risco-004 |
 | Risco-005 | Governança de mudança rompida: upload manual reverteu PR revisado, a main estava vermelha e nenhum workflow era required status check | P1 | Lacuna real | **Parcial** (a, d) | `2cf1c18` `f86020e` · sub-item (d) fechado: schema e invariantes entram no CI pelo check `Constraints e invariantes do banco`, e o contrato passa a ser lido pelo teste `PR 16 · invariante de paridade — contrato e mock, nos dois sentidos (Risco-034)`. **Resta** (b) sem gitleaks/CodeQL/`npm audit` e (c) sem `schedule` para vencimentos | Main restaurada (#19), T11 entregue (#18), proteção de branch evidenciada (#21–#25); permanecem gitleaks/CodeQL, `schedule` de vencimentos e schema/OpenAPI fora do CI — Relatório Técnico §1 (Adendo) e §4, Risco-005 |
 | Risco-006 | Retenção existe só como rótulo: sem retencao_ate, sem TTL, sem executor de expurgo — e o audit_log não tem prazo definido | P1 | Lacuna real | **Fechado** | `2cf1c18` · testes `PR 18 · unidade — retencao_ate é derivada, e por uma função só` e `PR 18 · integração — o executor elimina, prova e não repete`; check `Constraints e invariantes do banco` | Recomendação definida no Relatório Técnico §4, Risco-006 |
-| Risco-007 | Equidade algorítmica só declarada: teste de disparidade, remoção de proxies e AIA sem artefato executável ou versionado | P1 | Lacuna real | **Parcial** | `0da2b08` · teste `PR 26 · Risco-007 — equidade deixa de ser declarada e vira artefato`; check `Disparidade e proxies do modelo`. Fecha disparidade e proxies; **resta** a AIA sem instrumento e a base legal por lote na linhagem de treino | Recomendação definida no Relatório Técnico §4, Risco-007 |
+| Risco-007 | Equidade algorítmica só declarada: teste de disparidade, remoção de proxies e AIA sem artefato executável ou versionado | P1 | Lacuna real | **Fechado** | `0da2b08` `9614ab3` · testes `PR 26 · Risco-007 — equidade deixa de ser declarada e vira artefato` e `PR 28 · Risco-007 — a AIA é documento conferido, não anexo`; check `Disparidade e proxies do modelo`. Disparidade e proxies no primeiro; a AIA em `.privacy/aia-credit-scoring.md` no segundo, com fatores, medição datada e gatilho conferidos por teste. **Resíduo declarado:** base legal por registro na linhagem de treino, nomeado na própria AIA | Recomendação definida no Relatório Técnico §4, Risco-007 |
 | Risco-008 | Fornecedor não é entidade: DPA sem validação programática, expiração sem vigilância, sem chave por parceiro nem revogação com SLA | P1 | Lacuna real | **Parcial** | `4aa1f78` · testes `PR 21 · unidade — a vigência do DPA, na fronteira de um dia` e `PR 21 · integração — a varredura pega o que o trigger não alcança`. Fecha entidade, DPA no banco e vigilância de expiração; **resta** a revogação com SLA — desligar parceiro destruindo a chave dele é máquina própria | Recomendação definida no Relatório Técnico §4, Risco-008 |
 | Risco-009 | Processo de solicitação do titular sem etapa de verificação de identidade e sem ator titular | P1 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-009 |
 | Risco-010 | Prazo de comunicação à ANPD sem relógio: nenhum artefato conhece o prazo do Art. 48 | P1 | Lacuna real | Aberto | — | Recomendação definida no Relatório Técnico §4, Risco-010 |
@@ -282,6 +282,10 @@ decisão, não por inércia.
   anteriores, e reescrever o histórico é decisão de quem opera o repositório, não deste documento.
 - **Credencial em URL no feed ICS.** O token do `a367a89` tem papel e prazo, e o segredo é gerado por instância —
   mas o token viaja no caminho porque é o desenho do protocolo iCalendar. Está declarado no §7.3.
+
+**O Risco-007 fechou em duas etapas, e a coluna cita as duas.** O instrumento de disparidade veio em `0da2b08`; a AIA que ele pressupunha, em `9614ab3`. Fechar um risco cujo achado tinha quatro facetas exigiu separar o que cada commit resolveu — e o que sobrou está na célula, não numa nota de rodapé.
+
+**Uma consequência da própria catraca, registrada porque ela desenha o PR:** um documento não pode citar o commit que o escreve. O sha precisa existir antes de a tabela apontar para ele, então o fechamento do 007 veio em dois commits do mesmo PR — `9614ab3` entrega a AIA e os testes, e o commit seguinte fecha esta tabela citando-o. Autocitação passaria a verificação de ancestralidade sem provar nada.
 
 **Reavaliação:** este adendo não move a data do §7.4. Os 26 riscos que seguem abertos são o que sustenta o prazo.
 
