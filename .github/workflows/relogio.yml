@@ -1,0 +1,108 @@
+# Relógio do programa (Risco-005, sub-item c).
+#
+# As quatro varreduras de prazo existiam e funcionavam — retenção vencida, DPA
+# vencido, propagação parada, obrigação dentro da antecedência. Nenhuma rodava
+# sem alguém abrir a T0. Prazo que só é notado por quem já estava olhando não é
+# vigilância: é sorte com aparência de controle.
+#
+# ── NÃO MARQUE ESTE JOB COMO REQUIRED STATUS CHECK ──────────────────────────
+#
+# A polaridade dele é o oposto dos outros quatro. Gate, catraca, invariantes e
+# equidade reprovam porque o defeito está no diff de quem abriu o PR. Aqui a
+# pendência está no mundo: uma `main` vermelha todo dia depois de um DPA vencer
+# treina a equipe a ignorar vermelho, que é o efeito contrário ao pretendido.
+#
+# Pendência é **exit 0 com alerta aberto**. Vermelho aqui significa "o relógio
+# parou" — a varredura quebrou e ninguém sabe se há prazo estourado —, e nesse
+# caso nenhum alerta é emitido: um plano parcial escrito por varredura que morreu
+# no meio abriria alerta sobre levantamento incompleto e silenciaria o resto.
+#
+# ── O que `schedule` não faz, declarado em vez de escondido ─────────────────
+#
+# 1. **Atrasa.** O cron do GitHub não é relógio de precisão: em horário de pico o
+#    disparo sai dezenas de minutos depois. O horário abaixo é aproximado, e
+#    qualquer coisa que dependa de minuto exato não pode depender disto.
+# 2. **Não roda em fork.** Workflow agendado não dispara em repositório bifurcado,
+#    e o `GITHUB_TOKEN` de PR vindo de fork é somente leitura. Quem trabalha num
+#    fork usa `workflow_dispatch`, ou `npm run relogio` na própria máquina.
+# 3. **O GitHub desabilita o cron** em repositório sem atividade por 60 dias. Um
+#    relógio que para sozinho é pior que nenhum, porque o silêncio passa a ser
+#    lido como "nenhuma pendência". Quem operar isto precisa saber que a ausência
+#    de execução é um estado possível — e é por isso que o resumo de toda
+#    execução, inclusive a verde, diz explicitamente "nenhuma pendência".
+#
+# ── O workflow só move bytes ────────────────────────────────────────────────
+#
+# `gh issue list` → CLI → `gh issue create`. Nenhum `grep` decide nada: a regra de
+# idempotência ("um alerta ABERTO por chave") mora em `app/src/mock/relogio.ts` e é
+# exercitada por teste. Regra em shell de YAML é regra que ninguém roda em casa
+# nem consegue provar — foi o que o gate de privacidade evitou ao viver em `.ts`.
+#
+# Um job e dois gatilhos, sem nenhum `if` sobre `github.event_name`: é o que faz o
+# disparo manual reproduzir o agendado byte a byte, mesmo comando e mesma saída.
+name: Relógio do programa
+
+on:
+  schedule:
+    # 07:00 UTC — 04:00 em Brasília. Aproximado, ver a limitação 1 acima.
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: relogio
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  relogio:
+    name: Varreduras de prazo
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      # As chaves já abertas entram como **dado**, não como consulta feita pelo
+      # CLI: ele continua sem rede, e a decisão continua conferível em casa
+      # passando `--abertos=` à mão.
+      - name: Alertas já abertos
+        id: abertos
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          chaves=$(gh issue list --state open --label relogio --limit 200 \
+            --json title --jq '[.[] | .title | split(" — ")[0]] | join(",")')
+          echo "chaves=$chaves" >> "$GITHUB_OUTPUT"
+          echo "Abertos: ${chaves:-nenhum}"
+
+      # Pendência não é falha. O `plano.json` só existe se a varredura completou.
+      - name: Varreduras de prazo
+        run: npm run --silent relogio -- --abertos='${{ steps.abertos.outputs.chaves }}' --json=plano.json
+
+      - name: Abrir os alertas que faltam
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f plano.json ]; then
+            echo "Nenhum plano emitido — a varredura não completou." >&2
+            exit 1
+          fi
+          jq -c '.criar[]' plano.json | while read -r item; do
+            titulo=$(printf '%s' "$item" | jq -r '.titulo')
+            printf '%s' "$item" | jq -r '.corpo' > corpo.md
+            gh issue create --title "$titulo" --body-file corpo.md --label relogio
+          done

@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "gate:privacidade": "vite-node scripts/gate.ts",
     "equidade": "vite-node scripts/equidade.ts",
+    "relogio": "vite-node scripts/relogio.ts",
     "varredura:segredos": "vite-node scripts/segredos.ts",
     "build:producao": "vite build --mode producao --outDir dist-producao",
     "catraca:producao": "npm run build:producao && vite-node scripts/catraca.ts"

@@ -208,6 +208,18 @@ export function executarExpurgo(
  * acabar. O código é determinístico pelo mesmo motivo do vencimento — uma
  * varredura por dia sobre a mesma pendência não pode abrir um achado por dia.
  */
+/**
+ * O código do achado de propagação — determinístico, e agora nomeado.
+ *
+ * Estava embutido na varredura. O relógio do programa precisa do mesmo código
+ * para ligar o achado de volta ao item da cascata que o gerou, e reconstruí-lo lá
+ * seria uma segunda enunciação da mesma regra: as duas divergiriam na primeira
+ * mudança de formato, e o alerta passaria a apontar para um achado que não existe.
+ */
+export const codigoDaPropagacao = (campoId: string, alvo: string): string =>
+  `PROP-${campoId.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`
+  + `-${alvo.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
+
 export function varrerPropagacoes(banco: BancoMock, agoraMs: number): Achado[] {
   const LIMITE_MS = 24 * 60 * 60 * 1000;
   const tocados: Achado[] = [];
@@ -218,8 +230,7 @@ export function varrerPropagacoes(banco: BancoMock, agoraMs: number): Achado[] {
       const horas = (agoraMs - item.iniciadaEmMs) / (60 * 60 * 1000);
       if (agoraMs - item.iniciadaEmMs <= LIMITE_MS) continue;
 
-      const codigo = `PROP-${revogacao.campoId.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`
-        + `-${item.alvo.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
+      const codigo = codigoDaPropagacao(revogacao.campoId, item.alvo);
       const descricao = `A revogação de ${revogacao.campoId} não propagou para "${item.alvo}" `
         + `há ${horas.toFixed(0)} h. O titular já vê o atraso; falta alguém tratá-lo.`;
 

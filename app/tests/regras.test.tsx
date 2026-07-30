@@ -48,6 +48,11 @@ import {
 import { PISO_DECLARADO } from '../src/lib/equidade-versionada';
 import { BYTES_VERSIONADOS, avaliarEquidade } from '../src/mock/equidade';
 import { LINDDUN_BASE } from '../src/mock/scenarios';
+import {
+  chaveDe, corpoDoAlerta, pendenciasDe, planoDeAlertas, quandoDe, relatorioDoRelogio, varrerCenario,
+  varrerOPrograma,
+} from '../src/mock/relogio';
+import { PAPEIS } from '../src/mock/permissoes';
 import { execSync, spawnSync } from 'node:child_process';
 import {
   EH_DEMONSTRACAO, SELO_DE_DEMONSTRACAO, SELO_DO_SELETOR_DE_PAPEL, perfilDe,
@@ -9109,6 +9114,347 @@ describe('PR 28 · Risco-007 — a AIA é documento conferido, não anexo', () =
           .toBe(true);
       }
       expect(CORPO).toContain('não hospeda modelo');
+    });
+  });
+});
+
+describe('PR 29 · Risco-005(c) — o relógio do programa dispara sem sessão aberta', () => {
+  const instante = (iso: string) => new Date(iso).getTime();
+  const DIA = 86_400_000;
+
+  describe('verificação — a varredura acha a pendência?', () => {
+    it('o instante entra por parâmetro: nada aqui lê o relógio por conta própria', () => {
+      /**
+       * É o que permite provar a fronteira de um dia sem esperar um dia — e o que
+       * separa este bloco de um teste que passa hoje e reprova amanhã.
+       */
+      const fonte = readFileSync(join('src', 'mock', 'relogio.ts'), 'utf8');
+      expect(fonte, 'o módulo lê o relógio direto').not.toMatch(/Date\.now\(\)|new Date\(\)/);
+    });
+
+    it('obrigação vencida ontem entra com dias = 1', () => {
+      const b = new BancoMock('banco');
+      const o = b.cenario.obrigacoes.find((x) => x.curto === 'Reavaliar AIA')!;
+      const ontem = instante(`${o.vence}T12:00:00Z`) + DIA;
+      const p = varrerCenario('banco', ontem).find((x) => x.codigo === o.codigo);
+      expect(p, 'a obrigação vencida não virou pendência').toBeTruthy();
+      expect(p!.diasDeAtraso).toBe(1);
+      expect(p!.responsavel).toBe(o.responsavel);
+      expect(p!.consequencia, 'a consequência tem de vir do dado').toBe(o.seFalhar);
+    });
+
+    it('a AIA entra dentro da antecedência de 30 dias — o relógio alcança o PR anterior', () => {
+      /**
+       * O resíduo que o PR da AIA nomeou: o gatilho de relógio dela virava item de
+       * fila e não disparava nada. Aqui ele dispara.
+       */
+      const b = new BancoMock('banco');
+      const o = b.cenario.obrigacoes.find((x) => x.curto === 'Reavaliar AIA')!;
+      const vence = instante(`${o.vence}T12:00:00Z`);
+
+      const dentro = varrerCenario('banco', vence - (o.antecedenciaDias - 1) * DIA);
+      const p = dentro.find((x) => x.codigo === o.codigo);
+      expect(p, 'a AIA não entrou dentro da antecedência').toBeTruthy();
+      expect(p!.responsavel).toBe('dpo');
+      expect(p!.tipo).toBe('obrigacao');
+
+      // Fora da antecedência ela existe no calendário e não ocupa ninguém: o
+      // relógio não inventa uma segunda régua de urgência.
+      const fora = varrerCenario('banco', vence - (o.antecedenciaDias + 2) * DIA);
+      expect(fora.some((x) => x.codigo === o.codigo)).toBe(false);
+    });
+
+    it('SendGrid: nada no dia do vencimento, alerta no dia seguinte', () => {
+      // O contrato cobre o último dia, não a véspera dele. A fronteira é a mesma
+      // que `estadoDoDpa` já aplicava.
+      const chave = 'RELOGIO-banco-DPA-SENDGRID';
+      const noDia = varrerCenario('banco', instante('2026-09-30T12:00:00Z'));
+      expect(noDia.some((p) => p.chave === chave), 'alertou no dia em que o DPA ainda vale').toBe(false);
+
+      const depois = varrerCenario('banco', instante('2026-10-01T12:00:00Z'));
+      const p = depois.find((x) => x.chave === chave);
+      expect(p, 'não alertou no dia seguinte ao vencimento').toBeTruthy();
+      expect(p!.diasDeAtraso).toBe(1);
+      expect(p!.responsavel).toBe('dpo');
+    });
+
+    it('DPA sem prazo não "vence hoje" — ausência de prazo não é zero', () => {
+      /**
+       * Defeito da primeira versão deste módulo: um DPA nunca assinado saía como
+       * "vence hoje", frase falsa sobre um contrato que nunca existiu. Confundir
+       * os dois manda a pessoa renovar o que precisa ser assinado.
+       */
+      const sem = varrerCenario('varejo', instante('2026-07-30T12:00:00Z'))
+        .filter((p) => p.tipo === 'dpa' && p.diasDeAtraso === null);
+      expect(sem.length, 'o cenário perdeu o DPA sem prazo que este teste mede').toBeGreaterThan(0);
+      expect(quandoDe(null)).toBe('sem prazo declarado');
+      expect(quandoDe(0)).toBe('vence hoje');
+      for (const p of sem) expect(corpoDoAlerta(p)).toContain('sem prazo declarado');
+    });
+
+    it('o atraso sai do dado, e não da prosa do achado', () => {
+      // A primeira versão extraía o número por regex sobre a descrição. Um ajuste
+      // de redação na varredura teria zerado o atraso de todos os alertas em
+      // silêncio — reenunciar em vez de derivar.
+      const fonte = readFileSync(join('src', 'mock', 'relogio.ts'), 'utf8');
+      expect(fonte).not.toMatch(/exec\(.*descricao|descricao\)\s*;?\s*$/m);
+      expect(fonte).toContain('codigoDoAchadoDeDpa');
+      expect(fonte).toContain('codigoDaPropagacao');
+      expect(fonte).toContain('codigoDoAchado(');
+    });
+
+    it('DPA renovado não gera alerta: a varredura devolve o que ela fechou', () => {
+      /**
+       * `varrerDpas` também devolve achados que ela **encerrou** ao encontrar o
+       * contrato renovado. Alertar sobre eles avisaria que o problema acabou de
+       * ser resolvido.
+       */
+      const hoje = '2026-10-01';
+      /**
+       * O fechamento é **construído**, e não esperado da massa: a primeira versão
+       * deste teste iterava sobre os achados que a varredura por acaso tivesse
+       * encerrado naquela data, e passava por vacuidade quando não havia nenhum —
+       * inclusive com a regra desligada.
+       *
+       * `openai` tem DPA válido até 2027. Um achado aberto sobre ele é exatamente o
+       * estado "havia problema, foi renovado", e a varredura o encerra.
+       */
+      const b = new BancoMock('banco');
+      const codigo = codigoDoAchadoDeDpa('openai');
+      b.cenario.achados.push({
+        id: 'ach_teste_dpa', codigo, descricao: 'OpenAI estava sem DPA.', origem: 'motor_de_dpa',
+        status: 'aberto', criticidade: 'alta', reincidencias: 0, evidencias: [],
+      });
+      /**
+       * A ordem importa, e me custou duas tentativas: `varrerDpas` só devolve o
+       * achado no instante em que ela o **encerra** — na chamada seguinte ele já
+       * está encerrado e sai de `tocados`. Consumir o fechamento antes deixava a
+       * asserção olhando uma lista vazia, e a regra desligada passava.
+       *
+       * Então a varredura acontece **dentro** de `pendenciasDe`, na mesma
+       * instância, e a prova de que o fechamento ocorreu ali é o status depois.
+       */
+      const pendencias = pendenciasDe(b, 'banco', instante(`${hoje}T12:00:00Z`));
+      expect(b.cenario.achados.find((a) => a.codigo === codigo)!.status,
+        'o fechamento não aconteceu nesta varredura: o teste mediria nada').toBe('encerrado');
+      expect(pendencias.length, 'a varredura não achou nada').toBeGreaterThan(0);
+      expect(pendencias.some((p) => p.codigo === codigo), `${codigo} encerrado virou alerta`).toBe(false);
+    });
+
+    it('a chave carrega o cenário: o mesmo código em dois cenários são dois alertas', () => {
+      const agora = instante('2026-07-30T12:00:00Z');
+      const todas = varrerOPrograma(agora);
+      const porCodigo = new Map<string, Set<string>>();
+      for (const p of todas) {
+        if (!porCodigo.has(p.codigo)) porCodigo.set(p.codigo, new Set());
+        porCodigo.get(p.codigo)!.add(p.cenario);
+      }
+      const repetido = [...porCodigo.entries()].find(([, c]) => c.size > 1);
+      expect(repetido, 'nenhum código aparece em dois cenários: o teste perdeu o que mede').toBeTruthy();
+      const chaves = todas.filter((p) => p.codigo === repetido![0]).map((p) => p.chave);
+      expect(new Set(chaves).size, 'o mesmo código em dois cenários colidiu numa chave').toBe(chaves.length);
+      // E a chave é derivada, não escrita à mão.
+      for (const p of todas) expect(p.chave).toBe(chaveDe(p.cenario, p.codigo));
+    });
+  });
+
+  describe('idempotência — um alerta ABERTO por chave', () => {
+    const pendencia = (chave: string) => ({
+      chave, cenario: 'banco', tipo: 'obrigacao' as const, codigo: 'X', titulo: 'X',
+      responsavel: 'dpo' as const, diasDeAtraso: 1, consequencia: 'algo', criticidade: 'alta',
+    });
+
+    it('chave já aberta não entra em criar[], e aparece em mantidos[]', () => {
+      const p = pendencia('RELOGIO-banco-OBR-1');
+      const plano = planoDeAlertas([p], ['RELOGIO-banco-OBR-1']);
+      expect(plano.criar).toHaveLength(0);
+      expect(plano.mantidos.map((x) => x.chave)).toEqual(['RELOGIO-banco-OBR-1']);
+    });
+
+    it('duas execuções seguidas produzem um alerta, não dois', () => {
+      const p = pendencia('RELOGIO-banco-OBR-1');
+      const primeira = planoDeAlertas([p], []);
+      expect(primeira.criar).toHaveLength(1);
+      // A segunda execução recebe como abertas as chaves que a primeira criou.
+      const segunda = planoDeAlertas([p], primeira.criar.map((x) => x.chave));
+      expect(segunda.criar).toHaveLength(0);
+    });
+
+    it('alerta fechado com a pendência viva volta — fechar não renova o DPA', () => {
+      /**
+       * É o relógio funcionando, não um defeito. A regra é sobre alerta **aberto**:
+       * uma issue fechada sem a causa resolvida deixa a chave livre, e a próxima
+       * execução reabre. Se fosse "um alerta por chave, para sempre", fechar a
+       * issue silenciaria a pendência definitivamente.
+       */
+      const p = pendencia('RELOGIO-banco-DPA-SENDGRID');
+      const depoisDeFechar = planoDeAlertas([p], []);
+      expect(depoisDeFechar.criar.map((x) => x.chave)).toEqual(['RELOGIO-banco-DPA-SENDGRID']);
+      expect(corpoDoAlerta(p)).toContain('fechar o alerta não renova o contrato');
+    });
+
+    it('a mesma chave duas vezes na mesma execução é uma pendência, não duas', () => {
+      const p = pendencia('RELOGIO-banco-OBR-1');
+      expect(planoDeAlertas([p, { ...p }], []).criar).toHaveLength(1);
+    });
+  });
+
+  describe('validação — o alerta chega a quem responde?', () => {
+    it('o texto do alerta é subconjunto do dado — prosa nova reprova', () => {
+      /**
+       * A consequência é copiada de `seFalhar`/`descricao`. Texto novo aqui
+       * divergiria do que o artefato declara, e o alerta passaria a dizer uma
+       * coisa enquanto a tela diz outra.
+       */
+      const b = new BancoMock('banco');
+      const agora = instante('2026-10-01T12:00:00Z');
+      /**
+       * As varreduras **criam** achado quando encontram pendência nova, e o fazem
+       * na instância que recebem. A primeira versão deste teste coletava as
+       * descrições de uma instância virgem e comparava com pendências vindas de
+       * outra — os achados recém-criados não estavam no conjunto, e a asserção
+       * reprovava por comparar dois estados diferentes do mesmo cenário.
+       *
+       * Rodar as varreduras aqui antes de coletar é o que faz o conjunto ser "o
+       * que o artefato passou a declarar", que é justamente o que o alerta tem de
+       * copiar.
+       */
+      varrerVencimentos(b, '2026-10-01');
+      varrerDpas(b, '2026-10-01');
+      varrerPropagacoes(b, agora);
+      const doDado = new Set<string>([
+        ...b.cenario.obrigacoes.map((o) => o.seFalhar),
+        ...b.cenario.achados.map((a) => a.descricao),
+      ]);
+      const pendencias = varrerCenario('banco', agora);
+      expect(pendencias.length).toBeGreaterThan(0);
+      for (const p of pendencias) {
+        expect(doDado.has(p.consequencia), `${p.chave}: consequência que não vem do dado`).toBe(true);
+        expect(corpoDoAlerta(p), `${p.chave}: o corpo não carrega a consequência`).toContain(p.consequencia);
+        expect(corpoDoAlerta(p)).toContain(p.responsavel);
+      }
+    });
+
+    it('todo responsável é papel que existe, e a fila dele alcança o item', () => {
+      const agora = instante('2026-10-01T12:00:00Z');
+      for (const p of varrerOPrograma(agora)) {
+        expect(PAPEIS.map((x) => x.id), `${p.chave}: responsável fora do vocabulário`).toContain(p.responsavel);
+      }
+    });
+
+    it('execução sem pendência é verde e diz "nenhuma pendência"', () => {
+      /**
+       * Ausência de saída é indistinguível de relógio parado — e o cron do GitHub
+       * é desabilitado sozinho depois de 60 dias sem atividade. O silêncio não pode
+       * ser a forma de dizer que está tudo bem.
+       */
+      const relatorio = relatorioDoRelogio(0, [], { criar: [], mantidos: [] });
+      expect(relatorio).toContain('Nenhuma pendência de prazo');
+      expect(relatorio).toContain('quatro varreduras');
+    });
+
+    it('o relatório nomeia quantos abrir e quantos já estavam abertos', () => {
+      const agora = instante('2026-10-01T12:00:00Z');
+      const pendencias = varrerOPrograma(agora);
+      const abertas = [pendencias[0].chave];
+      const plano = planoDeAlertas(pendencias, abertas);
+      const r = relatorioDoRelogio(agora, pendencias, plano);
+      expect(r).toContain(`${plano.criar.length} alerta(s) a abrir`);
+      expect(r).toContain(`${plano.mantidos.length} já aberto(s)`);
+      expect(r).toContain('Já aberto');
+    });
+  });
+
+  describe('sistema — o CLI e o workflow', () => {
+    it('o CLI roda, sai 0 com pendência e emite o plano', () => {
+      const destino = join(tmpdir(), 'relogio-plano-teste.json');
+      rmSync(destino, { force: true });
+      const saida = execSync(
+        `npx vite-node scripts/relogio.ts -- --agora=2026-10-01T12:00:00Z --json=${destino}`,
+        { encoding: 'utf8' },
+      );
+      expect(saida).toContain('Relógio do programa');
+      const plano = JSON.parse(readFileSync(destino, 'utf8')) as { criar: { chave: string; corpo: string }[] };
+      expect(plano.criar.length, 'pendência real não gerou plano').toBeGreaterThan(0);
+      expect(plano.criar.some((c) => c.chave === 'RELOGIO-banco-DPA-SENDGRID')).toBe(true);
+      rmSync(destino, { force: true });
+    }, 90_000);
+
+    it('chave já aberta não volta no plano do CLI', () => {
+      const destino = join(tmpdir(), 'relogio-plano-teste-2.json');
+      rmSync(destino, { force: true });
+      execSync(
+        'npx vite-node scripts/relogio.ts -- --agora=2026-10-01T12:00:00Z'
+        + ` --abertos=RELOGIO-banco-DPA-SENDGRID --json=${destino}`,
+        { encoding: 'utf8' },
+      );
+      const plano = JSON.parse(readFileSync(destino, 'utf8')) as { criar: { chave: string }[]; mantidos: string[] };
+      expect(plano.criar.some((c) => c.chave === 'RELOGIO-banco-DPA-SENDGRID')).toBe(false);
+      expect(plano.mantidos).toContain('RELOGIO-banco-DPA-SENDGRID');
+      rmSync(destino, { force: true });
+    }, 90_000);
+
+    it('instante inválido sai 2 e não emite plano', () => {
+      const destino = join(tmpdir(), 'relogio-plano-teste-3.json');
+      rmSync(destino, { force: true });
+      const r = spawnSync('npx', ['vite-node', 'scripts/relogio.ts', '--', '--agora=nao-e-data', `--json=${destino}`],
+        { encoding: 'utf8' });
+      expect(r.status, 'varredura que não roda tem de sair diferente de zero').not.toBe(0);
+      expect(existsSync(destino), 'plano emitido apesar de a varredura não ter rodado').toBe(false);
+    }, 90_000);
+
+    it('o workflow tem os dois gatilhos, um job, e nenhum if por event_name', () => {
+      const yml = readFileSync(join('..', '.github', 'workflows', 'relogio.yml'), 'utf8');
+      expect(yml).toContain('schedule:');
+      expect(yml).toContain("cron: '0 7 * * *'");
+      expect(yml).toContain('workflow_dispatch:');
+      // Um job só, e nenhuma condição por gatilho: é o que faz o disparo manual
+      // reproduzir o agendado byte a byte.
+      expect(yml.match(/^  [a-z_-]+:\n    name:/gm) ?? []).toHaveLength(1);
+      /**
+       * A varredura é do YAML **executável**, a partir de `jobs:` — o comentário
+       * do cabeçalho cita `github.event_name` justamente para explicar a regra, e
+       * confundir a explicação com a infração obrigaria a apagar a explicação. É a
+       * mesma distinção do PR 26, e do gate contra o próprio comentário no PR 4.
+       */
+      const executavel = yml.slice(yml.indexOf('\njobs:'));
+      expect(executavel, 'condição por event_name faria dispatch e schedule divergirem')
+        .not.toMatch(/github\.event_name/);
+      expect(yml).not.toContain('continue-on-error');
+    });
+
+    it('o workflow declara as três limitações do cron e o não-required', () => {
+      const yml = readFileSync(join('..', '.github', 'workflows', 'relogio.yml'), 'utf8');
+      // Esconder qualquer uma delas repetiria o Risco-032: documento afirmando um
+      // controle operante que o código não sustenta.
+      expect(yml).toContain('Atrasa');
+      expect(yml).toContain('Não roda em fork');
+      expect(yml).toContain('60 dias');
+      expect(yml).toContain('NÃO MARQUE ESTE JOB COMO REQUIRED');
+    });
+
+    it('o workflow só move bytes: a decisão não mora no shell', () => {
+      /**
+       * `gh issue list` → CLI → `gh issue create`. Um `grep` decidindo o que abrir
+       * poria a regra de idempotência num lugar que ninguém roda em casa nem
+       * consegue exercitar — o defeito que o gate de privacidade evita ao viver
+       * em `.ts`.
+       */
+      const yml = readFileSync(join('..', '.github', 'workflows', 'relogio.yml'), 'utf8');
+      const passos = yml.slice(yml.indexOf('steps:'));
+      expect(passos).toContain('npm run --silent relogio');
+      expect(passos).toContain('--abertos=');
+      expect(passos).toContain('--json=plano.json');
+      expect(passos, 'decisão no shell').not.toMatch(/grep\s|\bsed\b/);
+      // E o passo de criar recusa plano ausente em vez de abrir zero alertas em
+      // silêncio: "não sei se há pendência" é diferente de "não há".
+      expect(passos).toContain('if [ ! -f plano.json ]');
+      expect(passos).toContain('exit 1');
+    });
+
+    it('o script npm existe e aponta para o CLI', () => {
+      const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
+      expect(pkg.scripts.relogio).toContain('scripts/relogio.ts');
     });
   });
 });
