@@ -1,0 +1,137 @@
+# Segurança da cadeia e do código (Risco-005, sub-item b).
+#
+# Três jobs, e eles NÃO têm a mesma polaridade. Chamar os três de "checks de
+# diff" seria impreciso, e a imprecisão viraria uma marcação que promete barreira
+# inexistente:
+#
+#   - **Segredos no diff e no histórico** — reprova. Segredo no diff é defeito de
+#     quem abriu o PR.
+#   - **Dependências vulneráveis** — reprova, no limiar declarado em
+#     `.privacy/audit-excecoes.yaml`.
+#   - **CodeQL** — reprova **alerta novo**, e só ele. A distinção é sutil e eu a
+#     escrevi errado na primeira versão deste arquivo, então vale ser exato:
+#
+#       * o job `CodeQL` abaixo executa a varredura e falha apenas por erro de
+#         execução — achado não derruba o `analyze`;
+#       * o GitHub cria um **segundo check, também chamado `CodeQL`**, vindo do
+#         code scanning, e esse reprova quando o PR **introduz** alerta novo.
+#
+#     Ou seja: alerta que já existia no código não bloqueia ninguém.
+#     Alerta que o diff acrescenta, sim. Descobri isso do jeito difícil — este PR nasceu
+#     com dois alertas `high` de path injection no CLI de auditoria, e o check
+#     ficou vermelho contra a frase que eu tinha acabado de escrever dizendo que
+#     ele não bloquearia.
+#
+# ## Por que não há `schedule` no audit
+#
+# Advisory publicado hoje deixaria a `main` vermelha sem ninguém ter tocado em
+# nada. É a mesma polaridade que o relógio do programa resolveu: mudança do mundo
+# não é defeito do diff, e vermelho diário treina a equipe a ignorar vermelho.
+# Advisory novo é pendência do mundo, e pertence ao relógio.
+#
+# O CodeQL tem semanal porque a varredura melhora sem o código mudar: consulta
+# nova encontra em código velho o que a anterior não via. Esses alertas aparecem
+# na aba Security e **não** reprovam PR nenhum — só o que o diff acrescenta
+# reprova. É a mesma separação entre "mudou o mundo" e "mudou o diff".
+#
+# ## O que o gitleaks acrescenta ao que já existia
+#
+# `npm run varredura:segredos` conhece **este** repositório: literal atribuído a
+# nome de constante com SEGREDO/SECRET/TOKEN, e o segredo histórico
+# `lastro-ics-demo` procurado no artefato construído. O gitleaks conhece **o
+# mundo**: centenas de padrões de fornecedor, e o histórico do git inteiro.
+#
+# Medido antes de escrever: zero achados na árvore e nos 49 commits, e a massa
+# sintética declarada passa sem allowlist — gitleaks casa segredo, não dado
+# pessoal. Por isso `.gitleaks.toml` não tem allowlist, e a regra de que toda
+# entrada teria de derivar do inventário está travada por teste em vez de por um
+# gerador que emitiria zero linhas.
+#
+# Nenhuma etapa aqui tolera falha, e a palavra que faria isso não aparece no
+# arquivo — de propósito, para que uma varredura simples confirme a ausência.
+name: Segurança
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  schedule:
+    # Só o CodeQL usa este gatilho; os outros dois têm `if` sobre ele logo abaixo,
+    # e essa é a única condição por evento neste arquivo — ver o comentário lá.
+    - cron: '0 6 * * 1'
+
+concurrency:
+  group: seguranca-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  segredos:
+    name: Segredos no diff e no histórico
+    # A condição existe porque o gatilho semanal é do CodeQL. Rodar a varredura de
+    # segredo toda semana sobre um histórico que não mudou produziria o mesmo
+    # resultado às segundas-feiras — e um verde semanal que ninguém lê é ruído com
+    # aparência de vigilância.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # O histórico inteiro: metade do valor do gitleaks é varrer os commits
+          # antigos, e num clone raso ele aprovaria por não ter olhado.
+          fetch-depth: 0
+
+      - name: Varredura de segredo
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  dependencias:
+    name: Dependências vulneráveis
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      # `npm audit` sai diferente de zero com qualquer vulnerabilidade, de `info`
+      # a `critical`. Quem decide é a política; o código de saída do npm é só o
+      # sinal de que o relatório saiu.
+      - name: Política de vulnerabilidade
+        run: npm run audit:politica
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # Sem query custom nesta rodada. Query própria sem alvo conhecido produz
+          # achado que ninguém sabe avaliar, e o repositório já tem regra própria
+          # para o que é específico dele.
+          queries: security-and-quality
+
+      - uses: github/codeql-action/analyze@v3

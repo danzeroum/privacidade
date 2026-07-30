@@ -53,6 +53,9 @@ import {
   varrerOPrograma,
 } from '../src/mock/relogio';
 import { PAPEIS } from '../src/mock/permissoes';
+import {
+  avaliarAuditoria, lerPolitica, pesoDe, relatorioDaAuditoria,
+} from '../src/lib/auditoria';
 import { execSync, spawnSync } from 'node:child_process';
 import {
   EH_DEMONSTRACAO, SELO_DE_DEMONSTRACAO, SELO_DO_SELETOR_DE_PAPEL, perfilDe,
@@ -8669,7 +8672,10 @@ describe('PR 27 · aceitação — a reconciliação da auditoria é conferível
     const parciais = LINHAS.filter((l) => l.status.startsWith('**Parcial**')).length;
     const intactos = LINHAS.length - fechados - parciais;
     expect(SECAO_71).toContain(`${fechados} riscos`);
-    expect(SECAO_71).toContain(`${parciais} parciais`);
+    // Singular e plural: a catraca é sobre o número, não sobre a gramática. Com
+    // o Risco-005 fechado sobrou **um** parcial, e a prosa passou a dizer "1
+    // parcial" — travar o plural obrigaria a escrever errado para o teste passar.
+    expect(SECAO_71).toMatch(new RegExp(`${parciais} parci(al|ais)`));
     expect(SECAO_71).toContain(`${intactos} como descritos`);
     // Não-vacuidade: uma tabela sem nenhuma linha movida passaria em tudo abaixo.
     expect(MOVIDOS.length, 'nenhuma linha anotada: as provas abaixo não provariam nada').toBeGreaterThan(10);
@@ -8765,7 +8771,10 @@ describe('PR 27 · aceitação — a reconciliação da auditoria é conferível
       // O 007 saiu daqui no PR 28: a AIA fechou a faceta que faltava, e o que
       // sobrou dele — base legal por registro na linhagem — está nomeado na
       // célula de fechamento, não como parcialidade do risco inteiro.
-      expect(parciais.map((l) => l.risco).sort()).toEqual(['Risco-005', 'Risco-008']);
+      // O 005 saiu daqui no PR 30: os quatro sub-itens fecharam, e o que sobrou
+      // dele — dois moderate abaixo do limiar — está na célula, não como
+      // parcialidade do risco.
+      expect(parciais.map((l) => l.risco).sort()).toEqual(['Risco-008']);
       for (const l of parciais) {
         expect(l.fechadoPor, `${l.risco}: parcial sem o que resta`).toMatch(/\*\*Resta\*\*|\*\*resta\*\*/);
       }
@@ -9455,6 +9464,299 @@ describe('PR 29 · Risco-005(c) — o relógio do programa dispara sem sessão a
     it('o script npm existe e aponta para o CLI', () => {
       const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
       expect(pkg.scripts.relogio).toContain('scripts/relogio.ts');
+    });
+  });
+});
+
+describe('PR 30 · Risco-005(b) — segredo, dependência e código sob varredura', () => {
+  const POLITICA_BRUTA = readFileSync(join('..', '.privacy', 'audit-excecoes.yaml'), 'utf8');
+  const GITLEAKS = readFileSync(join('..', '.gitleaks.toml'), 'utf8');
+  const SEGURANCA = readFileSync(join('..', '.github', 'workflows', 'seguranca.yml'), 'utf8');
+
+  const politica = (bruto = POLITICA_BRUTA) => {
+    const r = lerPolitica(bruto, '.privacy/audit-excecoes.yaml');
+    if (!r.ok) throw new Error(`fixture inválida: ${r.achados.map((a) => a.mensagem).join('; ')}`);
+    return r.politica;
+  };
+
+  const relatorio = (vias: { source: number; severity: string; name: string }[], fixAvailable = true) => ({
+    vulnerabilities: Object.fromEntries(vias.map((v) => [v.name, {
+      name: v.name,
+      severity: v.severity,
+      fixAvailable,
+      via: [{ source: v.source, name: v.name, severity: v.severity, title: `t${v.source}`, url: 'u' }],
+    }])),
+  });
+
+  const comExcecao = (campos: Record<string, unknown>) => `
+versao: 1
+limiar: high
+excecoes:
+  - advisory: ${campos.advisory ?? 999}
+    pacote: ${campos.pacote ?? 'pacote-x'}
+    severidade: high
+    motivo: ${campos.motivo ?? '"Sem correção publicada; o caminho vulnerável não é alcançável neste protótipo."'}
+    aceito_por: ${campos.aceito_por ?? '"@dpo-marcela"'}
+    valida_ate: ${campos.valida_ate ?? "'2026-12-31'"}
+`.trimStart();
+
+  describe('verificação — o check reprova o que deve?', () => {
+    it('advisory no limiar sem exceção reprova, e nomeia o pacote', () => {
+      const r = avaliarAuditoria(
+        relatorio([{ source: 1, severity: 'high', name: 'pacote-x' }]), politica(), '2026-07-30',
+      );
+      expect(r.aprovado).toBe(false);
+      expect(r.bloqueiam.map((a) => a.source)).toEqual([1]);
+      expect(r.achados[0].regra).toBe('audit/sem-excecao');
+      expect(r.achados[0].mensagem).toContain('pacote-x');
+    });
+
+    it('moderate com correção disponível não reprova — manutenção não é bloqueio', () => {
+      /**
+       * Transformar manutenção em bloqueio produz o vermelho crônico que ensina a
+       * equipe a ignorar vermelho. É a mesma razão de o relógio não reprovar.
+       */
+      const r = avaliarAuditoria(
+        relatorio([{ source: 1, severity: 'moderate', name: 'react-router' }]), politica(), '2026-07-30',
+      );
+      expect(r.aprovado).toBe(true);
+      expect(r.abaixoDoLimiar.map((a) => a.pacote)).toEqual(['react-router']);
+      // E aparece no relatório: abaixo do limiar é informado, não escondido.
+      expect(relatorioDaAuditoria(r)).toContain('abaixo do limiar');
+    });
+
+    it('a fronteira da exceção é de um dia: vence hoje ainda vale', () => {
+      // A mesma fronteira do DPA — o aceite cobre o último dia, não a véspera.
+      const rel = relatorio([{ source: 999, severity: 'high', name: 'pacote-x' }]);
+      const p = politica(comExcecao({ valida_ate: "'2026-07-30'" }));
+
+      expect(avaliarAuditoria(rel, p, '2026-07-30').aprovado, 'vence hoje tem de valer').toBe(true);
+      const vencida = avaliarAuditoria(rel, p, '2026-07-31');
+      expect(vencida.aprovado, 'vencida ontem tem de reprovar').toBe(false);
+      expect(vencida.achados[0].regra).toBe('excecao/vencida');
+      expect(vencida.achados[0].mensagem).toContain('2026-07-30');
+    });
+
+    it('exceção vigente passa citando o motivo e o dono', () => {
+      const r = avaliarAuditoria(
+        relatorio([{ source: 999, severity: 'high', name: 'pacote-x' }]),
+        politica(comExcecao({})), '2026-07-30',
+      );
+      expect(r.aprovado).toBe(true);
+      expect(r.tolerados).toHaveLength(1);
+      const texto = relatorioDaAuditoria(r);
+      expect(texto).toContain('não é alcançável neste protótipo');
+      expect(texto).toContain('@dpo-marcela');
+    });
+
+    it('severidade desconhecida cai no cenário mais restritivo', () => {
+      // O indefinido nunca cai no permissivo — a mesma regra do prazo indefinido
+      // na fila do PR 9.
+      expect(pesoDe('inexistente')).toBeGreaterThan(pesoDe('critical'));
+      const r = avaliarAuditoria(
+        relatorio([{ source: 1, severity: 'seila', name: 'p' }]), politica(), '2026-07-30',
+      );
+      expect(r.aprovado).toBe(false);
+    });
+
+    it('política ausente de campo, ilegível ou com limiar inválido reprova', () => {
+      expect(lerPolitica('limiar: [', 'x').ok).toBe(false);
+      expect(lerPolitica('versao: 1\nexcecoes: []', 'x').ok, 'sem limiar não há política').toBe(false);
+      expect(lerPolitica('limiar: altissimo\nexcecoes: []', 'x').ok).toBe(false);
+    });
+
+    it('a política real do repositório parseia, e o limiar é high', () => {
+      expect(politica().limiar).toBe('high');
+      expect(POLITICA_BRUTA).toContain('limiar: high');
+    });
+  });
+
+  describe('validação — a exceção corresponde a risco aceito de verdade?', () => {
+    it('exceção sem motivo, sem dono, sem prazo ou sem advisory reprova', () => {
+      const casos: [string, Record<string, unknown>][] = [
+        ['excecao/sem-motivo', { motivo: '"curto"' }],
+        ['excecao/sem-dono', { aceito_por: '""' }],
+        ['excecao/sem-validade', { valida_ate: '"quando der"' }],
+        ['excecao/sem-advisory', { advisory: '"GHSA-abc"' }],
+      ];
+      for (const [regra, campos] of casos) {
+        const r = lerPolitica(comExcecao(campos), 'x');
+        expect(r.ok, regra).toBe(false);
+        expect(!r.ok && r.achados.map((a) => a.regra), regra).toContain(regra);
+      }
+    });
+
+    it('exceção para advisory que não existe no relatório reprova — declaração morta', () => {
+      /**
+       * A mesma regra do inventário de PII e da lista de fatores da AIA: lista que
+       * ninguém confere apodrece, e apodrecida ela passa a autorizar o que já foi
+       * corrigido.
+       */
+      const r = avaliarAuditoria(relatorio([]), politica(comExcecao({})), '2026-07-30');
+      expect(r.aprovado).toBe(false);
+      expect(r.achados[0].regra).toBe('excecao/declaracao-morta');
+      expect(r.achados[0].mensagem).toContain('999');
+    });
+
+    it('exceção apontando para outro pacote reprova', () => {
+      const r = avaliarAuditoria(
+        relatorio([{ source: 999, severity: 'high', name: 'outro-pacote' }]),
+        politica(comExcecao({})), '2026-07-30',
+      );
+      expect(r.aprovado).toBe(false);
+      expect(r.achados.map((a) => a.regra)).toContain('excecao/pacote-divergente');
+    });
+
+    it('o limiar mora num lugar só', () => {
+      // Um segundo limiar em código divergiria do arquivo na primeira mudança, e a
+      // política passaria a ser a que ninguém lê.
+      const fonte = readFileSync(join('src', 'lib', 'auditoria.ts'), 'utf8');
+      expect(fonte, 'limiar embutido no código').not.toMatch(/limiar\s*=\s*['"](high|critical)['"]/);
+      const cli = readFileSync(join('scripts', 'audit.ts'), 'utf8');
+      expect(cli).toContain('audit-excecoes.yaml');
+      expect(cli, 'o CLI não pode ter limiar próprio').not.toMatch(/['"]high['"]/);
+    });
+  });
+
+  describe('gitleaks — a allowlist nasce vazia, e a regra fica travada', () => {
+    const allowlist = (toml = GITLEAKS): string[] => {
+      const linhas = toml.split('\n').filter((l) => !l.trimStart().startsWith('#'));
+      return [...linhas.join('\n').matchAll(/^\s*(?:regexes|paths|stopwords|commits)\s*=\s*\[([^\]]*)\]/gm)]
+        .flatMap((m) => m[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')))
+        .filter(Boolean);
+    };
+
+    const doInventario = (): string[] => {
+      const inv = parseYaml(readFileSync(join('..', '.privacy', 'pii-sintetica.yaml'), 'utf8')) as any;
+      return [
+        ...(inv.cpf ?? []).map((x: any) => String(x.valor)),
+        ...(inv.cnpj ?? []).map((x: any) => String(x.valor)),
+        ...(inv.telefone ?? []).map((x: any) => String(x.valor)),
+        ...(inv.email?.dominios ?? []).map((x: any) => String(x.dominio)),
+      ];
+    };
+
+    it('hoje a allowlist está vazia, e o arquivo diz por quê', () => {
+      /**
+       * Medido antes de escrever: gitleaks casa segredo, não dado pessoal. Os onze
+       * CPFs, três telefones e dois domínios declarados passam sem exceção. Gerar
+       * allowlist do inventário produziria um script que emite zero linhas e um
+       * teste que não tem como ser provado não-vacuoso.
+       */
+      expect(allowlist()).toEqual([]);
+      expect(GITLEAKS).toContain('useDefault = true');
+      expect(GITLEAKS).toContain('casa **segredo**, não dado pessoal');
+    });
+
+    it('toda entrada de allowlist tem de ter origem no inventário', () => {
+      /**
+       * A catraca que substitui o gerador. Hoje passa com zero entradas e reprova a
+       * primeira escrita à mão — provado por injeção aqui mesmo, para a regra ser
+       * demonstrável agora e não só no dia em que a primeira entrada aparecer.
+       */
+      const declarados = new Set(doInventario());
+      expect(declarados.size, 'inventário vazio: o teste não teria origem contra o que conferir')
+        .toBeGreaterThan(10);
+
+      for (const entrada of allowlist()) {
+        expect(declarados.has(entrada), `allowlist com entrada sem origem no inventário: ${entrada}`).toBe(true);
+      }
+
+      const inventada = `${GITLEAKS}\n[allowlist]\nregexes = ["segredo-que-alguem-colou"]\n`;
+      expect(allowlist(inventada).filter((e) => !declarados.has(e)),
+        'a catraca não pegaria a entrada escrita à mão').toEqual(['segredo-que-alguem-colou']);
+
+      const legitima = `${GITLEAKS}\n[allowlist]\nregexes = ["${[...declarados][0]}"]\n`;
+      expect(allowlist(legitima).filter((e) => !declarados.has(e))).toEqual([]);
+    });
+  });
+
+  describe('sistema — o workflow e o CLI', () => {
+    it('os três jobs existem com nome próprio e nenhum tolera falha', () => {
+      for (const nome of ['Segredos no diff e no histórico', 'Dependências vulneráveis', 'CodeQL']) {
+        expect(SEGURANCA, `job ausente: ${nome}`).toContain(`name: ${nome}`);
+      }
+      expect(SEGURANCA).not.toContain('continue-on-error');
+    });
+
+    it('o gitleaks varre o histórico inteiro, e não um clone raso', () => {
+      /**
+       * Metade do valor dele é o histórico. Num clone de profundidade 1 ele
+       * aprovaria por não ter olhado — o Risco-003 com outro nome, e a linha de
+       * base medida (zero achados em 49 commits) deixaria de significar algo.
+       */
+      const job = SEGURANCA.slice(SEGURANCA.indexOf('  segredos:'), SEGURANCA.indexOf('  dependencias:'));
+      expect(job).toContain('fetch-depth: 0');
+      expect(job).toContain('gitleaks');
+      expect(job).toContain('GITLEAKS_CONFIG: .gitleaks.toml');
+    });
+
+    it('o audit não tem schedule — advisory novo pertence ao relógio', () => {
+      const job = SEGURANCA.slice(SEGURANCA.indexOf('  dependencias:'), SEGURANCA.indexOf('  codeql:'));
+      expect(job).toContain("if: github.event_name != 'schedule'");
+      expect(job).toContain('npm run audit:politica');
+      expect(SEGURANCA).toContain('pertence ao relógio');
+    });
+
+    it('o CodeQL reprova alerta NOVO, e o YAML diz exatamente isso', () => {
+      /**
+       * A primeira versão deste bloco travava a frase errada — "informa, não
+       * bloqueia" — e o CodeQL reprovou o próprio PR que a introduziu, com dois
+       * alertas `high` de path injection no CLI de auditoria.
+       *
+       * O que é verdade: o job `analyze` falha só por erro de execução, e um
+       * **segundo** check homônimo, vindo do code scanning, reprova quando o diff
+       * **acrescenta** alerta. Alerta pré-existente não bloqueia; alerta novo, sim.
+       *
+       * Travar a frase errada é pior que não travar nada: o teste passava a
+       * garantir que o documento continuasse mentindo.
+       */
+      expect(SEGURANCA).toContain('reprova **alerta novo**');
+      expect(SEGURANCA).toContain('alerta que já existia no código não bloqueia');
+      expect(SEGURANCA).toContain('Alerta que o diff acrescenta, sim');
+      expect(SEGURANCA).toContain('languages: javascript-typescript');
+      expect(SEGURANCA).toContain("cron: '0 6 * * 1'");
+      const job = SEGURANCA.slice(SEGURANCA.indexOf('  codeql:'));
+      expect(job, 'o CodeQL é o único que roda no semanal').not.toContain("if: github.event_name != 'schedule'");
+    });
+
+    it('o CLI aplica a política sobre um relatório injetado por stdin', () => {
+      /**
+       * Por stdin, e não por `--relatorio=<caminho>`: a primeira versão levava
+       * caminho de `process.argv` até `readFileSync`, e o CodeQL reprovou com dois
+       * alertas `high` de path injection. Dispensar o alerta à mão seria a exceção
+       * sem registro que este repositório recusa; tirar o caminho do argumento
+       * resolve e ainda deixa o CLI com menos botão.
+       */
+      const rodar = (r: unknown) => spawnSync(
+        'npx', ['vite-node', 'scripts/audit.ts', '--', '--stdin', '--hoje=2026-07-30'],
+        { encoding: 'utf8', input: JSON.stringify(r) },
+      );
+
+      const vermelho = rodar(relatorio([{ source: 7, severity: 'critical', name: 'p' }]));
+      expect(vermelho.status, 'critical sem exceção tem de reprovar').toBe(1);
+      expect(vermelho.stdout).toContain('audit/sem-excecao');
+
+      expect(rodar(relatorio([{ source: 7, severity: 'low', name: 'p' }])).status).toBe(0);
+
+      // Entrada que não é JSON não vira relatório vazio: sem relatório não há
+      // veredito, e veredito por omissão é o Risco-003 com outro nome.
+      const lixo = spawnSync('npx', ['vite-node', 'scripts/audit.ts', '--', '--stdin'], { encoding: 'utf8', input: 'nao-e-json' });
+      expect(lixo.status).toBe(1);
+    }, 180_000);
+
+    it('o CLI não aceita caminho vindo de argumento', () => {
+      // A regra que o alerta do CodeQL ensinou: caminho de `process.argv` chegando
+      // a `readFileSync` é sink, e a resposta foi tirar o parâmetro em vez de
+      // dispensar o alerta.
+      const cli = readFileSync(join('scripts', 'audit.ts'), 'utf8');
+      expect(cli, 'caminho de argumento voltou ao CLI').not.toMatch(/argumento\('(raiz|relatorio)'\)/);
+      expect(cli).toContain('readFileSync(0');
+    });
+
+    it('o script npm existe e aponta para o CLI', () => {
+      const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
+      expect(pkg.scripts['audit:politica']).toContain('scripts/audit.ts');
     });
   });
 });
