@@ -1,6 +1,6 @@
 import { BancoMock } from './db';
 import { codigoDaPropagacao, varrerPropagacoes, varrerVencimentos, vencidos } from './expurgo';
-import { codigoDoAchadoDeDpa, varrerDpas } from './fornecedor';
+import { codigoDoDesligamento, codigoDoAchadoDeDpa, diasAlemDaJanela, janelaVencida, varrerDpas } from './fornecedor';
 import { codigoDoAchado, diasDeAtraso } from './retencao';
 import { diasAte, naAntecedencia } from './calendario';
 import { CENARIOS } from './scenarios';
@@ -40,7 +40,7 @@ import type { Achado, Papel } from './types';
  * mesmo defeito que o gate de privacidade evita ao viver em `.ts`.
  */
 
-export type TipoDePendencia = 'retencao' | 'dpa' | 'propagacao' | 'obrigacao';
+export type TipoDePendencia = 'retencao' | 'dpa' | 'propagacao' | 'obrigacao' | 'desligamento';
 
 export interface Pendencia {
   /** `RELOGIO-<cenario>-<codigo>`. É a identidade do alerta entre execuções. */
@@ -93,6 +93,9 @@ const RESPONSAVEL_POR_TIPO: Record<Exclude<TipoDePendencia, 'obrigacao'>, Papel>
   retencao: 'engenharia',
   dpa: 'dpo',
   propagacao: 'engenharia',
+  // Quem decide encerrar é o DPO; quem destrói a chave é a segurança, e é a
+  // destruição que está pendente aqui.
+  desligamento: 'seguranca',
 };
 
 const iso = (agora: number): string => new Date(agora).toISOString().slice(0, 10);
@@ -165,6 +168,33 @@ export function pendenciasDe(banco: BancoMock, cenario: string, agora: number): 
   }
   for (const a of varrerPropagacoes(banco, agora).filter(aberto)) {
     pendencias.push(doAchado(a, 'propagacao'));
+  }
+
+  /**
+   * Desligamento cuja janela venceu sem prova de destruição (Risco-008).
+   *
+   * A janela existe para o parceiro devolver o que tem. Passado o prazo sem a
+   * chave destruída, o dado dele continua descriptografável sob um contrato que
+   * já acabou — e ninguém saberia, porque o estado da relação não fala sozinho.
+   */
+  for (const f of banco.cenario.fornecedores) {
+    const d = f.desligamento;
+    if (f.estado !== 'desligando' || !d) continue;
+    if (d.chaveDestruidaEm) continue;
+    if (!janelaVencida(d, hoje)) continue;
+    const codigo = codigoDoDesligamento(f.slug);
+    pendencias.push({
+      chave: chaveDe(cenario, codigo),
+      cenario,
+      tipo: 'desligamento',
+      codigo,
+      titulo: `${f.nome} — chave não destruída`,
+      responsavel: RESPONSAVEL_POR_TIPO.desligamento,
+      diasDeAtraso: diasAlemDaJanela(d, hoje),
+      consequencia: `A janela do desligamento de ${f.nome} terminou em ${d.janelaAte} e a chave dele `
+        + 'continua de pé: o dado que ele recebeu segue descriptografável sob um contrato encerrado.',
+      criticidade: 'critica',
+    });
   }
 
   /**

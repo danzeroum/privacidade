@@ -986,6 +986,104 @@ paths:
             LIA incompleta — alternativa sem justificativa. "Não aplicável" também exige
             justificativa: é a resposta que mais esconde falta de análise.
 
+  /fornecedores/{slug}/desligamento:
+    post:
+      tags: [fornecedor]
+      summary: Decide o encerramento da relação com o parceiro
+      description: |
+        Risco-008. Desligar é fato com motivo e ator, não `UPDATE` de flag: o registro precisa
+        responder quem decidiu, por quê e qual janela foi prometida.
+
+        A janela é obrigatória **mesmo quando é de zero dia** — zero declarado é uma decisão
+        ("não há dado a devolver"), zero implícito é uma etapa que ninguém percebeu que existia —
+        e não pode exceder o prazo que o DPA promete no encerramento (`dpa_encerramento_dias`).
+
+        A partir daqui o banco recusa transferência **nova** para o parceiro, no ato e antes de
+        qualquer destruição de chave. O histórico continua legível: é justamente o período que uma
+        auditoria examina.
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [motivo, janela_dias]
+              properties:
+                motivo: { type: string, minLength: 20 }
+                janela_dias: { type: integer, minimum: 0, maximum: 365 }
+      responses:
+        '200':
+          description: Desligamento decidido; o parceiro entra em `desligando`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [slug, estado, janela_ate]
+                properties:
+                  slug: { type: string }
+                  estado: { type: string }
+                  janela_ate: { type: string, format: date }
+                  janela_dias: { type: integer }
+                  motivo: { type: string }
+        '403': { description: Somente o DPO decide o encerramento da relação. }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '409':
+          description: |
+            O parceiro não está `ativo`. A sequência é `ativo → desligando → desligado`, e não há
+            atalho: a máquina é a mesma dos outros oito artefatos.
+        '422':
+          description: |
+            Motivo curto, janela fora de 0–365, ou janela maior que o prazo do DPA no encerramento.
+        '503':
+          description: O trail não aceitou a linha. O estado **não** muda.
+
+  /fornecedores/{slug}/chave/destruicao:
+    post:
+      tags: [fornecedor]
+      summary: Destrói a chave do parceiro, com prova encadeada
+      description: |
+        Só depois do fim da janela: ela existe para o parceiro devolver o que tem e para o dado em
+        trânsito chegar. Destruir antes é `409` — a janela protege a devolução que o DPA promete.
+
+        **Idempotente.** A segunda chamada devolve a prova **original**, com o mesmo lote e o mesmo
+        hash, em vez de gerar outra. Prova nova a cada chamada faria a cadeia de custódia contar
+        destruições que não aconteceram.
+
+        Quem executa não é quem decide: `destruir_chave_de_parceiro` é de segurança e
+        `desligar_parceiro` é do DPO.
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Chave destruída — ou já destruída, com a prova original.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [slug, estado, prova]
+                properties:
+                  slug: { type: string }
+                  estado: { type: string }
+                  ja_estava_destruida: { type: boolean }
+                  prova:
+                    type: object
+                    properties:
+                      lote: { type: string }
+                      hash: { type: string }
+                      quando: { type: string, format: date-time }
+                      por: { type: string }
+        '403': { description: Somente a segurança destrói a chave do parceiro. }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '409':
+          description: |
+            O parceiro não está `desligando`, ou a janela ainda não terminou.
+        '503':
+          description: |
+            O trail não aceitou a prova. A chave **não** é marcada destruída — a prova precede o
+            fato declarado.
+
   /lias/{id}/equidade:
     post:
       tags: [lia]

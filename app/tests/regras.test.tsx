@@ -2088,12 +2088,22 @@ describe('T1-03 · unidade — a bolha é botão inteiro', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// PR 7 — Máquinas de estado dos oito artefatos
+// PR 7 — Máquinas de estado dos nove artefatos
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe('PR 7 · a tabela é a única autoridade sobre sequência', () => {
+  /**
+   * Lista **local**, que sombreia a importada de propósito: é a transcrição
+   * fechada contra a qual o runtime é conferido, e é ela que prova "nenhuma
+   * máquina a mais". Se usasse a lista do código, o teste compararia o código
+   * com ele mesmo.
+   *
+   * `fornecedor` entra no PR 31 (Risco-008): desligar parceiro passa pela mesma
+   * tabela dos outros oito, e máquina própria seria o atalho que este bloco
+   * existe para não deixar acontecer.
+   */
   const ARTEFATOS: Artefato[] = [
-    'parecer', 'ripd', 'lia', 'risco', 'solicitacao', 'achado', 'incidente', 'chave',
+    'parecer', 'ripd', 'lia', 'risco', 'solicitacao', 'achado', 'incidente', 'chave', 'fornecedor',
   ];
 
   it('cada artefato do MAPA tem máquina declarada, e nenhuma a mais', () => {
@@ -2139,6 +2149,9 @@ describe('PR 7 · a tabela é a única autoridade sobre sequência', () => {
       achado: ['aberto', 'causa_raiz', 'plano', 'executado', 'verificado', 'encerrado', 'reaberto'],
       incidente: ['aberto', 'contido', 'decidido', 'comunicado', 'nao_comunicado', 'encerrado'],
       chave: ['nova', 'recriptografando', 'canary', 'ativa', 'revogada'],
+      // O nono artefato (PR 31, Risco-008). Desligar parceiro passa pela mesma
+      // tabela dos outros oito: máquina própria seria o atalho que o PR 7 fechou.
+      fornecedor: ['ativo', 'desligando', 'desligado'],
     };
     for (const artefato of ARTEFATOS) {
       expect((estadosDe(artefato) as string[]).sort(), artefato).toEqual([...doMapa[artefato]].sort());
@@ -4321,12 +4334,18 @@ describe('PR 14 · verificação — o documento corresponde ao código?', () =>
     const comSete = ARTEFATOS.filter((a) => estadosDe(a).length === 7);
     expect(comSete.sort()).toEqual(['achado', 'ripd']);
     expect(ARTEFATOS.filter((a) => estadosDe(a).length > 7)).toEqual([]);
-    expect(secao.replace(/\s+/g, ' ')).toContain('seis das oito máquinas cabiam nele');
-    expect(ARTEFATOS.filter((a) => estadosDe(a).length <= 6), 'cabiam no limite antigo').toHaveLength(6);
+    /**
+     * "Seis das nove" desde o PR 31: `fornecedor` entrou como nono artefato, com
+     * três estados. A frase do documento é sobre quantas máquinas **cabiam** no
+     * limite revogado, e o denominador é o número de máquinas de hoje — deixá-lo
+     * em oito faria o texto descrever um repositório que não existe mais.
+     */
+    expect(secao.replace(/\s+/g, ' ')).toContain('seis das nove máquinas cabiam nele');
+    expect(ARTEFATOS.filter((a) => estadosDe(a).length <= 6), 'cabiam no limite antigo').toHaveLength(7);
     // Quatro, e não cinco: a LIA ganhou `em_revisao` no PR 7 e passou de cinco
     // para seis estados. Continua cabendo no limite antigo — a afirmação do
     // documento, "seis das oito máquinas cabiam nele", segue verdadeira.
-    expect(ARTEFATOS.filter((a) => estadosDe(a).length <= 5), 'cinco estados ou menos').toHaveLength(4);
+    expect(ARTEFATOS.filter((a) => estadosDe(a).length <= 5), 'cinco estados ou menos').toHaveLength(5);
   });
 
   it('o MAPA declara o próprio estatuto e traz a subseção que faltava', () => {
@@ -6332,6 +6351,9 @@ describe('PR 20 · sistema — a cascata pendente é vigiada, não só exibida',
 describe('PR 21 · unidade — a vigência do DPA, na fronteira de um dia', () => {
   const f = (extra: Partial<Fornecedor> = {}): Fornecedor => ({
     id: 'f1', slug: 'sendgrid', nome: 'SendGrid', papel: 'operador', pais: 'EUA',
+    // `estado` é obrigatório no tipo desde o PR 31: parceiro sem estado
+    // declarado não existe, e a fixture é forçada a decidir como a semente.
+    estado: 'ativo',
     dpaAssinado: true, dpaExpiraEm: '2026-09-30', ...extra,
   });
 
@@ -6463,7 +6485,7 @@ describe('PR 21 · integração — a varredura pega o que o trigger não alcan�
 
   it('parceiro cadastrado e sem uso não é achado — é cadastro', () => {
     varejo.cenario.fornecedores.push({
-      id: 'fo-novo', slug: 'novo', nome: 'Parceiro Novo', papel: 'operador', dpaAssinado: false,
+      id: 'fo-novo', slug: 'novo', nome: 'Parceiro Novo', papel: 'operador', estado: 'ativo', dpaAssinado: false,
     });
     const abertos = varrerDpas(varejo, HOJE());
     expect(abertos.map((a) => a.codigo)).not.toContain('DPA-NOVO');
@@ -8774,7 +8796,11 @@ describe('PR 27 · aceitação — a reconciliação da auditoria é conferível
       // O 005 saiu daqui no PR 30: os quatro sub-itens fecharam, e o que sobrou
       // dele — dois moderate abaixo do limiar — está na célula, não como
       // parcialidade do risco.
-      expect(parciais.map((l) => l.risco).sort()).toEqual(['Risco-008']);
+      // O 008 saiu daqui no PR 31: a revogação com SLA era a faceta que faltava,
+      // e o que sobrou dele — chave como registro versionado, não material em
+      // KMS — está na célula. A lista ficou vazia, e o `for` abaixo passa a não
+      // ter o que iterar: a asserção que vale é a igualdade com `[]`.
+      expect(parciais.map((l) => l.risco).sort()).toEqual([]);
       for (const l of parciais) {
         expect(l.fechadoPor, `${l.risco}: parcial sem o que resta`).toMatch(/\*\*Resta\*\*|\*\*resta\*\*/);
       }
@@ -9757,6 +9783,254 @@ excecoes:
     it('o script npm existe e aponta para o CLI', () => {
       const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
       expect(pkg.scripts['audit:politica']).toContain('scripts/audit.ts');
+    });
+  });
+});
+
+describe('PR 31 · Risco-008 (resíduo) — desligar parceiro destruindo a chave dele', () => {
+  let banco: BancoMock;
+  beforeEach(() => { banco = new BancoMock('banco'); });
+
+  const serasa = () => banco.cenario.fornecedores.find((f) => f.slug === 'serasa')!;
+  const MOTIVO = 'Encerramento contratual decidido pelo comitê de privacidade em julho.';
+
+  const decidir = (body: Record<string, unknown>, papel: 'dpo' | 'seguranca' = 'dpo') =>
+    request<Record<string, any>>(banco, {
+      metodo: 'POST', caminho: '/v1/fornecedores/serasa/desligamento', papel, ator: 'marcela', body,
+    });
+
+  const destruir = (papel: 'dpo' | 'seguranca' = 'seguranca') =>
+    request<Record<string, any>>(banco, {
+      metodo: 'POST', caminho: '/v1/fornecedores/serasa/chave/destruicao', papel, ator: 'rafael', body: {},
+    });
+
+  /** Empurra a janela para o passado sem mexer no relógio do processo. */
+  const janelaNoPassado = (dias: number) => {
+    const d = serasa().desligamento!;
+    d.janelaAte = new Date(Date.now() - dias * 86_400_000).toISOString().slice(0, 10);
+  };
+
+  describe('verificação — a transição e a prova existem?', () => {
+    it('é o nono artefato da máquina, e não uma máquina paralela', () => {
+      /**
+       * A prova de que não há atalho por fornecedor: a transição ilegal cai no
+       * **409 genérico**, com a frase vinda da própria tabela de estados. Se
+       * houvesse máquina própria, esta rota responderia outra coisa.
+       */
+      const res = request<{ erro: string }>(banco, {
+        metodo: 'POST', caminho: '/v1/estados/fornecedor/serasa', papel: 'dpo', ator: 'm', body: { para: 'desligado' },
+      });
+      expect([404, 409]).toContain(res.status);
+      expect(estadosDe('fornecedor')).toEqual(['ativo', 'desligando', 'desligado']);
+      expect(transicaoPermitida('fornecedor', 'ativo', 'desligado'), 'a janela é obrigatória').toBe(false);
+      expect(motivoDaRecusa('fornecedor', 'ativo', 'desligado')).toContain('zero dia');
+    });
+
+    it('decidir sem motivo ou com janela fora da faixa é 422; fora de ativo é 409', () => {
+      expect(decidir({ motivo: 'saiu', janela_dias: 10 }).status, 'motivo curto').toBe(422);
+      expect(decidir({ motivo: MOTIVO, janela_dias: -1 }).status, 'janela negativa').toBe(422);
+      expect(decidir({ motivo: MOTIVO }).status, 'janela omitida').toBe(422);
+
+      expect(decidir({ motivo: MOTIVO, janela_dias: 10 }).status).toBe(200);
+      // Já em desligamento: é sequência, e sequência é 409.
+      expect(decidir({ motivo: MOTIVO, janela_dias: 10 }).status).toBe(409);
+    });
+
+    it('janela maior que o contrato é 422 citando o prazo do DPA', () => {
+      // Serasa promete devolução em 30 dias no encerramento.
+      expect(serasa().dpaEncerramentoDias).toBe(30);
+      const res = decidir({ motivo: MOTIVO, janela_dias: 45 });
+      expect(res.status).toBe(422);
+      expect(String(res.body.erro)).toContain('30');
+      expect(String(res.body.erro)).toContain('45');
+    });
+
+    it('a decisão grava antes de mover, e o registro carrega a janela', () => {
+      const antes = banco.auditoria.length;
+      const res = decidir({ motivo: MOTIVO, janela_dias: 30 });
+      expect(res.status).toBe(200);
+      expect(banco.auditoria.length).toBe(antes + 1);
+      const linha = banco.auditoria.at(-1)!;
+      expect(linha.acao).toBe('PARCEIRO_DESLIGADO');
+      expect(linha.campos).toContain('ativo→desligando');
+      expect(linha.campos?.some((c) => c.startsWith('janela_ate='))).toBe(true);
+      expect(serasa().estado).toBe('desligando');
+      expect(serasa().desligamento!.janelaAte).toBe(res.body.janela_ate);
+    });
+
+    it('destruir antes do fim da janela é 409 citando a janela', () => {
+      decidir({ motivo: MOTIVO, janela_dias: 30 });
+      const res = destruir();
+      expect(res.status).toBe(409);
+      expect(String(res.body.erro)).toContain(serasa().desligamento!.janelaAte);
+      expect(res.regra).toContain('devolução');
+      expect(serasa().estado, 'a recusa não pode mover o estado').toBe('desligando');
+    });
+
+    it('no dia do fim da janela destrói, com prova encadeada', () => {
+      // Vence hoje já vale — a mesma fronteira do DPA e da exceção de audit.
+      decidir({ motivo: MOTIVO, janela_dias: 30 });
+      serasa().desligamento!.janelaAte = new Date().toISOString().slice(0, 10);
+
+      const res = destruir();
+      expect(res.status).toBe(200);
+      expect(res.body.ja_estava_destruida).toBe(false);
+      expect(String(res.body.prova.hash)).toMatch(/^[0-9a-f]{64}$/);
+      expect(serasa().estado).toBe('desligado');
+      expect(banco.auditoria.at(-1)!.acao).toBe('CHAVE_DE_PARCEIRO_DESTRUIDA');
+      expect(banco.auditVerificar().integro, 'a cadeia continua íntegra').toBe(true);
+    });
+
+    it('janela zero é válida, e a destruição pode ser imediata', () => {
+      // Zero declarado é decisão — "não há dado a devolver". O que não pode é
+      // ser omitido.
+      expect(decidir({ motivo: MOTIVO, janela_dias: 0 }).status).toBe(200);
+      expect(destruir().status).toBe(200);
+      expect(serasa().estado).toBe('desligado');
+    });
+
+    it('segunda destruição devolve a prova original — nunca uma nova', () => {
+      /**
+       * Prova nova a cada chamada faria a cadeia de custódia contar destruições
+       * que não aconteceram, e é esse número que uma auditoria usa.
+       */
+      decidir({ motivo: MOTIVO, janela_dias: 0 });
+      const primeira = destruir();
+      const linhas = banco.auditoria.length;
+
+      const segunda = destruir();
+      expect(segunda.status).toBe(200);
+      expect(segunda.body.ja_estava_destruida).toBe(true);
+      expect(segunda.body.prova.hash).toBe(primeira.body.prova.hash);
+      expect(segunda.body.prova.lote).toBe(primeira.body.prova.lote);
+      expect(banco.auditoria.length, 'a repetição não escreve no trail').toBe(linhas);
+    });
+
+    it('falha de log na destruição: 503, chave de pé e nada no trail', () => {
+      decidir({ motivo: MOTIVO, janela_dias: 0 });
+      const chave = banco.cenario.chaves.find((k) => k.alias === serasa().kmsChaveId);
+      const statusAntes = chave?.status;
+      const linhas = banco.auditoria.length;
+
+      banco.simularFalhaDeLog = true;
+      const res = destruir();
+      expect(res.status).toBe(503);
+
+      banco.simularFalhaDeLog = false;
+      // A asserção é sobre o **estado**, não sobre o código: a prova precede o
+      // fato declarado.
+      expect(serasa().estado).toBe('desligando');
+      expect(serasa().desligamento!.chaveDestruidaEm).toBeUndefined();
+      expect(chave?.status).toBe(statusAntes);
+      expect(banco.auditoria.length).toBe(linhas);
+    });
+
+    it('a ação é própria: desligar não cai em escrever genérico', () => {
+      // Engenharia tem `escrever` e não tem `desligar_parceiro`.
+      expect(pode('engenharia', 'escrever')).toBe(true);
+      expect(pode('engenharia', 'desligar_parceiro')).toBe(false);
+      const res = request<{ erro: string }>(banco, {
+        metodo: 'POST', caminho: '/v1/fornecedores/serasa/desligamento', papel: 'engenharia', ator: 'j',
+        body: { motivo: MOTIVO, janela_dias: 10 },
+      });
+      expect(res.status).toBe(403);
+      // E quem decide não é quem destrói.
+      expect(pode('dpo', 'desligar_parceiro')).toBe(true);
+      expect(pode('dpo', 'destruir_chave_de_parceiro')).toBe(false);
+      expect(pode('seguranca', 'destruir_chave_de_parceiro')).toBe(true);
+      expect(pode('seguranca', 'desligar_parceiro')).toBe(false);
+    });
+  });
+
+  describe('validação — o desligamento cumpre o que o DPA promete?', () => {
+    it('o parceiro desligado continua legível: o histórico é o que se audita', () => {
+      decidir({ motivo: MOTIVO, janela_dias: 0 });
+      destruir();
+      const f = serasa();
+      expect(f.estado).toBe('desligado');
+      expect(f.desligamento!.motivo).toBe(MOTIVO);
+      expect(f.desligamento!.decididoPor).toBe('marcela');
+      expect(f.desligamento!.chaveDestruidaPor).toBe('rafael');
+      // Os compartilhamentos antigos seguem no catálogo.
+      const usos = banco.cenario.campos.flatMap((c) => c.compartilhamentos ?? [])
+        .filter((x) => x.fornecedorId === f.id);
+      expect(usos.length, 'o histórico sumiu junto com a relação').toBeGreaterThan(0);
+    });
+
+    it('o relógio silencia dentro da janela e alerta no dia seguinte', () => {
+      decidir({ motivo: MOTIVO, janela_dias: 30 });
+      const agora = Date.now();
+
+      // Dentro da janela: silêncio.
+      expect(pendenciasDe(banco, 'banco', agora).some((p) => p.tipo === 'desligamento')).toBe(false);
+
+      // Um dia além dela, sem prova: alerta.
+      janelaNoPassado(1);
+      const p = pendenciasDe(banco, 'banco', agora).find((x) => x.tipo === 'desligamento');
+      expect(p, 'janela vencida sem prova não gerou alerta').toBeTruthy();
+      expect(p!.chave).toBe('RELOGIO-banco-DESLIG-SERASA');
+      expect(p!.diasDeAtraso).toBe(1);
+      expect(p!.responsavel).toBe('seguranca');
+      expect(p!.consequencia).toContain('descriptografável');
+      expect(p!.criticidade).toBe('critica');
+    });
+
+    it('com a prova registrada, a próxima execução do relógio silencia', () => {
+      // O fechamento da issue é do dono dela; o relógio para de reabrir porque a
+      // pendência acabou, não porque alguém a marcou como lida.
+      decidir({ motivo: MOTIVO, janela_dias: 0 });
+      janelaNoPassado(1);
+      expect(pendenciasDe(new BancoMock('banco'), 'banco', Date.now())
+        .some((p) => p.tipo === 'desligamento')).toBe(false);
+
+      destruir();
+      const depois = pendenciasDe(banco, 'banco', Date.now());
+      expect(depois.some((p) => p.tipo === 'desligamento'), 'prova registrada e o alerta continuou').toBe(false);
+      expect(planoDeAlertas(depois, []).criar.some((p) => p.tipo === 'desligamento')).toBe(false);
+    });
+
+    it('varrerDpas silencia sobre quem não está ativo — um fato, um alerta', () => {
+      /**
+       * Sem isto, um parceiro em encerramento com DPA vencendo geraria dois
+       * alertas dizendo coisas diferentes sobre o mesmo fato, e quem recebesse os
+       * dois trataria o errado.
+       */
+      const hoje = '2026-10-01';
+      /**
+       * Não-vacuidade primeiro, e ela me faltou: a primeira versão deste teste
+       * usava o DPA de Serasa como está — válido até 2027 —, então nenhum achado
+       * sairia com ou sem a regra. A injeção que deveria reprovar não reprovou, e
+       * a asserção estava provando a ausência de um achado que nunca existiria.
+       *
+       * Agora o contrato é posto vencido de propósito: com o parceiro **ativo** a
+       * varredura acha, e é só o estado que a silencia.
+       */
+      const comDpaVencido = (estado: 'ativo' | 'desligando') => {
+        const b = new BancoMock('banco');
+        const f = b.cenario.fornecedores.find((x) => x.slug === 'serasa')!;
+        f.dpaExpiraEm = '2026-01-01';
+        f.estado = estado;
+        return varrerDpas(b, hoje).some((a) => a.codigo === 'DPA-SERASA' && a.status !== 'encerrado');
+      };
+      expect(comDpaVencido('ativo'), 'ativo com DPA vencido tem de virar achado').toBe(true);
+      expect(comDpaVencido('desligando'), 'em desligamento, a pendência é a chave — não a renovação').toBe(false);
+    });
+
+    it('as duas rotas estão no contrato, com política e ação declaradas', () => {
+      const doContrato = new Set(OPERACOES.map((o) => `${o.metodo} ${o.contrato}`));
+      expect(doContrato.has('POST /fornecedores/{slug}/desligamento')).toBe(true);
+      expect(doContrato.has('POST /fornecedores/{slug}/chave/destruicao')).toBe(true);
+
+      for (const [caminho, acao] of [
+        ['fornecedores/serasa/desligamento', 'desligar_parceiro'],
+        ['fornecedores/serasa/chave/destruicao', 'destruir_chave_de_parceiro'],
+      ] as const) {
+        const p = politicaDe('POST', caminho, 'console');
+        expect(p, caminho).toBeTruthy();
+        expect(p!.acao, `${caminho}: ação própria`).toBe(acao);
+        expect(p!.finalidade).toBe('dispensada');
+        expect(p!.motivoDaDispensa!.length).toBeGreaterThan(40);
+      }
     });
   });
 });

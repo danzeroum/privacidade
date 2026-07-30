@@ -419,28 +419,31 @@ const diasAtras = (n: number): string =>
  * em vez de descrevê-lo.
  */
 const fornecedoresBanco: Fornecedor[] = [
-  { id: 'fo-openai', slug: 'openai', nome: 'OpenAI', papel: 'operador', pais: 'EUA',
+  { id: 'fo-openai', slug: 'openai', nome: 'OpenAI', papel: 'operador', estado: 'ativo', pais: 'EUA',
     dpaAssinado: true, dpaUri: 'dpa/openai-scc.pdf', dpaExpiraEm: '2027-08-01', slaIncidenteHoras: 24 },
-  { id: 'fo-serasa', slug: 'serasa', nome: 'Serasa', papel: 'controlador', pais: 'Brasil',
+  { id: 'fo-serasa', slug: 'serasa', nome: 'Serasa', papel: 'controlador', estado: 'ativo', pais: 'Brasil',
+    // O DPA promete devolução em 30 dias no encerramento: é contra este número
+    // que a janela do desligamento é conferida.
+    dpaEncerramentoDias: 30,
     dpaAssinado: true, dpaExpiraEm: '2027-03-15', slaIncidenteHoras: 24 },
   // Vence em 30/09/2026. É o caso natural da varredura — nenhuma data forjada.
-  { id: 'fo-sendgrid', slug: 'sendgrid', nome: 'SendGrid', papel: 'operador', pais: 'EUA',
+  { id: 'fo-sendgrid', slug: 'sendgrid', nome: 'SendGrid', papel: 'operador', estado: 'ativo', pais: 'EUA',
     dpaAssinado: true, dpaUri: 'dpa/sendgrid-scc.pdf', dpaExpiraEm: '2026-09-30', slaIncidenteHoras: 48 },
 ];
 
 const fornecedoresVarejo: Fornecedor[] = [
-  { id: 'fo-meta', slug: 'meta-ads', nome: 'Meta Ads', papel: 'operador', pais: 'EUA',
+  { id: 'fo-meta', slug: 'meta-ads', nome: 'Meta Ads', papel: 'operador', estado: 'ativo', pais: 'EUA',
     dpaAssinado: false, dpaUri: 'dpa/meta-scc.pdf' },
-  { id: 'fo-transportadora', slug: 'transportadora-norte', nome: 'Transportadora Norte',
+  { id: 'fo-transportadora', slug: 'transportadora-norte', nome: 'Transportadora Norte', estado: 'ativo',
     papel: 'operador', pais: 'Brasil', dpaAssinado: false },
-  { id: 'fo-zenvia', slug: 'zenvia', nome: 'Zenvia', papel: 'operador', pais: 'Brasil',
+  { id: 'fo-zenvia', slug: 'zenvia', nome: 'Zenvia', papel: 'operador', estado: 'ativo', pais: 'Brasil',
     dpaAssinado: false },
 ];
 
 const fornecedoresMidia: Fornecedor[] = [
-  { id: 'fo-nielsen', slug: 'nielsen', nome: 'Nielsen', papel: 'controlador_conjunto', pais: 'EUA',
+  { id: 'fo-nielsen', slug: 'nielsen', nome: 'Nielsen', papel: 'controlador_conjunto', estado: 'ativo', pais: 'EUA',
     dpaAssinado: false, dpaUri: 'dpa/nielsen-scc.pdf' },
-  { id: 'fo-gam', slug: 'google-ad-manager', nome: 'Google Ad Manager', papel: 'operador', pais: 'EUA',
+  { id: 'fo-gam', slug: 'google-ad-manager', nome: 'Google Ad Manager', papel: 'operador', estado: 'ativo', pais: 'EUA',
     dpaAssinado: false, dpaUri: 'dpa/gam-scc.pdf' },
 ];
 

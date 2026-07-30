@@ -124,6 +124,16 @@ export const OPERACOES: Operacao[] = [
     nota: 'Risco-007. Mede a massa versionada contra o piso e derruba a vigência abaixo dele. '
       + 'A razão é derivada no servidor: o corpo não carrega número nenhum.' },
 
+  // ── Fornecedor: desligamento com SLA (Risco-008) ─────────────────────────
+  { metodo: 'POST', contrato: '/fornecedores/{slug}/desligamento', superficie: 'console',
+    mock: '/v1/fornecedores/nao-existe/desligamento', papel: 'dpo',
+    nota: 'Decide o encerramento: motivo, ator e janela. A janela não pode exceder o prazo que o DPA '
+      + 'promete no encerramento, e a partir dela o banco recusa transferência nova.' },
+  { metodo: 'POST', contrato: '/fornecedores/{slug}/chave/destruicao', superficie: 'console',
+    mock: '/v1/fornecedores/nao-existe/chave/destruicao', papel: 'seguranca',
+    nota: 'Destrói a chave do parceiro depois da janela, com prova encadeada. Idempotente: a segunda '
+      + 'chamada devolve a prova original em vez de gerar outra.' },
+
   // ── Step-up de autenticação (Risco-011) ──────────────────────────────────
   { metodo: 'POST', contrato: '/step-up', superficie: 'console', mock: '/v1/step-up', papel: 'dpo',
     nota: 'Abre o desafio. O código não sai na resposta: vai pelo canal, como no portal.' },

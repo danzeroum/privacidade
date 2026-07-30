@@ -72,7 +72,7 @@ apagaria justamente o que a auditoria precisa ver.
 Comprimir qualquer uma das duas para caber em seis custaria um campo novo para
 guardar a distinção que o estado deixaria de fazer — e campo paralelo diverge do
 registro, que é o problema que a máquina de estados existe para não ter. O limite
-era heurística contra proliferação, e a proliferação nunca aconteceu: seis das oito
+era heurística contra proliferação, e a proliferação nunca aconteceu: seis das nove
 máquinas cabiam nele sem esforço, e cinco delas têm cinco estados ou menos.
 
 ---
