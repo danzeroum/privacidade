@@ -42,8 +42,19 @@ permissions:
 
 jobs:
   equidade:
-    name: Disparidade e proxies do modelo
-    runs-on: ubuntu-latest
+    # Sufixo vazio no leg Ubuntu preserva o nome do check — ver a nota longa em
+    # `ci.yml`. Aqui a matriz vale por um motivo próprio: a massa é CSV, e este
+    # job a lê **linha a linha**. É a classe exata do defeito que o CI Ubuntu
+    # deixou passar — um `\r` invisível no fim de cada campo, com a comparação
+    # caindo em `null` e a suíte declarando verde uma paridade que não valia.
+    name: Disparidade e proxies do modelo${{ matrix.sufixo }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, sufixo: '' }
+          - { os: windows-latest, sufixo: ' (windows)' }
     defaults:
       run:
         working-directory: app

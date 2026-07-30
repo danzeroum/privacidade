@@ -31,8 +31,26 @@ permissions:
 
 jobs:
   verificacao:
-    name: Tipos e testes
-    runs-on: ubuntu-latest
+    # O sufixo vem da matriz e é **vazio** no leg Ubuntu, de propósito: o check
+    # continua se chamando exatamente `Tipos e testes`, que é o nome já marcado
+    # como *required* na proteção da `main`. Matriz sem isto renomearia para
+    # `Tipos e testes (ubuntu-latest)` e derrubaria a marcação no mesmo instante;
+    # matriz com `name` estático daria nomes **idênticos** aos dois legs, e aí o
+    # verde de um mascararia o vermelho do outro na proteção de branch.
+    #
+    # O leg Windows entra como check novo, marcável pelo dono quando quiser — e
+    # até lá informa o vermelho sem impedir merge, como todo check novo aqui.
+    name: Tipos e testes${{ matrix.sufixo }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Um leg vermelho não cancela o outro. Com `fail-fast` no padrão, o Windows
+      # falhando cancelaria o Ubuntu no meio, e um *required check* em `cancelled`
+      # bloqueia o merge sem dizer o que quebrou — vermelho pelo motivo errado.
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, sufixo: '' }
+          - { os: windows-latest, sufixo: ' (windows)' }
     defaults:
       run:
         # O protótipo vive em app/. O restante do repositório é esquema, API e
@@ -67,6 +85,18 @@ jobs:
       # ele estiver fora de sincronia com o package.json.
       - name: Instalar dependências
         run: npm ci
+
+      # Medida, e não afirmação. `core.autocrlf` é configuração do ambiente, não
+      # do repositório: o runner Windows pode entregá-lo em `true`, e uma versão
+      # futura do `actions/checkout` pode mudar isso sem avisar. A etapa roda nas
+      # duas plataformas e imprime a mesma forma nas duas — é o que permite
+      # comparar as duas colunas do log em vez de acreditar em uma delas.
+      #
+      # Não reprova: CRLF na árvore não é defeito, porque a primeira camada (o
+      # `split(/\r?\n/)` de cada leitor) existe para tolerá-lo. Sai diferente de
+      # zero só se não conseguiu ler o que prometeu medir.
+      - name: Fim de linha, medido neste runner
+        run: npm run --silent fim-de-linha
 
       - name: Verificação de tipos
         run: npx tsc --noEmit

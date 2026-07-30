@@ -50,8 +50,19 @@ permissions:
 
 jobs:
   privacidade:
-    name: PII, catálogo e PbD
-    runs-on: ubuntu-latest
+    # Sufixo vazio no leg Ubuntu preserva o nome do check — ver a nota longa em
+    # `ci.yml`. Este é o job que mais anda em caminho de arquivo: três bibliotecas
+    # normalizam `sep` para `/` antes de comparar, e nenhuma dessas normalizações
+    # tinha sido executada uma vez sequer sobre `\`. Varredura que casa caminho
+    # errado aprova por não ter olhado, que é o Risco-003 com outro nome.
+    name: PII, catálogo e PbD${{ matrix.sufixo }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, sufixo: '' }
+          - { os: windows-latest, sufixo: ' (windows)' }
 
     steps:
       - uses: actions/checkout@v4

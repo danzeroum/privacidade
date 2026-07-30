@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { avaliarAuditoria, lerPolitica, relatorioDaAuditoria } from '../src/lib/auditoria';
+import { precisaDeShell } from '../src/lib/plataforma';
 
 /**
  * CLI da política de dependências vulneráveis (Risco-005, sub-item b).
@@ -71,7 +72,13 @@ if (process.argv.includes('--stdin')) {
     process.exit(1);
   }
 } else {
-  const r = spawnSync('npm', ['audit', '--json'], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  // `shell` pela plataforma: em Windows o alvo é `npm.cmd`, e o Node recusa
+  // `.cmd` sem shell desde a correção da CVE-2024-27980. Sem isto o `spawnSync`
+  // volta sem stdout e o CLI reprova por "não produziu relatório" — que é a pior
+  // forma de errar aqui, porque a mensagem culpa o npm por um defeito nosso.
+  const r = spawnSync('npm', ['audit', '--json'], {
+    encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, shell: precisaDeShell(process.platform),
+  });
   if (!r.stdout) {
     process.stderr.write(`\n  npm audit não produziu relatório: ${r.stderr?.slice(0, 400) ?? 'sem saída'}\n`);
     process.exit(1);
