@@ -8672,7 +8672,10 @@ describe('PR 27 · aceitação — a reconciliação da auditoria é conferível
     const parciais = LINHAS.filter((l) => l.status.startsWith('**Parcial**')).length;
     const intactos = LINHAS.length - fechados - parciais;
     expect(SECAO_71).toContain(`${fechados} riscos`);
-    expect(SECAO_71).toContain(`${parciais} parciais`);
+    // Singular e plural: a catraca é sobre o número, não sobre a gramática. Com
+    // o Risco-005 fechado sobrou **um** parcial, e a prosa passou a dizer "1
+    // parcial" — travar o plural obrigaria a escrever errado para o teste passar.
+    expect(SECAO_71).toMatch(new RegExp(`${parciais} parci(al|ais)`));
     expect(SECAO_71).toContain(`${intactos} como descritos`);
     // Não-vacuidade: uma tabela sem nenhuma linha movida passaria em tudo abaixo.
     expect(MOVIDOS.length, 'nenhuma linha anotada: as provas abaixo não provariam nada').toBeGreaterThan(10);
@@ -8768,7 +8771,10 @@ describe('PR 27 · aceitação — a reconciliação da auditoria é conferível
       // O 007 saiu daqui no PR 28: a AIA fechou a faceta que faltava, e o que
       // sobrou dele — base legal por registro na linhagem — está nomeado na
       // célula de fechamento, não como parcialidade do risco inteiro.
-      expect(parciais.map((l) => l.risco).sort()).toEqual(['Risco-005', 'Risco-008']);
+      // O 005 saiu daqui no PR 30: os quatro sub-itens fecharam, e o que sobrou
+      // dele — dois moderate abaixo do limiar — está na célula, não como
+      // parcialidade do risco.
+      expect(parciais.map((l) => l.risco).sort()).toEqual(['Risco-008']);
       for (const l of parciais) {
         expect(l.fechadoPor, `${l.risco}: parcial sem o que resta`).toMatch(/\*\*Resta\*\*|\*\*resta\*\*/);
       }
