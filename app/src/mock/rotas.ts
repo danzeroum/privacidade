@@ -146,7 +146,7 @@ export const OPERACOES: Operacao[] = [
     nota: 'Reidentificação sob finalidade, justificativa e protocolo.' },
   { metodo: 'POST', contrato: '/titulares/buscar', superficie: 'console', mock: '/v1/titulares/buscar', papel: 'dpo',
     nota: 'Busca por hash, com cota antes do find para o 429 não virar oráculo.' },
-  { metodo: 'GET', contrato: '/titulares/{id}', superficie: 'console', mock: '/v1/titulares/nao-existe', papel: 'dpo',
+  { metodo: 'GET', contrato: '/titulares/{id}', superficie: 'console', mock: '/v1/titulares/t1', papel: 'dpo',
     nota: 'Ficha do balcão, com valores mascarados.' },
   { metodo: 'POST', contrato: '/decisoes/{id}/revisar', superficie: 'console', mock: '/v1/decisoes/nao-existe/revisar', papel: 'dpo',
     nota: 'O ato humano da revisão (Art. 20) — o pedido do titular é POST /me/decisoes/{id}/revisao.' },
