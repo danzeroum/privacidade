@@ -131,6 +131,9 @@ export const DESTINO: Record<string, Destino> = {
   // ── Pseudônimo ───────────────────────────────────────────────────────────
   'POST /pseudonyms/resolve': { tabela: 'audit_log' },
   'POST /titulares/buscar': { tabela: 'audit_log' },
+  // Leitura, e persiste mesmo assim: a ficha do balcão grava `TITULAR_CONSULTADO`
+  // antes de responder. Entra no mapa porque persistir é o critério, não o verbo.
+  'GET /titulares/{id}': { tabela: 'audit_log' },
 
   // ── Lacunas reais, declaradas com o risco que as cobre ───────────────────
   //
@@ -174,12 +177,25 @@ export const MINIMO_DO_MOTIVO = 60;
 
 export type Achado = { regra: string; detalhe: string };
 
-/** As operações de escrita do contrato, na forma `MÉTODO /caminho`. */
+/**
+ * As leituras que persistem.
+ *
+ * Lista fechada, e curta de propósito: é a única `GET` com ação de PII e
+ * finalidade exigida. O critério do mapa é **persistir**, não o verbo — uma
+ * leitura que grava no trail antes de responder tem destino tanto quanto um
+ * POST, e deixá-la de fora faria o mapa dizer que ela não persiste.
+ */
+export const LEITURAS_QUE_PERSISTEM = ['GET /titulares/{id}'] as const;
+
+/** As operações do contrato que persistem, na forma `MÉTODO /caminho`. */
 export const escritasDoContrato = (paths: Record<string, Record<string, unknown>>): string[] => {
   const ops: string[] = [];
   for (const [caminho, item] of Object.entries(paths)) {
     for (const m of ['post', 'patch', 'put', 'delete']) {
       if (item[m]) ops.push(`${m.toUpperCase()} ${caminho}`);
+    }
+    if (item.get && (LEITURAS_QUE_PERSISTEM as readonly string[]).includes(`GET ${caminho}`)) {
+      ops.push(`GET ${caminho}`);
     }
   }
   return ops.sort();

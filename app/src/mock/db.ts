@@ -29,7 +29,21 @@ export interface EntradaAudit {
 }
 
 /** Ações que tocam dado pessoal: sem finalidade e justificativa, não entram no log (Art. 37). */
-const ACOES_PII = ['CAMPO_REVELADO', 'TITULAR_CONSULTADO', 'PSEUDONIMO_RESOLVIDO'];
+/**
+ * Acesso ao **valor**: exige finalidade e justificativa com corpo.
+ *
+ * `TITULAR_CONSULTADO` saiu daqui no Risco-012 e a decisão merece registro. A
+ * ficha do balcão devolve `mascara`, nunca `segredos`: nenhum valor sai por ela,
+ * e o caminho de revelação continua sendo `POST /pseudonyms/resolve`, que
+ * mantém as duas exigências e a janela de 60 s.
+ *
+ * Cobrar vinte caracteres de prosa para abrir uma ficha mascarada produziria
+ * justificativa de fachada a cada atendimento — o mesmo raciocínio que manteve
+ * `TITULAR_BUSCADO` fora desta lista. O que sustenta a consulta em auditoria é a
+ * finalidade declarada mais o id no registro; o que sustenta a **revelação** é a
+ * justificativa, e ela continua exigida onde o valor de fato sai.
+ */
+const ACOES_PII = ['CAMPO_REVELADO', 'PSEUDONIMO_RESOLVIDO'];
 
 /**
  * Ações que exigem finalidade, mas não prosa. Localizar um titular é passo
@@ -37,7 +51,7 @@ const ACOES_PII = ['CAMPO_REVELADO', 'TITULAR_CONSULTADO', 'PSEUDONIMO_RESOLVIDO
  * declarada mais o identificador truncado. Exigir justificativa de 20
  * caracteres a cada busca só produziria texto de fachada.
  */
-const ACOES_COM_FINALIDADE = ['TITULAR_BUSCADO'];
+const ACOES_COM_FINALIDADE = ['TITULAR_BUSCADO', 'TITULAR_CONSULTADO'];
 
 export class FalhaDeAuditoria extends Error {}
 export class LogImutavel extends Error {}

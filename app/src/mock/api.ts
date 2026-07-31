@@ -220,6 +220,10 @@ export function request<T = unknown>(banco: BancoMock, req: Req): Res<T> {
     return buscarTitular<T>(banco, req);
   }
 
+  if (metodo === 'GET' && raiz === 'titulares' && partes.length === 2 && partes[1] !== 'me') {
+    return fichaDoTitular<T>(banco, req, partes[1]);
+  }
+
   switch (`${metodo} ${raiz}`) {
     /**
      * Risco-011 — o step-up, em duas etapas como no portal.
@@ -1362,6 +1366,74 @@ function buscarTitular<T>(banco: BancoMock, req: Req): Res<T> {
   return ok({ id: titular.id, pseudonimo: `hmac:${cpfHash.slice(0, 4)}…${cpfHash.slice(-4)}` }) as Res<T>;
 }
 
+
+/**
+ * Risco-012 — a ficha do balcão, servida e registrada.
+ *
+ * A rota estava no contrato, a política já exigia finalidade e ação própria, e
+ * **ninguém a servia**: caía no 404 genérico. O efeito é o pior dos dois mundos
+ * — o contrato promete uma leitura de dado de titular, e o registro que o Art.
+ * 37 exige nunca acontece, porque a Regra 3 só alcança rota servida.
+ *
+ * ── Ordem, e por que esta ─────────────────────────────────────────────────
+ *
+ * Permissão e finalidade já foram cobradas pela guarda, antes daqui. O que
+ * sobra é **registrar, depois procurar**:
+ *
+ *   1. `auditAppend` com `TITULAR_CONSULTADO`. Falhou, 503 e nenhum valor sai —
+ *      sem registro não há leitura.
+ *   2. Só então o `find`. Registrar depois de achar faria o trail guardar as
+ *      consultas bem-sucedidas e esquecer as sondagens, que são exatamente as
+ *      que uma auditoria de enumeração precisa ver.
+ *
+ * ── O que a rota NÃO abre ─────────────────────────────────────────────────
+ *
+ * Nenhum caminho novo de revelação. Sai `mascara`, nunca `segredos`: o valor
+ * continua saindo só por `POST /pseudonyms/resolve`, que exige justificativa e
+ * tem janela de 60 s. Campo sensível aparece na ficha — omiti-lo diria ao
+ * operador que ele não existe — e **sem valor e sem caminho**, que é o que o
+ * Art. 11 pede.
+ *
+ * E o 404 de titular inexistente é byte a byte o de fora de escopo: a Regra 5
+ * fecharia o oráculo pela porta da frente e o reabriria por esta, se as duas
+ * respostas diferissem.
+ */
+function fichaDoTitular<T>(banco: BancoMock, req: Req, id: string): Res<T> {
+  const { papel, ator } = req;
+  const naoEncontrado = erro(404, 'Não encontrado.',
+    'Titular fora do escopo do ator responde igual a titular inexistente — 403 confirmaria a existência.');
+
+  // Grava antes de responder, e antes de procurar: a sondagem que não achou
+  // nada é a que mais interessa a quem audita enumeração.
+  try {
+    banco.auditAppend({
+      ator, atorPapel: papel, acao: 'TITULAR_CONSULTADO', recursoTipo: 'titular',
+      recursoId: id, finalidade: req.purpose, campos: ['ficha'],
+    });
+  } catch (e) {
+    const msg = e instanceof FalhaDeAuditoria ? e.message : 'Falha ao registrar a consulta.';
+    return erro(503, msg, 'Sem registro não há consulta: a ordem é gravar, depois responder.') as Res<T>;
+  }
+
+  const titular = banco.cenario.titulares.find((t) => t.id === id);
+  if (!titular) return naoEncontrado as Res<T>;
+
+  return ok({
+    id: titular.id,
+    pseudonimo: `hmac:${titular.cpfHash.slice(0, 4)}…${titular.cpfHash.slice(-4)}`,
+    campos: titular.campos.map((c) => ({
+      chave: c.chave,
+      rotulo: c.rotulo,
+      grupo: c.grupo,
+      sensivel: c.sensivel,
+      // `mascara`, nunca `segredos`. O valor sai por /pseudonyms/resolve, com
+      // justificativa e janela — e é lá que ele é registrado como revelação.
+      valorMascarado: c.mascara,
+      baseLegal: c.baseLegal,
+      campoCatalogoId: c.campoCatalogoId,
+    })),
+  }) as Res<T>;
+}
 
 /**
  * PR 7 — a rota única de transição.
