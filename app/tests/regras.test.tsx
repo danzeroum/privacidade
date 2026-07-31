@@ -68,6 +68,9 @@ import {
 import {
   APPEND_ONLY, MUTAVEL_COM_MOTIVO, appendOnlyDoSchema, avaliarAppendOnly, relatorioDoAppendOnly,
 } from '../src/lib/append-only';
+import {
+  DESTINO, avaliarPersistencia, escritasDoContrato, lacunasDeclaradas, relatorioDaPersistencia,
+} from '../src/lib/persistencia';
 import { execSync, spawnSync } from 'node:child_process';
 import {
   EH_DEMONSTRACAO, SELO_DE_DEMONSTRACAO, SELO_DO_SELETOR_DE_PAPEL, perfilDe,
@@ -10765,8 +10768,11 @@ describe('PR 34 · Risco-024 — append-only onde a prova mora, e só onde ela m
       expect(TESTS_SQL).toContain('UPDATE expurgo_run SET status');
       expect(TESTS_SQL).toContain('UPDATE expurgo_entrada SET verificado_em');
       for (const t of Object.keys(MUTAVEL_COM_MOTIVO)) {
-        expect(SCHEMA, `${t} foi protegida apesar de declarada mutável`)
-          .not.toContain(`BEFORE UPDATE OR DELETE ON ${t}`);
+        // Casando a tabela inteira: `... ON incidente` é prefixo de
+        // `... ON incidente_evento`, e a versão anterior acusava a tabela
+        // mutável por causa da trilha append-only que fica ao lado dela.
+        expect(appendOnlyDoSchema(SCHEMA), `${t} foi protegida apesar de declarada mutável`)
+          .not.toContain(t);
       }
     });
 
@@ -10824,6 +10830,133 @@ CREATE TRIGGER raci_imutavel
       const soGenerico = SCHEMA.replace('FOR EACH ROW EXECUTE FUNCTION audit_log_expurgo_de_pii();', ';');
       expect(appendOnlyDoSchema(soGenerico)).not.toContain('audit_log');
       expect(avaliarAppendOnly(soGenerico).map((a) => a.regra)).toContain('no-mock-e-nao-no-schema');
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 35 · Risco-015 — o incidente do Art. 48 tem onde persistir
+//
+// A ficha nomeia duas metades: "sem tabela `incidente` no schema e sem rota no
+// contrato". A segunda fechou em `f86020e`. Esta é a primeira — e, junto dela, o
+// mapa que torna declarada cada operação que grava sem tabela, em vez de deixar
+// as outras cinco invisíveis até a próxima auditoria.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('PR 35 · Risco-015 — a rota que grava diz onde persiste', () => {
+  const SCHEMA_SQL = readFileSync(join('..', 'db', 'schema.sql'), 'utf8');
+  const TESTS_SQL2 = readFileSync(join('..', 'db', 'tests.sql'), 'utf8');
+  const TABELAS = [...SCHEMA_SQL.matchAll(/^CREATE TABLE (\w+)/gm)].map((m) => m[1]);
+  const CONTRATO = parseYaml(readFileSync(join('..', 'api', 'openapi.yaml'), 'utf8')) as {
+    paths: Record<string, Record<string, unknown>>;
+  };
+  const ESCRITAS = escritasDoContrato(CONTRATO.paths);
+
+  describe('verificação — a rota tem tabela?', () => {
+    it('toda operação de escrita declara destino, e nenhum destino é órfão', () => {
+      const achados = avaliarPersistencia(ESCRITAS, TABELAS);
+      expect(achados, relatorioDaPersistencia(achados)).toEqual([]);
+    });
+
+    it('não-vacuidade: o contrato tem escritas e o schema tem tabelas', () => {
+      // Um `openapi.yaml` que o leitor não fatiasse devolveria zero operações, e
+      // o teste acima passaria por não ter iterado nada.
+      expect(ESCRITAS.length).toBeGreaterThan(40);
+      expect(TABELAS.length).toBeGreaterThan(40);
+      expect(Object.keys(DESTINO).length).toBe(ESCRITAS.length);
+    });
+
+    it('as seis rotas do incidente apontam para as tabelas novas', () => {
+      expect(DESTINO['POST /incidentes']).toEqual({ tabela: 'incidente' });
+      for (const acao of ['conter', 'decisao', 'comunicar', 'registrar-nao-comunicacao', 'encerrar']) {
+        expect(DESTINO[`POST /incidentes/{id}/${acao}`], acao).toEqual({ tabela: 'incidente_evento' });
+      }
+      for (const t of ['incidente', 'incidente_campo', 'incidente_evento']) {
+        expect(TABELAS, `${t} ausente do schema`).toContain(t);
+      }
+    });
+  });
+
+  describe('validação — o que a rota promete gravar é o que persiste?', () => {
+    it('o prazo do Art. 48 é derivado da detecção, e o intervalo mora num lugar só', () => {
+      /**
+       * Data digitada ao lado do fato diverge dele no primeiro erro de digitação
+       * — e aqui o fato é o marco legal. `AT TIME ZONE 'UTC'` não é enfeite:
+       * `timestamptz + interval` depende do `TimeZone` da sessão, e o Postgres
+       * recusa a coluna gerada por não ser imutável. Descobri isso com o schema
+       * reprovando na aplicação.
+       */
+      expect(SCHEMA_SQL).toMatch(/comunicar_ate\s+TIMESTAMP GENERATED ALWAYS AS/);
+      expect(SCHEMA_SQL).toContain("(detectado_em AT TIME ZONE 'UTC') + INTERVAL '3 days'");
+      // Num lugar só: o intervalo não é redigitado em teste, mock ou documento.
+      expect((SCHEMA_SQL.match(/INTERVAL '3 days'/g) ?? []).length).toBe(1);
+      expect(TESTS_SQL2).toContain("(detectado_em AT TIME ZONE 'UTC') + INTERVAL '3 days'");
+    });
+
+    it('o banco cobra o conteúdo de cada estado, não só a sequência', () => {
+      // Estado que avança sem o conteúdo que o justifica é a assinatura sem
+      // documento do Risco-024, noutra tabela.
+      for (const caso of ['decidir sem fundamento', 'decidir com fundamento sem corpo',
+        'nao_comunicado com decisão de comunicar', 'comunicado sem comunicado_em',
+        'encerrar sem encerrado_em']) {
+        expect(TESTS_SQL2, `invariante ausente: ${caso}`).toContain(`'${caso}'`);
+      }
+    });
+
+    it('o incidente é estado e a trilha dele é fato — critério do Risco-024', () => {
+      expect(appendOnlyDoSchema(SCHEMA_SQL)).toContain('incidente_evento');
+      expect(appendOnlyDoSchema(SCHEMA_SQL)).not.toContain('incidente_campo');
+      expect(MUTAVEL_COM_MOTIVO.incidente, 'o incidente precisa do motivo de ser mutável').toBeTruthy();
+      // E o sentido inverso está no SQL: congelar o incidente pararia o fluxo.
+      expect(TESTS_SQL2).toContain("UPDATE incidente SET estado = 'contido'");
+    });
+
+    it('as lacunas reais são contáveis e cada uma cita o risco que a cobre', () => {
+      /**
+       * A parte que este PR **não** fecha, escrita em vez de escondida. Cinco
+       * operações gravam sem tabela e deveriam ter uma; cada uma aponta o risco
+       * já catalogado. É a diferença entre uma ausência que alguém decidiu e uma
+       * que ninguém percebeu.
+       */
+      const lacunas = lacunasDeclaradas();
+      expect(lacunas.length).toBe(6);
+      expect([...new Set(lacunas.map((l) => l.risco))].sort())
+        .toEqual(['Risco-001', 'Risco-009', 'Risco-010', 'Risco-014']);
+      // E nenhuma delas é do incidente: o 015 fecha inteiro ou não fecha.
+      expect(lacunas.some((l) => l.op.includes('incidente'))).toBe(false);
+    });
+  });
+
+  describe('injeção — a catraca reprova o que promete reprovar', () => {
+    it('rota nova sem destino declarado reprova, nomeando a rota', () => {
+      const achados = avaliarPersistencia([...ESCRITAS, 'POST /coisa-nova'], TABELAS);
+      expect(achados.map((a) => a.regra)).toContain('sem-destino');
+      expect(relatorioDaPersistencia(achados)).toContain('POST /coisa-nova: grava e não declara onde');
+    });
+
+    it('destino apontando para tabela inexistente reprova', () => {
+      const semIncidente = TABELAS.filter((t) => t !== 'incidente');
+      const achados = avaliarPersistencia(ESCRITAS, semIncidente);
+      expect(achados.map((a) => a.regra)).toContain('tabela-inexistente');
+      expect(relatorioDaPersistencia(achados)).toContain('POST /incidentes: aponta `incidente`');
+    });
+
+    it('entrada declarada para operação que saiu do contrato reprova', () => {
+      // O mapa envelhecendo para o outro lado: decisão sobre algo que não existe
+      // mais, sobrevivendo em silêncio até confundir a próxima leitura.
+      const achados = avaliarPersistencia(ESCRITAS.filter((o) => o !== 'POST /gates/runs'), TABELAS);
+      expect(achados.map((a) => a.regra)).toContain('destino-orfao');
+      expect(relatorioDaPersistencia(achados)).toContain('POST /gates/runs: declarado aqui e ausente do contrato');
+    });
+
+    it('motivo sem corpo reprova — ausência sem explicação é ausência sem decisão', () => {
+      const guardado = DESTINO['POST /audit/verificar'];
+      try {
+        DESTINO['POST /audit/verificar'] = { motivo: 'não precisa' };
+        const achados = avaliarPersistencia(ESCRITAS, TABELAS);
+        expect(achados.map((a) => a.regra)).toContain('motivo-sem-corpo');
+      } finally {
+        DESTINO['POST /audit/verificar'] = guardado;
+      }
     });
   });
 });

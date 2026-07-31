@@ -53,6 +53,7 @@ export const APPEND_ONLY = [
   'ripd_aprovacao',
   'gate_finding',
   'metric_snapshot',
+  'incidente_evento',
 ] as const;
 
 /**
@@ -74,6 +75,10 @@ export const MUTAVEL_COM_MOTIVO: Record<string, string> = {
     '`status` é a própria etapa avançando: uma rotação de chave é uma sequência de passos que muda de '
     + 'estado até terminar, e congelá-la deixaria toda rotação parada no primeiro passo. O que prova a '
     + 'rotação é o `kms_acesso`, que está append-only.',
+  incidente:
+    '`estado` avança pela máquina (aberto → contido → decidido → comunicado/nao_comunicado → encerrado) e a '
+    + 'decisão chega depois da contenção: congelá-la pararia o fluxo do Art. 48 no primeiro passo. O que prova '
+    + 'o cumprimento do prazo é `incidente_evento`, que está append-only.',
   solicitacao_mensagem:
     'Fato, **menos** `lida_em`, que é recibo de leitura e só existe depois. Uma exceção estreita como a do '
     + '`audit_log` resolveria, e não foi feita: seria função nova sem defeito que a motive, e o corpo já é '

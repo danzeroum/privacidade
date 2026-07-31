@@ -344,3 +344,28 @@ INSERT INTO audit_log (tenant_id, ator_id, ator_tipo, acao, recurso_tipo, recurs
  ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-000000000003','seguranca','INTEGRIDADE_VERIFICADA','expurgo_run','bbbbbbbb-bbbb-4bbb-8bbb-000000000001',NULL,NULL,'{}',NULL,'10.4.8.5','sucesso'),
  ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-000000000001','engenharia','RIPD_SUBMETIDO','ripd','RIPD-2026-014',NULL,NULL,'{}',NULL,'10.4.2.9','sucesso'),
  ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-000000000003','seguranca','KMS_ACESSO_NEGADO','kms_chave','alias/onboarding-bio-v2',NULL,NULL,'{}',NULL,'189.22.7.90','negado');
+
+-- ── Incidente de segurança (Risco-015) ──────────────────────────────────────
+-- Um incidente em cada ponta do fluxo: um aberto e dentro do prazo, e um já
+-- decidido por não comunicar. Dois, e não um, porque as invariantes precisam de
+-- linha nos dois lados dos CHECK — um só provaria metade.
+INSERT INTO incidente (id, tenant_id, codigo, estado, detectado_em, origem, titulares_estimados, contido_por)
+VALUES
+  ('11111111-0000-4000-8000-000000000e01'::uuid, '11111111-1111-4111-8111-111111111111',
+   'INC-2026-001', 'aberto', now() - INTERVAL '6 hours', 'alerta do WAF', 1200, NULL);
+
+INSERT INTO incidente (id, tenant_id, codigo, estado, detectado_em, origem, titulares_estimados,
+                       decisao, fundamento, contido_por, decidido_por)
+SELECT '11111111-0000-4000-8000-000000000e02'::uuid, '11111111-1111-4111-8111-111111111111',
+       'INC-2026-002', 'nao_comunicado', now() - INTERVAL '10 days', 'varredura interna', 3,
+       'nao_comunicar',
+       'Escopo restrito a metadado sem identificacao direta; risco a direitos e liberdades avaliado como baixo.',
+       a.id, a.id
+FROM ator a LIMIT 1;
+
+INSERT INTO incidente_campo (incidente_id, campo_id)
+SELECT '11111111-0000-4000-8000-000000000e01'::uuid, id FROM campo LIMIT 1;
+
+INSERT INTO incidente_evento (incidente_id, de, para, detalhe)
+VALUES ('11111111-0000-4000-8000-000000000e01'::uuid, NULL, 'aberto', 'detectado pelo alerta do WAF');
+
