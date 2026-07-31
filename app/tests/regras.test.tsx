@@ -70,6 +70,7 @@ import {
 } from '../src/lib/append-only';
 import {
   DESTINO, avaliarPersistencia, escritasDoContrato, lacunasDeclaradas, relatorioDaPersistencia,
+  LEITURAS_QUE_PERSISTEM,
 } from '../src/lib/persistencia';
 import { execSync, spawnSync } from 'node:child_process';
 import {
@@ -10957,6 +10958,122 @@ describe('PR 35 · Risco-015 — a rota que grava diz onde persiste', () => {
       } finally {
         DESTINO['POST /audit/verificar'] = guardado;
       }
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 36 · Risco-012 — a ficha do balcão é servida, e registrada antes de responder
+//
+// A rota estava no contrato, a política já exigia finalidade e ação própria, e
+// ninguém a servia: caía no 404 genérico. O pior dos dois mundos — o contrato
+// promete leitura de dado de titular, e o registro do Art. 37 nunca acontece,
+// porque a Regra 3 só alcança rota servida.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('PR 36 · Risco-012 — a ficha do balcão, servida e registrada', () => {
+  describe('verificação — a rota grava antes de responder?', () => {
+    it('leitura com finalidade devolve 200 e o registro entra antes da resposta', () => {
+      const b = novoBanco('banco');
+      const antes = b.auditoria.length;
+      const r = request(b, {
+        papel: 'dpo', ator: 'ana', metodo: 'GET', caminho: '/v1/titulares/t1', purpose: 'atendimento',
+      } as never) as { status: number; body: Record<string, unknown> };
+      expect(r.status).toBe(200);
+      const novas = b.auditoria.slice(antes);
+      expect(novas.map((l) => l.acao)).toContain('TITULAR_CONSULTADO');
+      expect(novas.at(-1)!.finalidade).toBe('atendimento');
+      expect(novas.at(-1)!.recursoId).toBe('t1');
+    });
+
+    it('falha de log derruba a leitura: 503 e nenhum valor sai', () => {
+      const b = novoBanco('banco');
+      b.simularFalhaDeLog = true;
+      const r = request(b, {
+        papel: 'dpo', ator: 'ana', metodo: 'GET', caminho: '/v1/titulares/t1', purpose: 'atendimento',
+      } as never) as { status: number; body: Record<string, unknown> };
+      expect(r.status).toBe(503);
+      expect(JSON.stringify(r.body)).not.toContain('Ana Beatriz');
+    });
+
+    it('sem finalidade a guarda recusa antes de qualquer leitura', () => {
+      const b = novoBanco('banco');
+      const r = request(b, {
+        papel: 'dpo', ator: 'ana', metodo: 'GET', caminho: '/v1/titulares/t1',
+      } as never) as { status: number; body: Record<string, string> };
+      expect(r.status).toBe(403);
+      expect(JSON.stringify(r.body)).toContain('X-Purpose');
+    });
+
+    it('a sondagem que não achou nada também fica no trail', () => {
+      // Registrar depois de achar guardaria as consultas bem-sucedidas e
+      // esqueceria as sondagens — que são as que uma auditoria de enumeração
+      // precisa ver.
+      const b = novoBanco('banco');
+      const antes = b.auditoria.length;
+      const r = request(b, {
+        papel: 'dpo', ator: 'ana', metodo: 'GET', caminho: '/v1/titulares/nao-existe', purpose: 'atendimento',
+      } as never) as { status: number };
+      expect(r.status).toBe(404);
+      expect(b.auditoria.slice(antes).map((l) => l.acao)).toContain('TITULAR_CONSULTADO');
+    });
+  });
+
+  describe('validação — a leitura respeita mascaramento e escopo?', () => {
+    it('sai máscara, nunca segredo — e o sensível aparece sem valor e sem caminho', () => {
+      const b = novoBanco('banco');
+      const r = request(b, {
+        papel: 'dpo', ator: 'ana', metodo: 'GET', caminho: '/v1/titulares/t1', purpose: 'atendimento',
+      } as never) as { body: { campos: { sensivel: boolean; valorMascarado: string }[] } };
+      const bruto = JSON.stringify(r.body);
+      // Nenhum valor revelável do cenário atravessa a ficha.
+      const titular = b.cenario.titulares.find((t) => t.id === 't1')!;
+      for (const valor of Object.values(titular.segredos)) {
+        expect(bruto, `segredo vazou na ficha: ${valor}`).not.toContain(valor);
+      }
+      expect(bruto).not.toContain('segredos');
+      // O campo sensível está lá — omiti-lo diria que ele não existe — e sem valor.
+      const sensiveis = r.body.campos.filter((c) => c.sensivel);
+      expect(sensiveis.length).toBeGreaterThan(0);
+      for (const c of sensiveis) expect(c.valorMascarado).toBeTruthy();
+    });
+
+    it('papel sem escopo recebe 404 idêntico ao de titular inexistente, nas duas direções', () => {
+      const b1 = novoBanco('banco');
+      const b2 = novoBanco('banco');
+      const semEscopo = request(b1, {
+        papel: 'seguranca', ator: 'x', metodo: 'GET', caminho: '/v1/titulares/t1', purpose: 'atendimento',
+      } as never) as { status: number; body: unknown };
+      const inexistente = request(b2, {
+        papel: 'dpo', ator: 'ana', metodo: 'GET', caminho: '/v1/titulares/nao-existe', purpose: 'atendimento',
+      } as never) as { status: number; body: unknown };
+      expect(semEscopo.status).toBe(inexistente.status);
+      expect(semEscopo.body).toEqual(inexistente.body);
+    });
+
+    it('a ação saiu de ACOES_PII com o motivo escrito, e a revelação manteve as duas exigências', () => {
+      /**
+       * Decisão de desenho, declarada em vez de silenciosa: a ficha devolve
+       * máscara, então cobrar vinte caracteres de prosa a cada atendimento
+       * produziria justificativa de fachada. O valor continua saindo só por
+       * `/pseudonyms/resolve`, que mantém finalidade **e** justificativa.
+       */
+      const db = readFileSync(join('src', 'mock', 'db.ts'), 'utf8');
+      expect(db).toContain("const ACOES_PII = ['CAMPO_REVELADO', 'PSEUDONIMO_RESOLVIDO']");
+      expect(db).toContain("const ACOES_COM_FINALIDADE = ['TITULAR_BUSCADO', 'TITULAR_CONSULTADO']");
+      expect(db).toContain('justificativa de fachada');
+
+      // E a revelação continua exigindo as duas: sem justificativa, não sai.
+      const b = novoBanco('banco');
+      const r = request(b, {
+        papel: 'dpo', ator: 'ana', metodo: 'POST', caminho: '/v1/pseudonyms/resolve',
+        purpose: 'atendimento', body: { titularId: 't1', campo: 'renda' },
+      } as never) as { status: number };
+      expect(r.status).not.toBe(200);
+    });
+
+    it('o mapa de persistência deixou de omitir a rota', () => {
+      expect(DESTINO['GET /titulares/{id}']).toEqual({ tabela: 'audit_log' });
+      expect(LEITURAS_QUE_PERSISTEM).toContain('GET /titulares/{id}');
     });
   });
 });
